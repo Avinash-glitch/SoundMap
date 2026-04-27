@@ -294,8 +294,8 @@ async def merge_playlists(request: Request) -> JSONResponse:
 @app.post("/ai-playlist")
 async def ai_playlist(request: Request) -> JSONResponse:
     """
-    Use Claude to curate a playlist from the user's library based on a natural language prompt.
-    Body: {"prompt": "1 hour gym playlist — high energy, high BPM", "name": "..." (optional)}
+    Curate a playlist using Claude or OpenAI.
+    Body: {"prompt": "...", "name": "..." (optional), "api_key": "..." (optional), "provider": "anthropic"|"openai" (optional)}
     Returns: {name, url, track_count, duration_min, reasoning, track_ids}
     """
     token = request.session.get("access_token")
@@ -307,6 +307,8 @@ async def ai_playlist(request: Request) -> JSONResponse:
         body = await request.json()
         prompt = (body.get("prompt") or "").strip()
         custom_name = (body.get("name") or "").strip()
+        user_api_key = (body.get("api_key") or "").strip()
+        provider = (body.get("provider") or "anthropic").strip().lower()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
@@ -314,10 +316,18 @@ async def ai_playlist(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Prompt is required")
     if len(prompt) > 600:
         raise HTTPException(status_code=400, detail="Prompt too long (max 600 chars)")
+    if provider not in ("anthropic", "openai"):
+        raise HTTPException(status_code=400, detail="provider must be 'anthropic' or 'openai'")
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured on server")
+    # Resolve API key: user-supplied key takes priority over server key
+    if provider == "anthropic":
+        api_key = user_api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="No Anthropic API key — add yours in AI settings or ask the server admin to configure ANTHROPIC_API_KEY")
+    else:
+        api_key = user_api_key or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="No OpenAI API key — add yours in AI settings")
 
     map_data = storage.load_map(user_id)
     if not map_data:
@@ -367,24 +377,39 @@ async def ai_playlist(request: Request) -> JSONResponse:
 
     user_msg = f"Library ({len(lines)} tracks):\n{manifest}\n\nRequest: {prompt}"
 
-    print(f"[ai-playlist] calling Claude for user {user_id} — {len(lines)} tracks, prompt: {prompt!r}")
+    print(f"[ai-playlist] {provider} for user {user_id} — {len(lines)} tracks, prompt: {prompt!r}")
 
+    raw = ""
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        resp = client.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=4000,
-            system=system_msg,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-        raw = resp.content[0].text.strip()
+        if provider == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            resp = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=4000,
+                system=system_msg,
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            raw = resp.content[0].text.strip()
+        else:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+            resp = client.chat.completions.create(
+                model="gpt-4o",
+                max_tokens=4000,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+            raw = resp.choices[0].message.content.strip()
+
         if raw.startswith("```"):
             raw = "\n".join(raw.split("\n")[1:]).rsplit("```", 1)[0].strip()
         llm_data = json.loads(raw)
     except json.JSONDecodeError as exc:
         print(f"[ai-playlist] JSON parse error: {exc}\nRaw: {raw[:300]}")
-        raise HTTPException(status_code=502, detail="Claude returned malformed JSON — try again")
+        raise HTTPException(status_code=502, detail="AI returned malformed JSON — try again")
     except Exception as exc:
         print(f"[ai-playlist] LLM error: {exc}")
         raise HTTPException(status_code=502, detail=f"AI error: {exc}")

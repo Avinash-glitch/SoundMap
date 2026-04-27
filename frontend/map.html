@@ -784,8 +784,17 @@
 <!-- AI Curator modal -->
 <div class="modal-backdrop" id="ai-modal">
   <div class="modal" style="width:min(560px,92vw)">
-    <div class="modal-title">✦ AI Playlist Curator</div>
-    <div class="modal-sub">Describe what you want. Claude reads your full library and builds a playlist that fits.</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">
+      <div class="modal-title" style="margin:0">✦ AI Playlist Curator</div>
+      <button id="ai-settings-btn" title="AI key settings"
+        style="background:none;border:none;color:var(--text-dim);cursor:pointer;padding:4px;line-height:0;transition:color .15s"
+        onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-dim)'">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-sub" id="ai-modal-sub">Describe what you want. The AI reads your full library and builds a playlist that fits.</div>
     <textarea class="modal-input" id="ai-prompt" rows="3"
       placeholder="e.g. 1 hour gym playlist — high energy, high BPM"
       style="resize:vertical;min-height:64px;margin-bottom:.6rem"></textarea>
@@ -799,12 +808,45 @@
     <div id="ai-error" style="font-size:.78rem;color:#f87171;margin-bottom:.6rem;display:none"></div>
     <div id="ai-loading" style="display:none;text-align:center;padding:1.75rem 0;color:var(--text-dim);font-size:.82rem">
       <div class="spinner" style="margin:0 auto .8rem;width:22px;height:22px;border-width:2px"></div>
-      Claude is reading your library…
+      <span id="ai-loading-text">AI is reading your library…</span>
     </div>
     <div id="ai-result" style="display:none"></div>
     <div class="modal-actions" id="ai-actions">
       <button class="btn-secondary" id="ai-cancel">Cancel</button>
       <button class="btn-primary" id="ai-submit">Curate →</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI Key Settings modal -->
+<div class="modal-backdrop" id="ai-settings-modal">
+  <div class="modal" style="width:min(440px,92vw)">
+    <div class="modal-title">AI Key Settings</div>
+    <div class="modal-sub">Use your own API key so you're not sharing the server's quota. Keys are stored only in your browser.</div>
+
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">Provider</div>
+    <div style="display:flex;gap:.5rem;margin-bottom:1.1rem">
+      <label style="flex:1;display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-anthropic">
+        <input type="radio" name="ai-provider" value="anthropic" style="accent-color:var(--accent)" /> Claude (Anthropic)
+      </label>
+      <label style="flex:1;display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-openai">
+        <input type="radio" name="ai-provider" value="openai" style="accent-color:var(--accent)" /> GPT-4o (OpenAI)
+      </label>
+    </div>
+
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">API Key</div>
+    <input class="modal-input" id="ai-key-input" type="password"
+      placeholder="Paste your API key here…"
+      style="margin-bottom:.4rem;font-family:'DM Mono',monospace" autocomplete="off" />
+    <div style="font-size:.7rem;color:var(--text-dim);margin-bottom:1.25rem;line-height:1.5">
+      Stored in your browser's localStorage. Never sent anywhere except the AI provider via our server.
+      Leave blank to use the server's key (if configured).
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-secondary" id="ai-settings-cancel">Cancel</button>
+      <button class="btn-secondary" id="ai-settings-clear" style="color:#f87171;border-color:rgba(248,113,113,.3)">Clear key</button>
+      <button class="btn-primary" id="ai-settings-save">Save</button>
     </div>
   </div>
 </div>
@@ -1688,6 +1730,7 @@ document.getElementById('btn-ai').addEventListener('click', () => {
     <button class="btn-secondary" id="ai-cancel">Cancel</button>
     <button class="btn-primary" id="ai-submit">Curate →</button>`;
   _bindAiModalBtns();
+  _updateAiModalSub();
   document.getElementById('ai-modal').classList.add('open');
   setTimeout(() => document.getElementById('ai-prompt').focus(), 80);
 });
@@ -1715,6 +1758,80 @@ document.getElementById('ai-prompt').addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) _runAiCurator();
 });
 
+// ---------------------------------------------------------------------------
+// AI Key Settings
+// ---------------------------------------------------------------------------
+const LS_KEY_ANTHROPIC = 'sm_ai_key_anthropic';
+const LS_KEY_OPENAI = 'sm_ai_key_openai';
+const LS_PROVIDER = 'sm_ai_provider';
+
+function _getAiSettings() {
+  const provider = localStorage.getItem(LS_PROVIDER) || 'anthropic';
+  const key = provider === 'openai'
+    ? (localStorage.getItem(LS_KEY_OPENAI) || '')
+    : (localStorage.getItem(LS_KEY_ANTHROPIC) || '');
+  return { provider, key };
+}
+
+function _updateAiModalSub() {
+  const { provider, key } = _getAiSettings();
+  const sub = document.getElementById('ai-modal-sub');
+  const loading = document.getElementById('ai-loading-text');
+  const label = provider === 'openai' ? 'GPT-4o' : 'Claude';
+  const keyNote = key ? ` · using your ${label} key` : '';
+  sub.textContent = `Describe what you want. ${label} reads your full library and builds a playlist that fits.${keyNote}`;
+  loading.textContent = `${label} is reading your library…`;
+}
+
+document.getElementById('ai-settings-btn').addEventListener('click', () => {
+  const { provider, key } = _getAiSettings();
+  document.querySelector(`input[name="ai-provider"][value="${provider}"]`).checked = true;
+  document.getElementById('ai-key-input').value = key;
+  _highlightProviderLabel(provider);
+  document.getElementById('ai-settings-modal').classList.add('open');
+});
+
+document.querySelectorAll('input[name="ai-provider"]').forEach(radio => {
+  radio.addEventListener('change', () => _highlightProviderLabel(radio.value));
+});
+
+function _highlightProviderLabel(provider) {
+  ['anthropic', 'openai'].forEach(p => {
+    const lbl = document.getElementById(`provider-label-${p}`);
+    lbl.style.borderColor = p === provider ? 'var(--accent)' : 'var(--border)';
+  });
+}
+
+document.getElementById('ai-settings-save').addEventListener('click', () => {
+  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'anthropic';
+  const key = document.getElementById('ai-key-input').value.trim();
+  localStorage.setItem(LS_PROVIDER, provider);
+  if (provider === 'openai') {
+    localStorage.setItem(LS_KEY_OPENAI, key);
+  } else {
+    localStorage.setItem(LS_KEY_ANTHROPIC, key);
+  }
+  _updateAiModalSub();
+  document.getElementById('ai-settings-modal').classList.remove('open');
+});
+
+document.getElementById('ai-settings-clear').addEventListener('click', () => {
+  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'anthropic';
+  if (provider === 'openai') localStorage.removeItem(LS_KEY_OPENAI);
+  else localStorage.removeItem(LS_KEY_ANTHROPIC);
+  document.getElementById('ai-key-input').value = '';
+});
+
+document.getElementById('ai-settings-cancel').addEventListener('click', () => {
+  document.getElementById('ai-settings-modal').classList.remove('open');
+});
+
+document.getElementById('ai-settings-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+// ---------------------------------------------------------------------------
+
 async function _runAiCurator() {
   const prompt = document.getElementById('ai-prompt').value.trim();
   const errEl = document.getElementById('ai-error');
@@ -1726,6 +1843,8 @@ async function _runAiCurator() {
     return;
   }
 
+  const { provider, key } = _getAiSettings();
+
   document.getElementById('ai-loading').style.display = 'block';
   document.getElementById('ai-actions').style.display = 'none';
 
@@ -1733,7 +1852,7 @@ async function _runAiCurator() {
     const resp = await fetch('/ai-playlist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, provider, api_key: key || undefined }),
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || 'Failed');

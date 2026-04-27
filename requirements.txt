@@ -12,3 +12,5 @@ python-multipart>=0.0.9
 httpx>=0.26.0
 anthropic>=0.25.0
 itsdangerous>=2.1.0
+supabase>=2.3.0
+openai>=1.12.0
