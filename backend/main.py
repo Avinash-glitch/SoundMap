@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import router as auth_router
-from .jobs import get_job
+from .jobs import get_job, submit_job
 from .models import JobStatus
 from . import storage
 
@@ -68,6 +68,26 @@ async def job_status(job_id: str) -> JSONResponse:
             error=job.get("error"),
         ).model_dump()
     )
+
+
+@app.post("/start-job")
+async def start_job(request: Request) -> JSONResponse:
+    """Start pipeline job for the logged-in user. Accepts optional api_key in JSON body."""
+    token = request.session.get("access_token")
+    user_id = request.session.get("user_id")
+    display_name = request.session.get("display_name", user_id)
+    if not token or not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    api_key = ""
+    try:
+        body = await request.json()
+        api_key = (body.get("api_key") or "").strip()
+    except Exception:
+        pass
+
+    job_id = submit_job(token, user_id, display_name, api_key=api_key)
+    return JSONResponse({"job_id": job_id, "user_id": user_id})
 
 
 @app.get("/debug/token")

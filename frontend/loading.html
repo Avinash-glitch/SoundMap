@@ -122,6 +122,75 @@
       border-top: 1px solid var(--border);
     }
 
+    /* API key setup panel */
+    .setup-panel { text-align: left; }
+    .setup-panel .setup-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 1.3rem;
+      margin-bottom: 0.5rem;
+    }
+    .setup-panel .setup-sub {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-bottom: 1.75rem;
+      line-height: 1.6;
+    }
+    .setup-panel label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-bottom: 0.4rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .setup-panel input[type="text"] {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.65rem 0.9rem;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.8rem;
+      outline: none;
+      transition: border-color 0.15s;
+      margin-bottom: 0.5rem;
+    }
+    .setup-panel input[type="text"]:focus { border-color: var(--accent); }
+    .setup-panel .key-hint {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      margin-bottom: 1.75rem;
+      line-height: 1.5;
+    }
+    .btn-generate {
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--accent);
+      border: none;
+      border-radius: 100px;
+      color: #000;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-generate:hover { opacity: 0.85; }
+    .btn-generate:disabled { opacity: 0.4; cursor: not-allowed; }
+    .skip-link {
+      display: block;
+      text-align: center;
+      margin-top: 1rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .skip-link:hover { color: var(--text); }
+
     /* Error state */
     .error-box {
       display: none;
@@ -183,45 +252,63 @@
   <div class="wordmark">SoundMap</div>
 
   <div class="status-card">
-    <div class="dots">
-      <div class="dot"></div>
-      <div class="dot"></div>
-      <div class="dot"></div>
+
+    <!-- Step 1: API key entry -->
+    <div id="setup-panel" class="setup-panel">
+      <div class="setup-title">Almost there</div>
+      <p class="setup-sub">SoundMap uses Claude AI to group your playlists into mood territories. Add your Anthropic API key to enable this — or skip and get a basic map.</p>
+      <label for="api-key-input">Anthropic API Key (optional)</label>
+      <input type="text" id="api-key-input" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+      <div class="key-hint">Your key is sent directly to Anthropic and never stored on our servers. Get one at console.anthropic.com.</div>
+      <button class="btn-generate" id="btn-generate">Generate My Map</button>
+      <span class="skip-link" id="skip-link">Skip — generate without AI moods</span>
     </div>
 
-    <div class="status-title" id="status-title">Building your map…</div>
-    <div class="status-message" id="status-message">Starting up…</div>
+    <!-- Step 2: Progress -->
+    <div id="progress-panel" style="display:none">
+      <div class="dots">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
 
-    <div class="progress-track">
-      <div class="progress-fill" id="progress-fill"></div>
-    </div>
-    <div class="progress-label">
-      <span id="progress-pct">0%</span>
-      <span id="eta-text"></span>
+      <div class="status-title" id="status-title">Building your map…</div>
+      <div class="status-message" id="status-message">Starting up…</div>
+
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-label">
+        <span id="progress-pct">0%</span>
+        <span id="eta-text"></span>
+      </div>
+
+      <div class="eta" id="eta-note">
+        Audio features: ~2 min &nbsp;·&nbsp; CLAP embeddings: ~20 min
+      </div>
+
+      <div class="error-box" id="error-box">
+        <strong>Something went wrong.</strong><br />
+        <span id="error-detail"></span>
+        <br />
+        <a href="/" class="btn-retry">Try Again</a>
+      </div>
     </div>
 
-    <div class="eta" id="eta-note">
-      Audio features: ~2 min &nbsp;·&nbsp; CLAP embeddings: ~20 min
-    </div>
-
-    <div class="error-box" id="error-box">
-      <strong>Something went wrong.</strong><br />
-      <span id="error-detail"></span>
-      <br />
-      <a href="/" class="btn-retry">Try Again</a>
-    </div>
   </div>
 </div>
 
 <script>
   const params = new URLSearchParams(location.search);
-  const jobId = params.get('job');
   const userId = params.get('user');
 
-  if (!jobId) {
-    location.href = '/';
-  }
+  if (!userId) { location.href = '/'; }
 
+  const setupPanel = document.getElementById('setup-panel');
+  const progressPanel = document.getElementById('progress-panel');
+  const btnGenerate = document.getElementById('btn-generate');
+  const skipLink = document.getElementById('skip-link');
+  const apiKeyInput = document.getElementById('api-key-input');
   const fillEl = document.getElementById('progress-fill');
   const pctEl = document.getElementById('progress-pct');
   const msgEl = document.getElementById('status-message');
@@ -230,22 +317,21 @@
   const errorBox = document.getElementById('error-box');
   const errorDetail = document.getElementById('error-detail');
 
+  // Pre-fill from localStorage if user has saved a key in the map UI
+  const savedKey = localStorage.getItem('sm_ai_key_anthropic') || '';
+  if (savedKey) apiKeyInput.value = savedKey;
+
   let startTime = Date.now();
-  let lastPct = 0;
 
   function updateETA(pct) {
     if (pct <= 0 || pct >= 100) { etaEl.textContent = ''; return; }
     const elapsed = (Date.now() - startTime) / 1000;
-    const rate = pct / elapsed; // pct per second
+    const rate = pct / elapsed;
     const remaining = (100 - pct) / rate;
-    if (remaining < 60) {
-      etaEl.textContent = `~${Math.ceil(remaining)}s left`;
-    } else {
-      etaEl.textContent = `~${Math.ceil(remaining / 60)}m left`;
-    }
+    etaEl.textContent = remaining < 60 ? `~${Math.ceil(remaining)}s left` : `~${Math.ceil(remaining / 60)}m left`;
   }
 
-  async function poll() {
+  async function poll(jobId) {
     try {
       const resp = await fetch(`/status/${jobId}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -256,7 +342,6 @@
       pctEl.textContent = pct + '%';
       msgEl.textContent = job.message || '…';
       updateETA(pct);
-      lastPct = pct;
 
       if (job.status === 'done') {
         titleEl.textContent = 'Map ready!';
@@ -264,9 +349,7 @@
         fillEl.style.width = '100%';
         pctEl.textContent = '100%';
         etaEl.textContent = '';
-        setTimeout(() => {
-          location.href = `/map.html?user=${userId}`;
-        }, 800);
+        setTimeout(() => { location.href = `/map.html?user=${userId}`; }, 800);
         return;
       }
 
@@ -274,18 +357,45 @@
         titleEl.textContent = 'Processing failed';
         errorDetail.textContent = job.error || 'Unknown error.';
         errorBox.style.display = 'block';
-        document.querySelector('.dots').style.display = 'none';
+        progressPanel.querySelector('.dots').style.display = 'none';
         return;
       }
 
-      setTimeout(poll, 2000);
+      setTimeout(() => poll(jobId), 2000);
     } catch (err) {
       console.error('Poll error:', err);
-      setTimeout(poll, 3000);
+      setTimeout(() => poll(jobId), 3000);
     }
   }
 
-  poll();
+  async function startJob(apiKey) {
+    btnGenerate.disabled = true;
+    btnGenerate.textContent = 'Starting…';
+    try {
+      const resp = await fetch('/start-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: apiKey || undefined }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+
+      // Save the key to localStorage for use in the map UI
+      if (apiKey) localStorage.setItem('sm_ai_key_anthropic', apiKey);
+
+      setupPanel.style.display = 'none';
+      progressPanel.style.display = 'block';
+      startTime = Date.now();
+      poll(data.job_id);
+    } catch (err) {
+      btnGenerate.disabled = false;
+      btnGenerate.textContent = 'Generate My Map';
+      alert('Failed to start — please try again.');
+    }
+  }
+
+  btnGenerate.addEventListener('click', () => startJob(apiKeyInput.value.trim()));
+  skipLink.addEventListener('click', () => startJob(''));
 
   // ---- Background canvas (same as index.html) ----
   const canvas = document.getElementById('bg-canvas');

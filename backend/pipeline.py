@@ -32,6 +32,7 @@ def process_user(
     user_id: str,
     on_progress: Callable[[int, str], None] | None = None,
     display_name: str = "",
+    api_key: str = "",
 ) -> dict:
     """
     Full pipeline for one user.
@@ -57,7 +58,7 @@ def process_user(
         raise RuntimeError("No tracks found in your Spotify library.")
 
     progress(28, "Grouping playlists into moods…")
-    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_track_samples)
+    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_track_samples, api_key=api_key)
 
     progress(30, f"Processing {len(tracks)} tracks across {len(playlist_meta)} playlists…")
 
@@ -617,16 +618,15 @@ def _run_umap(embeddings: np.ndarray) -> np.ndarray:
 def _llm_mood_groups(
     playlist_meta: list[dict],
     pl_track_samples: dict[str, list[str]],
+    api_key: str = "",
 ) -> tuple[dict[str, str], str]:
     """
-    Call OpenAI to group playlists into persona-aware mood categories.
+    Group playlists into persona-aware mood categories using Claude.
     Returns ({playlist_name: mood_name}, persona_string).
-    Falls back to ({}, "") if API key missing or call fails.
+    Falls back to ({}, "") if no API key or call fails.
     """
-    import os
     import json
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key or not playlist_meta:
         return {}, ""
 

@@ -112,11 +112,11 @@ async def callback(request: Request, code: str | None = None, error: str | None 
     # Store token in session for debug endpoints and playlist creation
     request.session["access_token"] = access_token
     request.session["user_id"] = user_id
+    request.session["display_name"] = display_name
 
     # Skip processing if a fresh map already exists
     if storage.map_exists(user_id) and storage.map_age_hours(user_id) < 24:
         print(f"[auth] Fresh map found for {user_id} — skipping pipeline")
         return RedirectResponse(f"{app_url}/map.html?user={user_id}")
 
-    job_id = submit_job(access_token, user_id, display_name)
-    return RedirectResponse(f"{app_url}/loading.html?job={job_id}&user={user_id}")
+    return RedirectResponse(f"{app_url}/loading.html?user={user_id}")
