@@ -658,7 +658,7 @@ def _llm_mood_groups(
             "\n\n"
             "First, infer the user's listener persona in one short sentence. "
             "Then assign each playlist to exactly one mood category. "
-            "Use between 4 and 12 categories (more is fine if the library is sonically diverse). "
+            "Use between 3 and 6 categories maximum — merge similar sounds rather than splitting. "
             "Name each category evocatively in 2–3 words that match the sonic character "
             "of the tracks — NOT just the time-of-day or mood adjective. "
             "\n\n"

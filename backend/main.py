@@ -70,6 +70,63 @@ async def job_status(job_id: str) -> JSONResponse:
     )
 
 
+@app.post("/analyze-moods")
+async def analyze_moods(request: Request) -> JSONResponse:
+    """Re-run mood grouping on existing map data using a user-supplied API key."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    api_key = ""
+    try:
+        body = await request.json()
+        api_key = (body.get("api_key") or "").strip()
+    except Exception:
+        pass
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key required")
+
+    map_data = storage.load_map(user_id)
+    if not map_data:
+        raise HTTPException(status_code=404, detail="Map not found")
+
+    points = map_data.get("points", [])
+    if not points:
+        raise HTTPException(status_code=400, detail="No tracks in map")
+
+    # Reconstruct playlist metadata + track samples from stored points
+    pl_tracks: dict[str, list[str]] = {}
+    for p in points:
+        for pl in p.get("playlists", []):
+            pl_tracks.setdefault(pl, [])
+            if len(pl_tracks[pl]) < 10:
+                pl_tracks[pl].append(f"{p.get('name','')} — {p.get('artist','')}")
+
+    playlist_meta = [{"name": pl} for pl in pl_tracks]
+    if not playlist_meta:
+        raise HTTPException(status_code=400, detail="No playlist data to analyze")
+
+    from .pipeline import _llm_mood_groups
+    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_tracks, api_key=api_key)
+
+    if not pl_to_mood:
+        raise HTTPException(status_code=500, detail="Mood analysis returned no results — check your API key")
+
+    # Apply mood assignments to points
+    for p in points:
+        pls = p.get("playlists", [])
+        mood = next((pl_to_mood[pl] for pl in pls if pl in pl_to_mood), None)
+        p["mood"] = mood or "Uncharted"
+
+    map_data["points"] = points
+    if persona:
+        map_data["persona"] = persona
+    storage.save_map(user_id, map_data)
+
+    return JSONResponse({"points": points, "persona": persona})
+
+
 @app.post("/start-job")
 async def start_job(request: Request) -> JSONResponse:
     """Start pipeline job for the logged-in user. Accepts optional api_key in JSON body."""
@@ -202,17 +259,41 @@ async def create_mood_playlists(request: Request) -> JSONResponse:
             mood_tracks.setdefault(mood, []).append(tid)
 
     h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # Fetch all existing playlists owned by the user to avoid duplicates
+    existing: dict[str, tuple[str, str]] = {}  # name → (id, url)
+    offset = 0
+    while True:
+        r = _requests.get(f"https://api.spotify.com/v1/me/playlists?limit=50&offset={offset}", headers=h)
+        if r.status_code != 200:
+            break
+        items = r.json().get("items", [])
+        for pl in items:
+            if pl and (pl.get("owner") or {}).get("id") == user_id:
+                existing[pl["name"]] = (pl["id"], pl["external_urls"]["spotify"])
+        if len(items) < 50:
+            break
+        offset += 50
+
     created = []
 
     for mood, track_ids in mood_tracks.items():
         if selected_moods is not None and mood not in selected_moods:
             continue
+
+        pl_name = f"🗺 {mood}"
+
+        # Skip if playlist already exists
+        if pl_name in existing:
+            print(f"[create-playlists] skipping '{pl_name}' — already exists")
+            continue
+
         # Create the playlist
         pl_resp = _requests.post(
             f"https://api.spotify.com/v1/me/playlists",
             headers=h,
             json={
-                "name": f"🗺 {mood}",
+                "name": pl_name,
                 "description": f"SoundMap mood zone — {mood}. Auto-generated from your library.",
                 "public": False,
             },

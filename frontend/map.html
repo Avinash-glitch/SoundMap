@@ -351,10 +351,19 @@
       align-items: center;
       gap: 0.5rem;
       cursor: pointer;
-      transition: opacity 0.15s;
+      padding: 0.4rem 0.5rem;
+      border-radius: 7px;
+      margin: 0 -0.5rem;
+      border-left: 2px solid transparent;
+      transition: background 0.15s, border-color 0.15s, padding 0.15s;
     }
 
-    .legend-item:hover { opacity: 0.7; }
+    .legend-item:hover {
+      background: rgba(255,255,255,0.05);
+      border-left-color: var(--accent);
+      padding-top: 0.6rem;
+      padding-bottom: 0.6rem;
+    }
 
     .legend-dot {
       width: 9px;
@@ -364,6 +373,57 @@
     }
 
     .legend-label { color: var(--text); }
+
+    /* ---- Track tooltip ---- */
+    #track-tooltip {
+      position: fixed;
+      pointer-events: none;
+      background: rgba(18,18,26,0.92);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.45rem 0.75rem;
+      font-size: 0.75rem;
+      color: var(--text);
+      white-space: nowrap;
+      backdrop-filter: blur(6px);
+      opacity: 0;
+      transition: opacity 0.12s;
+      z-index: 50;
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #track-tooltip.visible { opacity: 1; }
+    #track-tooltip .tt-artist { color: var(--text-dim); font-size: 0.68rem; margin-top: 1px; }
+
+    /* ---- Mood gate panel ---- */
+    #mood-gate {
+      display: none;
+      background: rgba(240,240,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 1.1rem;
+      margin: 0.5rem 0;
+      text-align: center;
+    }
+    #mood-gate .mg-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.9rem; margin-bottom: 0.35rem; }
+    #mood-gate .mg-sub { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.85rem; line-height: 1.5; }
+    #mood-gate input[type=text] {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 0.5rem 0.65rem; color: var(--text);
+      font-family: 'DM Mono', monospace; font-size: 0.75rem; outline: none;
+      margin-bottom: 0.5rem; transition: border-color 0.15s;
+    }
+    #mood-gate input[type=text]:focus { border-color: var(--accent); }
+    #mood-gate .mg-btn {
+      width: 100%; padding: 0.5rem; background: var(--accent); border: none;
+      border-radius: 100px; color: #000; font-family: 'DM Mono', monospace;
+      font-size: 0.78rem; cursor: pointer; transition: opacity 0.15s; margin-bottom: 0.5rem;
+    }
+    #mood-gate .mg-btn:hover { opacity: 0.85; }
+    #mood-gate .mg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    #mood-gate .mg-skip { font-size: 0.7rem; color: var(--text-dim); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+    #mood-gate .mg-skip:hover { color: var(--text); }
 
     /* ---- Zoom controls ---- */
     .zoom-controls {
@@ -641,6 +701,11 @@
 </div>
 
 <canvas id="map-canvas"></canvas>
+
+<div id="track-tooltip">
+  <div id="tt-name"></div>
+  <div class="tt-artist" id="tt-artist"></div>
+</div>
 
 <!-- Top bar -->
 <div class="topbar">
@@ -1148,6 +1213,67 @@ function buildMoodLegend() {
     const key = p.mood || 'Uncharted';
     counts[key] = (counts[key] || 0) + 1;
   }
+
+  const keys = Object.keys(counts);
+  const allUncharted = keys.length === 0 || (keys.length === 1 && keys[0] === 'Uncharted');
+
+  if (allUncharted) {
+    const legend = document.getElementById('map-legend');
+    legend.innerHTML = `
+      <div class="legend-title"><span>${points.length}</span> tracks · moods</div>
+      <div class="legend-items">
+        <div id="mood-gate">
+          <div class="mg-title">Generate Mood Zones</div>
+          <div class="mg-sub">Add your Anthropic API key to let AI group your playlists into sonic territories.</div>
+          <input type="text" id="mg-key-input" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+          <button class="mg-btn" id="mg-generate-btn">Generate Mood Zones</button>
+          <span class="mg-skip" id="mg-skip-link">Skip — view my Sound Map →</span>
+        </div>
+      </div>`;
+
+    document.getElementById('mood-gate').style.display = 'block';
+
+    const savedKey = localStorage.getItem('sm_ai_key_anthropic') || '';
+    if (savedKey) document.getElementById('mg-key-input').value = savedKey;
+
+    document.getElementById('mg-generate-btn').addEventListener('click', async () => {
+      const key = document.getElementById('mg-key-input').value.trim();
+      if (!key) { alert('Please enter your Anthropic API key.'); return; }
+      const btn = document.getElementById('mg-generate-btn');
+      btn.disabled = true; btn.textContent = 'Analyzing…';
+      try {
+        const resp = await fetch('/analyze-moods', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_key: key }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Failed');
+        localStorage.setItem('sm_ai_key_anthropic', key);
+        // Apply updated points and re-render
+        points = data.points;
+        if (data.persona) {
+          const badge = document.getElementById('user-badge-persona');
+          badge.textContent = data.persona;
+          badge.style.display = 'block';
+        }
+        buildLegend();
+        render();
+      } catch (err) {
+        alert(`Error: ${err.message}`);
+        btn.disabled = false; btn.textContent = 'Generate Mood Zones';
+      }
+    });
+
+    document.getElementById('mg-skip-link').addEventListener('click', () => {
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'playlists'));
+      mapMode = 'playlists';
+      buildLegend();
+      render();
+    });
+    return;
+  }
+
   _renderLegendItems(counts, k => moodColors[k] || COLOR_UNTAGGED, k => points.filter(p => (p.mood || 'Uncharted') === k));
 }
 
@@ -1210,8 +1336,8 @@ function _renderLegendItems(counts, colorFor, ptsFor) {
 function showFilterTracks(key, color, pts) {
   const sorted = [...pts].sort((a, b) => (b.play_score || 1) - (a.play_score || 1));
   const legend = document.getElementById('map-legend');
-  // Single-track playlists/moods (Unsorted) shouldn't expose the save button — Spotify needs ≥1 track
-  const showSave = pts.length > 0 && key !== 'Unsorted';
+  // Only show save button in mood mode — playlists already exist in Spotify
+  const showSave = mapMode === 'moods' && pts.length > 0 && key !== 'Uncharted';
 
   legend.innerHTML = `
     <div class="legend-back" id="legend-back">
@@ -1382,6 +1508,17 @@ canvas.addEventListener('mousemove', e => {
     canvas.style.cursor = hit ? 'pointer' : 'grab';
     render();
   }
+
+  const tooltip = document.getElementById('track-tooltip');
+  if (hit) {
+    document.getElementById('tt-name').textContent = hit.name || '';
+    document.getElementById('tt-artist').textContent = hit.artist || '';
+    tooltip.style.left = (e.clientX + 14) + 'px';
+    tooltip.style.top = (e.clientY - 12) + 'px';
+    tooltip.classList.add('visible');
+  } else {
+    tooltip.classList.remove('visible');
+  }
 });
 
 canvas.addEventListener('mouseup', e => {
@@ -1396,6 +1533,7 @@ canvas.addEventListener('mouseup', e => {
 });
 
 canvas.addEventListener('mouseleave', () => {
+  document.getElementById('track-tooltip').classList.remove('visible');
   dragStart = null; isDragging = false;
   canvas.classList.remove('panning');
 });
