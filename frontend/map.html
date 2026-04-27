@@ -564,6 +564,21 @@
       max-width: 165px;
     }
 
+    /* ---- AI Curator chips ---- */
+    .ai-chip {
+      padding: .32rem .7rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      color: var(--text-dim);
+      font-family: 'DM Mono', monospace;
+      font-size: .68rem;
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+      white-space: nowrap;
+    }
+    .ai-chip:hover { border-color: var(--accent); color: var(--text); }
+
     /* ---- Map mode toggle ---- */
     .mode-toggle {
       display: flex;
@@ -647,6 +662,12 @@
       <button class="mode-btn active" data-mode="moods">Mood Zones</button>
       <button class="mode-btn" data-mode="playlists">Playlists</button>
     </div>
+    <button class="btn-icon" id="btn-ai" title="AI Playlist Curator" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(29,185,84,.4)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
+        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+      </svg>
+      AI Curate
+    </button>
     <button class="btn-icon" id="btn-merge" title="Merge playlists" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.4rem">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
         <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
@@ -760,6 +781,34 @@
   </div>
 </div>
 
+<!-- AI Curator modal -->
+<div class="modal-backdrop" id="ai-modal">
+  <div class="modal" style="width:min(560px,92vw)">
+    <div class="modal-title">✦ AI Playlist Curator</div>
+    <div class="modal-sub">Describe what you want. Claude reads your full library and builds a playlist that fits.</div>
+    <textarea class="modal-input" id="ai-prompt" rows="3"
+      placeholder="e.g. 1 hour gym playlist — high energy, high BPM"
+      style="resize:vertical;min-height:64px;margin-bottom:.6rem"></textarea>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem">
+      <button class="ai-chip" data-p="1 hour gym playlist — high energy, high BPM">🏋️ Gym 1h</button>
+      <button class="ai-chip" data-p="90 minute deep focus — instrumental only, no lyrics">🌙 Focus 90m</button>
+      <button class="ai-chip" data-p="45 minute road trip — anthemic, big choruses">🚗 Drive 45m</button>
+      <button class="ai-chip" data-p="30 minute Sunday morning — slow, warm, nostalgic">☕ Sunday 30m</button>
+      <button class="ai-chip" data-p="2 hour late night DJ set — dark techno and bass">🎛️ Club 2h</button>
+    </div>
+    <div id="ai-error" style="font-size:.78rem;color:#f87171;margin-bottom:.6rem;display:none"></div>
+    <div id="ai-loading" style="display:none;text-align:center;padding:1.75rem 0;color:var(--text-dim);font-size:.82rem">
+      <div class="spinner" style="margin:0 auto .8rem;width:22px;height:22px;border-width:2px"></div>
+      Claude is reading your library…
+    </div>
+    <div id="ai-result" style="display:none"></div>
+    <div class="modal-actions" id="ai-actions">
+      <button class="btn-secondary" id="ai-cancel">Cancel</button>
+      <button class="btn-primary" id="ai-submit">Curate →</button>
+    </div>
+  </div>
+</div>
+
 <!-- Legend -->
 <div class="legend" id="map-legend">
   <div class="legend-title"><span id="legend-count">0</span> tracks</div>
@@ -823,6 +872,7 @@ let transform = { x: 0, y: 0, scale: 1 };
 let selectedPoint = null;
 let hoveredPoint = null;
 let mapMode = 'moods'; // 'moods' | 'playlists'
+let aiHighlightSet = null; // Set<string> | null — IDs returned by AI curator
 
 // ---------------------------------------------------------------------------
 // Canvas setup
@@ -940,6 +990,30 @@ function render() {
 function _renderDots() {
   ctx.clearRect(0, 0, W, H);
 
+  // ---- Territory overlay when a filter is active ----
+  if (activeGenreFilter) {
+    const filterColor = mapMode === 'moods'
+      ? (moodColors[activeGenreFilter] || COLOR_UNTAGGED)
+      : (playlistColors[activeGenreFilter] || COLOR_UNTAGGED);
+    const glowA = filterColor.startsWith('hsl(')
+      ? filterColor.replace('hsl(', 'hsla(').replace(')', ', 0.09)')
+      : 'rgba(255,255,255,0.06)';
+    for (const p of points) {
+      const inFilter = mapMode === 'moods'
+        ? (p.mood || 'Uncharted') === activeGenreFilter
+        : (p.playlists || []).includes(activeGenreFilter);
+      if (!inFilter) continue;
+      const { cx, cy } = toCanvas(p.nx, p.ny);
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 52);
+      grad.addColorStop(0, glowA);
+      grad.addColorStop(1, 'transparent');
+      ctx.beginPath();
+      ctx.arc(cx, cy, 52, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+  }
+
   // ---- Cluster glow pre-pass (always behind dots) ----
   if (hoveredPoint) {
     const { cx: hx, cy: hy } = toCanvas(hoveredPoint.nx, hoveredPoint.ny);
@@ -981,11 +1055,12 @@ function _renderDots() {
     const { cx, cy } = toCanvas(p.nx, p.ny);
     const isSel = selectedPoint && selectedPoint.id === p.id;
     const isHov = hoveredPoint && hoveredPoint.id === p.id;
-    const isDimmed = activeGenreFilter && (
+    let isDimmed = activeGenreFilter && (
       mapMode === 'moods'
         ? (p.mood || 'Uncharted') !== activeGenreFilter
         : !(p.playlists || []).includes(activeGenreFilter)
     );
+    if (aiHighlightSet) isDimmed = !aiHighlightSet.has(p.id);
 
     const base = pointColor(p);
     const r = isSel ? pointRadius(p, 6) : isHov ? pointRadius(p, 5) : pointRadius(p, 3.5);
@@ -1176,6 +1251,24 @@ function showFilterTracks(key, color, pts) {
 }
 
 // Pan & zoom to fit a cluster of points centered in the viewport
+// Shared eased animation — all pan/zoom goes through here
+let _animFrame = null;
+function animateTransform(toX, toY, toScale, duration = 650) {
+  if (_animFrame) { cancelAnimationFrame(_animFrame); _animFrame = null; }
+  const fromX = transform.x, fromY = transform.y, fromScale = transform.scale;
+  const start = performance.now();
+  function step(now) {
+    const raw = Math.min((now - start) / duration, 1);
+    const t = raw < 0.5 ? 2 * raw * raw : -1 + (4 - 2 * raw) * raw; // easeInOutQuad
+    transform.x = fromX + (toX - fromX) * t;
+    transform.y = fromY + (toY - fromY) * t;
+    transform.scale = fromScale + (toScale - fromScale) * t;
+    render();
+    if (raw < 1) _animFrame = requestAnimationFrame(step);
+  }
+  _animFrame = requestAnimationFrame(step);
+}
+
 function panToCluster(pts) {
   if (!pts || pts.length === 0) return;
   if (pts.length === 1) { panTo(pts[0]); return; }
@@ -1191,18 +1284,10 @@ function panToCluster(pts) {
   const cy = (yMin + yMax) / 2;
   const w = Math.max(xMax - xMin, 0.04);
   const h = Math.max(yMax - yMin, 0.04);
-
-  // Aim for the cluster to take ~55% of available viewport, with margins
-  const usableW = W - 360; // leave room for sidebar/legend
+  const usableW = W - 360;
   const usableH = H - 200;
-  const targetScale = Math.min(usableW / (w * 1.6), usableH / (h * 1.6));
-  // Clamp so we don't zoom absurdly far in/out
-  const newScale = Math.min(Math.max(targetScale, 250), 5000);
-
-  transform.scale = newScale;
-  transform.x = W / 2 - cx * newScale;
-  transform.y = H / 2 - cy * newScale;
-  render();
+  const targetScale = Math.min(Math.max(Math.min(usableW / (w * 1.6), usableH / (h * 1.6)), 250), 5000);
+  animateTransform(W / 2 - cx * targetScale, H / 2 - cy * targetScale, targetScale);
 }
 
 // ---------------------------------------------------------------------------
@@ -1429,9 +1514,7 @@ function showSidebar(p) {
 
 function panTo(p) {
   const { cx, cy } = toCanvas(p.nx, p.ny);
-  transform.x += W / 2 - cx;
-  transform.y += H / 2 - cy;
-  render();
+  animateTransform(transform.x + W / 2 - cx, transform.y + H / 2 - cy, transform.scale, 500);
 }
 
 document.getElementById('btn-close-sidebar').addEventListener('click', () => {
@@ -1590,6 +1673,153 @@ document.getElementById('mood-select-create').addEventListener('click', async ()
 });
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// AI Playlist Curator
+// ---------------------------------------------------------------------------
+document.getElementById('btn-ai').addEventListener('click', () => {
+  // Reset modal to entry state
+  document.getElementById('ai-prompt').value = '';
+  document.getElementById('ai-error').style.display = 'none';
+  document.getElementById('ai-loading').style.display = 'none';
+  document.getElementById('ai-result').style.display = 'none';
+  document.getElementById('ai-result').innerHTML = '';
+  document.getElementById('ai-actions').style.display = 'flex';
+  document.getElementById('ai-actions').innerHTML = `
+    <button class="btn-secondary" id="ai-cancel">Cancel</button>
+    <button class="btn-primary" id="ai-submit">Curate →</button>`;
+  _bindAiModalBtns();
+  document.getElementById('ai-modal').classList.add('open');
+  setTimeout(() => document.getElementById('ai-prompt').focus(), 80);
+});
+
+function _bindAiModalBtns() {
+  const cancelBtn = document.getElementById('ai-cancel');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => document.getElementById('ai-modal').classList.remove('open'));
+  const submitBtn = document.getElementById('ai-submit');
+  if (submitBtn) submitBtn.addEventListener('click', _runAiCurator);
+}
+
+document.getElementById('ai-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+// Example chips
+document.querySelectorAll('.ai-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.getElementById('ai-prompt').value = chip.dataset.p;
+    document.getElementById('ai-prompt').focus();
+  });
+});
+
+document.getElementById('ai-prompt').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) _runAiCurator();
+});
+
+async function _runAiCurator() {
+  const prompt = document.getElementById('ai-prompt').value.trim();
+  const errEl = document.getElementById('ai-error');
+  errEl.style.display = 'none';
+
+  if (!prompt) {
+    errEl.textContent = 'Describe what you want first.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  document.getElementById('ai-loading').style.display = 'block';
+  document.getElementById('ai-actions').style.display = 'none';
+
+  try {
+    const resp = await fetch('/ai-playlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed');
+
+    document.getElementById('ai-loading').style.display = 'none';
+
+    const resultEl = document.getElementById('ai-result');
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `
+      <div style="background:var(--bg);border:1px solid var(--accent);border-radius:10px;padding:1rem;margin-bottom:1rem">
+        <div style="font-family:Syne,sans-serif;font-weight:700;font-size:1.05rem;margin-bottom:.3rem">${data.name}</div>
+        <div style="font-size:.72rem;color:var(--accent);margin-bottom:.6rem;font-family:'DM Mono',monospace">
+          ${data.track_count} tracks · ${data.duration_min} min
+        </div>
+        <div style="font-size:.78rem;color:var(--text-dim);line-height:1.55">${data.reasoning}</div>
+      </div>
+      <div style="display:flex;gap:.5rem;margin-bottom:.25rem">
+        <a href="${data.url}" target="_blank" rel="noopener"
+           style="flex:1;display:flex;align-items:center;justify-content:center;gap:.4rem;
+                  padding:.6rem;background:var(--accent);color:#000;font-family:Syne,sans-serif;
+                  font-weight:700;font-size:.82rem;text-decoration:none;border-radius:100px;
+                  transition:background .15s">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+          </svg>
+          Open in Spotify
+        </a>
+        <button class="btn-secondary" id="ai-show-map" style="flex:1">Show on map</button>
+      </div>`;
+
+    document.getElementById('ai-actions').style.display = 'flex';
+    document.getElementById('ai-actions').innerHTML = `
+      <button class="btn-secondary" id="ai-new">← New prompt</button>
+      <button class="btn-secondary" id="ai-done">Done</button>`;
+
+    document.getElementById('ai-done').addEventListener('click', () =>
+      document.getElementById('ai-modal').classList.remove('open'));
+    document.getElementById('ai-new').addEventListener('click', () => {
+      document.getElementById('ai-result').style.display = 'none';
+      document.getElementById('ai-result').innerHTML = '';
+      document.getElementById('ai-actions').innerHTML = `
+        <button class="btn-secondary" id="ai-cancel">Cancel</button>
+        <button class="btn-primary" id="ai-submit">Curate →</button>`;
+      _bindAiModalBtns();
+    });
+
+    document.getElementById('ai-show-map').addEventListener('click', () => {
+      aiHighlightSet = new Set(data.track_ids);
+      const aiPts = points.filter(p => aiHighlightSet.has(p.id));
+      document.getElementById('ai-modal').classList.remove('open');
+      panToCluster(aiPts);
+      render();
+      _showAiBadge(data.name, data.track_count);
+    });
+
+  } catch (err) {
+    document.getElementById('ai-loading').style.display = 'none';
+    document.getElementById('ai-actions').style.display = 'flex';
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function _showAiBadge(name, count) {
+  document.getElementById('ai-badge')?.remove();
+  const badge = document.createElement('div');
+  badge.id = 'ai-badge';
+  badge.className = 'compare-badge visible';
+  badge.style.cssText = 'border-color:var(--accent);color:var(--accent);cursor:pointer';
+  badge.innerHTML = `
+    <div class="dot" style="background:var(--accent)"></div>
+    <span style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
+    <span style="font-size:.7rem;color:var(--text-dim);margin-left:2px">(${count})</span>
+    <span style="opacity:.5;margin-left:4px">✕</span>`;
+  badge.addEventListener('click', () => {
+    aiHighlightSet = null;
+    badge.remove();
+    render();
+  });
+  // Insert before the mode toggle
+  const modeToggle = document.getElementById('map-mode-toggle');
+  modeToggle.parentNode.insertBefore(badge, modeToggle);
+}
+
+_bindAiModalBtns();
+
 // Map mode toggle (Mood Zones ↔ Playlists)
 // ---------------------------------------------------------------------------
 document.getElementById('map-mode-toggle').addEventListener('click', e => {
@@ -1739,11 +1969,12 @@ function renderWithCompare() {
     const { cx, cy } = toCanvas(p.nx, p.ny);
     const isSel = selectedPoint && selectedPoint.id === p.id && selectedPoint._source === 'mine';
     const isHov = hoveredPoint && hoveredPoint.id === p.id && hoveredPoint._source === 'mine';
-    const isDimmed = activeGenreFilter && (
+    let isDimmed = activeGenreFilter && (
       mapMode === 'moods'
         ? (p.mood || 'Uncharted') !== activeGenreFilter
         : !(p.playlists || []).includes(activeGenreFilter)
     );
+    if (aiHighlightSet) isDimmed = !aiHighlightSet.has(p.id);
     const base = pointColor(p);
     const r = isSel ? pointRadius(p, 6) : isHov ? pointRadius(p, 5) : pointRadius(p, 3.5);
     const color = isSel ? COLOR_SEL : isHov ? COLOR_HOVER : base;

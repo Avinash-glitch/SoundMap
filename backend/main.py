@@ -1,5 +1,6 @@
 """SoundMap FastAPI application — entry point."""
 
+import json
 import os
 from pathlib import Path
 
@@ -288,3 +289,158 @@ async def merge_playlists(request: Request) -> JSONResponse:
 
     print(f"[merge-playlists] '{new_name}' — {len(track_ids)} tracks from {source}")
     return JSONResponse({"name": new_name, "track_count": len(track_ids), "url": pl_url})
+
+
+@app.post("/ai-playlist")
+async def ai_playlist(request: Request) -> JSONResponse:
+    """
+    Use Claude to curate a playlist from the user's library based on a natural language prompt.
+    Body: {"prompt": "1 hour gym playlist — high energy, high BPM", "name": "..." (optional)}
+    Returns: {name, url, track_count, duration_min, reasoning, track_ids}
+    """
+    token = request.session.get("access_token")
+    user_id = request.session.get("user_id")
+    if not token or not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    try:
+        body = await request.json()
+        prompt = (body.get("prompt") or "").strip()
+        custom_name = (body.get("name") or "").strip()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required")
+    if len(prompt) > 600:
+        raise HTTPException(status_code=400, detail="Prompt too long (max 600 chars)")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured on server")
+
+    map_data = storage.load_map(user_id)
+    if not map_data:
+        raise HTTPException(status_code=404, detail="Map not found — process your library first")
+
+    pts = map_data.get("points", [])
+    if not pts:
+        raise HTTPException(status_code=400, detail="No tracks in your library map")
+
+    # Build compact manifest: one line per track
+    lines: list[str] = []
+    for p in pts:
+        tid = p.get("id")
+        if not tid:
+            continue
+        name = p.get("name", "")
+        artist = p.get("artist", "")
+        pls = ", ".join((p.get("playlists") or [])[:3]) or "none"
+        mood = p.get("mood", "Uncharted")
+        dur_sec = round((p.get("duration_ms") or 0) / 1000)
+        lines.append(f"{tid} | {name} — {artist} | pl: {pls} | mood: {mood} | {dur_sec}s")
+
+    manifest = "\n".join(lines)
+
+    system_msg = (
+        "You are a music curator with deep knowledge of artists, genres, BPM, and energy levels. "
+        "The user has given you their Spotify library and a request. "
+        "Select tracks that genuinely fit — quality and cohesion matter more than quantity.\n\n"
+        "Each library line is: TRACK_ID | Name — Artist | pl: playlist(s) | mood: mood | Xs\n\n"
+        "Rules:\n"
+        "- If a duration is mentioned (e.g. '1 hour', '45 min'), the SUM of selected track "
+        "durations in seconds must land within ±15% of that target. Calculate carefully.\n"
+        "- For high-BPM / high-energy requests (gym, workout, running, rave, techno): "
+        "prioritise tracks from playlists with names like workout/gym/techno/dnb/electronic/rave, "
+        "and artists/tracks you know to be high-energy from your training data.\n"
+        "- For focus/study: instrumental, ambient, low-tempo, jazz, lo-fi.\n"
+        "- For driving/road: anthemic, dynamic range, not too slow.\n"
+        "- Order matters — build an arc appropriate to the request "
+        "(warmup → peak → cooldown for gym; opener → energy → comedown for a party set, etc.).\n"
+        "- Use your training knowledge of the artists and track names to infer BPM and energy. "
+        "Playlist names and mood tags are strong hints.\n"
+        "- NEVER invent or modify track IDs. Only return IDs that appear in the library.\n\n"
+        "Respond ONLY with valid JSON, no markdown fences:\n"
+        '{"name": "Playlist name (2-5 words)", "reasoning": "1-2 sentences", '
+        '"track_ids": ["id1", "id2", ...]}'
+    )
+
+    user_msg = f"Library ({len(lines)} tracks):\n{manifest}\n\nRequest: {prompt}"
+
+    print(f"[ai-playlist] calling Claude for user {user_id} — {len(lines)} tracks, prompt: {prompt!r}")
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=4000,
+            system=system_msg,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = "\n".join(raw.split("\n")[1:]).rsplit("```", 1)[0].strip()
+        llm_data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"[ai-playlist] JSON parse error: {exc}\nRaw: {raw[:300]}")
+        raise HTTPException(status_code=502, detail="Claude returned malformed JSON — try again")
+    except Exception as exc:
+        print(f"[ai-playlist] LLM error: {exc}")
+        raise HTTPException(status_code=502, detail=f"AI error: {exc}")
+
+    pl_name = custom_name or llm_data.get("name") or "AI Curated"
+    reasoning = llm_data.get("reasoning", "")
+    raw_ids: list[str] = llm_data.get("track_ids", [])
+
+    # Validate — only accept IDs that exist in the user's library
+    valid_ids = {p["id"] for p in pts if p.get("id")}
+    track_ids = [tid for tid in raw_ids if tid in valid_ids]
+
+    if not track_ids:
+        raise HTTPException(status_code=502, detail="Claude returned no valid track IDs — try rephrasing")
+
+    # Compute total duration
+    dur_map = {p["id"]: (p.get("duration_ms") or 0) for p in pts}
+    total_ms = sum(dur_map.get(tid, 0) for tid in track_ids)
+    duration_min = round(total_ms / 60000, 1)
+
+    print(f"[ai-playlist] '{pl_name}' — {len(track_ids)} tracks, {duration_min} min")
+    print(f"[ai-playlist] reasoning: {reasoning}")
+
+    # Create Spotify playlist
+    h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    pl_resp = _requests.post(
+        "https://api.spotify.com/v1/me/playlists",
+        headers=h,
+        json={
+            "name": pl_name,
+            "description": f"SoundMap AI · {prompt[:120]}",
+            "public": False,
+        },
+    )
+    if pl_resp.status_code not in (200, 201):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Spotify error {pl_resp.status_code}: {pl_resp.text[:120]}",
+        )
+
+    pl_id = pl_resp.json()["id"]
+    pl_url = pl_resp.json()["external_urls"]["spotify"]
+
+    uris = [f"spotify:track:{tid}" for tid in track_ids]
+    for i in range(0, len(uris), 100):
+        _requests.post(
+            f"https://api.spotify.com/v1/playlists/{pl_id}/items",
+            headers=h,
+            json={"uris": uris[i: i + 100]},
+        )
+
+    return JSONResponse({
+        "name": pl_name,
+        "url": pl_url,
+        "track_count": len(track_ids),
+        "duration_min": duration_min,
+        "reasoning": reasoning,
+        "track_ids": track_ids,
+    })
