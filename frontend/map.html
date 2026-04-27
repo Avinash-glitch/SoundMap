@@ -1,0 +1,1899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SoundMap</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --bg2: #111118;
+      --surface: #18181f;
+      --border: #2a2a35;
+      --text: #e8e8f0;
+      --text-dim: #888899;
+      --accent: #1db954;
+      --accent-dim: #158a3e;
+      --accent-glow: rgba(29, 185, 84, 0.15);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      overflow: hidden;
+    }
+
+    /* ---- Canvas ---- */
+    #map-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+    #map-canvas.panning { cursor: grabbing; }
+
+    /* ---- Top bar ---- */
+    .topbar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 1.25rem;
+      background: linear-gradient(to bottom, rgba(10,10,15,0.9) 60%, transparent);
+      pointer-events: none;
+    }
+
+    .topbar > * { pointer-events: auto; }
+
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #fff 40%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-decoration: none;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .user-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.85rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 0.78rem;
+      color: var(--text-dim);
+    }
+
+    .user-badge .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+
+    .btn-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px; height: 34px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-dim);
+      text-decoration: none;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      font-size: 0;
+    }
+    .btn-icon:hover { color: var(--text); border-color: var(--text-dim); }
+    .btn-icon svg { width: 15px; height: 15px; }
+
+    /* ---- Search ---- */
+    .search-wrap {
+      position: fixed;
+      top: 3.5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      width: min(360px, calc(100vw - 2rem));
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 0.6rem 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.82rem;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .search-input::placeholder { color: var(--text-dim); }
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .search-results {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0; right: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    .search-result {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.6rem 1rem;
+      cursor: pointer;
+      transition: background 0.1s;
+      border-bottom: 1px solid var(--border);
+    }
+    .search-result:last-child { border-bottom: none; }
+    .search-result:hover { background: var(--bg2); }
+
+    .search-result img {
+      width: 36px; height: 36px;
+      border-radius: 4px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: var(--border);
+    }
+
+    .search-result-text { min-width: 0; }
+    .search-result-name { font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .search-result-artist { font-size: 0.72rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ---- Sidebar ---- */
+    .sidebar {
+      position: fixed;
+      top: 0; right: 0;
+      width: min(320px, 85vw);
+      height: 100%;
+      z-index: 20;
+      background: var(--bg2);
+      border-left: 1px solid var(--border);
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar.open { transform: translateX(0); }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .sidebar-header-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.95rem;
+    }
+
+    .btn-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 4px;
+      line-height: 0;
+      transition: color 0.15s;
+    }
+    .btn-close:hover { color: var(--text); }
+
+    .sidebar-art {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+
+    .sidebar-body { padding: 1.25rem; overflow-y: auto; flex: 1; }
+
+    .track-name {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 1.1rem;
+      line-height: 1.3;
+      margin-bottom: 0.25rem;
+    }
+
+    .track-artist {
+      font-size: 0.82rem;
+      color: var(--accent);
+      margin-bottom: 0.2rem;
+    }
+
+    .track-album {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      margin-bottom: 1.25rem;
+    }
+
+    .audio-player {
+      margin-bottom: 1.25rem;
+    }
+
+    audio {
+      width: 100%;
+      height: 32px;
+      accent-color: var(--accent);
+    }
+
+    .no-preview {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      padding: 0.5rem 0;
+      margin-bottom: 1.25rem;
+    }
+
+    .btn-spotify {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      width: 100%;
+      padding: 0.65rem;
+      background: var(--accent);
+      color: #000;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.85rem;
+      text-decoration: none;
+      border-radius: 100px;
+      transition: background 0.15s;
+      margin-bottom: 1rem;
+    }
+    .btn-spotify:hover { background: #1ed760; }
+
+    .nearby-section { margin-top: 1.25rem; }
+    .nearby-title {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.75rem;
+    }
+
+    .nearby-track {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .nearby-track:last-child { border-bottom: none; }
+    .nearby-track:hover { opacity: 0.75; }
+
+    .nearby-track img {
+      width: 32px; height: 32px;
+      border-radius: 3px;
+      object-fit: cover;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    .nearby-name { font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .nearby-artist { font-size: 0.7rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ---- Legend ---- */
+    .legend {
+      position: fixed;
+      bottom: 1.25rem;
+      left: 1.25rem;
+      z-index: 10;
+      background: rgba(17,17,24,0.92);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem 1rem;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      line-height: 1;
+      backdrop-filter: blur(8px);
+    }
+
+    .legend-title {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      margin-bottom: 0.6rem;
+    }
+
+    .legend-items {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .legend-item:hover { opacity: 0.7; }
+
+    .legend-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .legend-label { color: var(--text); }
+
+    /* ---- Zoom controls ---- */
+    .zoom-controls {
+      position: fixed;
+      bottom: 1.25rem;
+      right: 1.25rem;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .btn-zoom {
+      width: 34px; height: 34px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 1.2rem;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.15s;
+    }
+    .btn-zoom:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ---- Loading overlay ---- */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 1rem;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      transition: opacity 0.5s;
+    }
+
+    #loading-overlay .spinner {
+      width: 32px; height: 32px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Compare modal ---- */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.75rem;
+      width: min(420px, 90vw);
+    }
+
+    .modal-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 1.05rem;
+      margin-bottom: 0.4rem;
+    }
+
+    .modal-sub {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      margin-bottom: 1.25rem;
+      line-height: 1.5;
+    }
+
+    .modal-input {
+      width: 100%;
+      padding: 0.6rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.82rem;
+      outline: none;
+      margin-bottom: 1rem;
+      transition: border-color 0.15s;
+    }
+    .modal-input:focus { border-color: var(--accent); }
+    .modal-input::placeholder { color: var(--text-dim); }
+
+    .modal-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
+
+    .btn-primary {
+      padding: 0.55rem 1.25rem;
+      background: var(--accent);
+      color: #000;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.82rem;
+      border: none;
+      border-radius: 100px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: #1ed760; }
+
+    .btn-secondary {
+      padding: 0.55rem 1.25rem;
+      background: transparent;
+      color: var(--text-dim);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.82rem;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-secondary:hover { color: var(--text); border-color: var(--text-dim); }
+
+    /* Compare badge */
+    .compare-badge {
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.85rem;
+      background: var(--surface);
+      border: 1px solid #4f46e5;
+      border-radius: 100px;
+      font-size: 0.78rem;
+      color: #a5b4fc;
+      cursor: pointer;
+    }
+    .compare-badge.visible { display: flex; }
+    .compare-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: #818cf8; flex-shrink: 0; }
+
+    /* ---- Legend track list mode ---- */
+    .legend {
+      max-height: min(72vh, 420px);
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+      min-width: 190px;
+    }
+    .legend::-webkit-scrollbar { width: 4px; }
+    .legend::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .legend-back {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding-bottom: 0.55rem;
+      margin-bottom: 0.55rem;
+      border-bottom: 1px solid var(--border);
+      transition: color 0.15s;
+    }
+    .legend-back:hover { color: var(--text); }
+
+    .legend-track-item {
+      padding: 0.28rem 0;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(42,42,53,0.5);
+      transition: opacity 0.15s;
+    }
+    .legend-track-item:last-child { border-bottom: none; }
+    .legend-track-item:hover { opacity: 0.7; }
+    .legend-track-name {
+      font-size: 0.72rem;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 165px;
+    }
+    .legend-track-artist {
+      font-size: 0.63rem;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 165px;
+    }
+
+    /* ---- Map mode toggle ---- */
+    .mode-toggle {
+      display: flex;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 3px;
+      gap: 2px;
+    }
+    .mode-btn {
+      padding: .28rem .75rem;
+      border: none;
+      border-radius: 100px;
+      background: transparent;
+      color: var(--text-dim);
+      font-family: 'DM Mono', monospace;
+      font-size: .7rem;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+      white-space: nowrap;
+    }
+    .mode-btn.active { background: var(--accent); color: #000; font-weight: 600; }
+
+    /* ---- Mood playlist selection modal ---- */
+    .mood-check-item {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      user-select: none;
+    }
+    .mood-check-item:hover { border-color: var(--text-dim); }
+    .mood-check-item.selected { border-color: var(--accent); background: var(--accent-glow); }
+    .mood-check-item input[type=checkbox] {
+      accent-color: var(--accent);
+      width: 15px; height: 15px;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .mood-check-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .mood-check-name { font-size: 0.82rem; color: var(--text); flex: 1; }
+    .mood-check-count { font-size: 0.7rem; color: var(--text-dim); }
+
+    /* ---- Mobile ---- */
+    @media (max-width: 600px) {
+      .legend { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <span>Loading your map…</span>
+</div>
+
+<canvas id="map-canvas"></canvas>
+
+<!-- Top bar -->
+<div class="topbar">
+  <a href="/" class="logo">SoundMap</a>
+  <div class="topbar-right">
+    <div class="user-badge" style="flex-direction:column;align-items:flex-start;gap:1px">
+      <div style="display:flex;align-items:center;gap:.5rem">
+        <div class="dot"></div>
+        <span id="user-name">Your Library</span>
+      </div>
+      <span id="user-badge-persona" style="display:none;font-size:.65rem;color:var(--text-dim);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:1.1rem"></span>
+    </div>
+    <div class="compare-badge" id="compare-badge">
+      <div class="dot"></div>
+      <span id="compare-name">Comparing</span>
+      <span style="opacity:0.5;margin-left:2px">✕</span>
+    </div>
+    <div class="mode-toggle" id="map-mode-toggle">
+      <button class="mode-btn active" data-mode="moods">Mood Zones</button>
+      <button class="mode-btn" data-mode="playlists">Playlists</button>
+    </div>
+    <button class="btn-icon" id="btn-merge" title="Merge playlists" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.4rem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
+        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+      </svg>
+      Merge
+    </button>
+    <button class="btn-icon" id="btn-save-moods" title="Save mood playlists to Spotify" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.4rem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
+        <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
+      </svg>
+      Save to Spotify
+    </button>
+    <button class="btn-icon" id="btn-compare" title="Compare with a friend">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+      </svg>
+      Compare
+    </button>
+    <button class="btn-icon" id="btn-refresh" title="Refresh map">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+      </svg>
+      Refresh
+    </button>
+  </div>
+</div>
+
+<!-- Search -->
+<div class="search-wrap">
+  <input type="text" class="search-input" id="search-input" placeholder="Search tracks…" autocomplete="off" />
+  <div class="search-results" id="search-results"></div>
+</div>
+
+<!-- Sidebar -->
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-header-title" id="sidebar-title">Track info</div>
+    <button class="btn-close" id="btn-close-sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+  <img id="sidebar-art" class="sidebar-art" src="" alt="" />
+  <div class="sidebar-body">
+    <div class="track-name" id="sidebar-name"></div>
+    <div class="track-artist" id="sidebar-artist"></div>
+    <div class="track-album" id="sidebar-album"></div>
+    <div id="sidebar-genre" style="font-size:0.72rem;margin-bottom:1.25rem;display:flex;align-items:center;gap:0.4rem"></div>
+    <div class="audio-player" id="audio-player"></div>
+    <a class="btn-spotify" id="sidebar-spotify-link" href="#" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+      </svg>
+      Open in Spotify
+    </a>
+    <div class="nearby-section">
+      <div class="nearby-title">Nearby tracks</div>
+      <div id="nearby-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Compare modal -->
+<div class="modal-backdrop" id="compare-modal">
+  <div class="modal">
+    <div class="modal-title">Compare with a friend</div>
+    <div class="modal-sub">
+      Ask your friend to visit this app, log in with their Spotify, then share
+      their user ID with you. Paste it below to overlay their library on your map.
+    </div>
+    <input class="modal-input" id="compare-input" placeholder="Friend's user ID…" autocomplete="off" />
+    <div id="compare-error" style="font-size:0.78rem;color:#f87171;margin-bottom:0.75rem;display:none"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="compare-cancel">Cancel</button>
+      <button class="btn-primary" id="compare-load">Load</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mood playlist selection modal -->
+<div class="modal-backdrop" id="mood-select-modal">
+  <div class="modal" style="width:min(480px,92vw)">
+    <div class="modal-title">Save mood playlists to Spotify</div>
+    <div class="modal-sub">Choose which mood zones to create as playlists. All tracks in a zone will be added.</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem">
+      <span style="font-size:0.72rem;color:var(--text-dim)" id="mood-select-hint">All selected</span>
+      <button class="btn-secondary" id="mood-toggle-all" style="padding:.3rem .75rem;font-size:.72rem">Deselect all</button>
+    </div>
+    <div id="mood-checkboxes" style="display:flex;flex-direction:column;gap:0.45rem;margin-bottom:1.25rem;max-height:280px;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="mood-select-cancel">Cancel</button>
+      <button class="btn-primary" id="mood-select-create">Create playlists</button>
+    </div>
+  </div>
+</div>
+
+<!-- Merge playlists modal -->
+<div class="modal-backdrop" id="merge-modal">
+  <div class="modal" style="width:min(500px,92vw)">
+    <div class="modal-title">Merge playlists</div>
+    <div class="modal-sub">Select two or more playlists to fuse into one new Spotify playlist. Duplicate tracks are removed and sorted by how much you've listened.</div>
+    <div id="merge-checkboxes" style="display:flex;flex-direction:column;gap:.4rem;max-height:240px;overflow-y:auto;margin-bottom:1rem;scrollbar-width:thin"></div>
+    <input class="modal-input" id="merge-name" placeholder="New playlist name…" autocomplete="off" />
+    <div id="merge-error" style="font-size:.78rem;color:#f87171;margin-bottom:.5rem;display:none"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="merge-cancel">Cancel</button>
+      <button class="btn-primary" id="merge-confirm" disabled>Select 2+ playlists</button>
+    </div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div class="legend" id="map-legend">
+  <div class="legend-title"><span id="legend-count">0</span> tracks</div>
+  <div class="legend-items" id="legend-items"></div>
+</div>
+
+<!-- Zoom controls -->
+<div class="zoom-controls">
+  <button class="btn-zoom" id="btn-zoom-in">+</button>
+  <button class="btn-zoom" id="btn-zoom-out">−</button>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Colours — mood-first
+// ---------------------------------------------------------------------------
+const COLOR_UNTAGGED = '#3a3a4a';
+
+const moodColors = {};
+const playlistColors = {};  // kept for legacy/sidebar use
+
+function buildMoodColors(moods) {
+  moods.forEach((name, i) => {
+    const hue = Math.round((i / Math.max(moods.length, 1)) * 360);
+    moodColors[name] = `hsl(${hue}, 65%, 58%)`;
+  });
+}
+
+function buildPlaylistColors(playlists) {
+  playlists.forEach((pl, i) => {
+    const hue = Math.round((i / Math.max(playlists.length, 1)) * 360);
+    playlistColors[pl.name] = `hsl(${hue}, 70%, 62%)`;
+  });
+}
+
+function pointColor(p) {
+  if (mapMode === 'playlists') {
+    const pl = (p.playlists || [])[0];
+    return playlistColors[pl] || COLOR_UNTAGGED;
+  }
+  return moodColors[p.mood] || COLOR_UNTAGGED;
+}
+
+function pointRadius(p, base) {
+  // play_score 1–9+ → scale radius logarithmically so the range feels natural
+  const s = Math.max(1, p.play_score || 1);
+  return base * (1 + Math.log(s) / Math.log(9) * 0.8);
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const userId = params.get('user');
+
+if (!userId) { location.href = '/'; }
+
+let mapData = null;
+let points = [];
+let transform = { x: 0, y: 0, scale: 1 };
+let selectedPoint = null;
+let hoveredPoint = null;
+let mapMode = 'moods'; // 'moods' | 'playlists'
+
+// ---------------------------------------------------------------------------
+// Canvas setup
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById('map-canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  if (mapData) { fitToView(); render(); }
+}
+window.addEventListener('resize', resize);
+
+// ---------------------------------------------------------------------------
+// Load data
+// ---------------------------------------------------------------------------
+async function loadMap() {
+  try {
+    const resp = await fetch(`/map/${userId}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    mapData = await resp.json();
+
+    // Set user name badge
+    if (mapData.display_name) {
+      document.getElementById('user-name').textContent = mapData.display_name;
+    }
+
+    // Normalise coords to canvas space
+    const raw = mapData.points;
+    const xs = raw.map(p => p.x);
+    const ys = raw.map(p => p.y);
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    const yMin = Math.min(...ys), yMax = Math.max(...ys);
+    const xRange = xMax - xMin || 1;
+    const yRange = yMax - yMin || 1;
+
+    points = raw.map(p => ({
+      ...p,
+      nx: (p.x - xMin) / xRange,
+      ny: (p.y - yMin) / yRange,
+    }));
+
+    buildMoodColors(mapData.moods || []);
+    buildPlaylistColors(mapData.playlists || []);
+    buildLegend();
+
+    // Show persona string under user badge if available
+    if (mapData.persona) {
+      const badge = document.getElementById('user-badge-persona');
+      if (badge) { badge.textContent = mapData.persona; badge.style.display = 'block'; }
+    }
+
+    resize();
+    fitToView();
+    render();
+
+    // Hide loading overlay
+    const overlay = document.getElementById('loading-overlay');
+    overlay.style.opacity = '0';
+    setTimeout(() => { overlay.style.display = 'none'; }, 500);
+
+  } catch (err) {
+    document.getElementById('loading-overlay').innerHTML =
+      `<div style="color:#f87171;font-size:.85rem;text-align:center;padding:2rem">
+        Failed to load map data.<br/><a href="/" style="color:var(--accent)">Try again</a>
+      </div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fit view
+// ---------------------------------------------------------------------------
+const PADDING = 80;
+
+function fitToView() {
+  const usableW = W - PADDING * 2;
+  const usableH = H - PADDING * 2;
+  transform.scale = Math.min(usableW, usableH);
+  transform.x = (W - transform.scale) / 2;
+  transform.y = (H - transform.scale) / 2;
+}
+
+// Map normalised → canvas
+function toCanvas(nx, ny) {
+  return {
+    cx: transform.x + nx * transform.scale,
+    cy: transform.y + ny * transform.scale,
+  };
+}
+
+// Map canvas → normalised
+function fromCanvas(cx, cy) {
+  return {
+    nx: (cx - transform.x) / transform.scale,
+    ny: (cy - transform.y) / transform.scale,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Render
+// ---------------------------------------------------------------------------
+const COLOR_HOVER  = '#ffffff';
+const COLOR_SEL    = '#1db954';
+const COMPARE_COLOR = '#818cf8';
+
+let activeGenreFilter = null;
+
+function render() {
+  if (comparePoints.length) { renderWithCompare(); return; }
+  _renderDots();
+}
+
+function _renderDots() {
+  ctx.clearRect(0, 0, W, H);
+
+  // ---- Cluster glow pre-pass (always behind dots) ----
+  if (hoveredPoint) {
+    const { cx: hx, cy: hy } = toCanvas(hoveredPoint.nx, hoveredPoint.ny);
+    const GLOW_R = 100;
+    // Large territory blob centered on cursor
+    const hslColor = pointColor(hoveredPoint);
+    const blobC = hslColor.startsWith('hsl(')
+      ? hslColor.replace('hsl(', 'hsla(').replace(')', ', 0.10)')
+      : 'rgba(255,255,255,0.07)';
+    const blob = ctx.createRadialGradient(hx, hy, 0, hx, hy, GLOW_R);
+    blob.addColorStop(0, blobC);
+    blob.addColorStop(1, 'transparent');
+    ctx.beginPath();
+    ctx.arc(hx, hy, GLOW_R, 0, Math.PI * 2);
+    ctx.fillStyle = blob;
+    ctx.fill();
+    // Individual halos on each nearby point
+    for (const p of points) {
+      const { cx, cy } = toCanvas(p.nx, p.ny);
+      const d = Math.hypot(cx - hx, cy - hy);
+      if (d > GLOW_R) continue;
+      const fade = (1 - d / GLOW_R) ** 1.5;
+      const a = (0.22 * fade).toFixed(3);
+      const pc = pointColor(p);
+      const haloC = pc.startsWith('hsl(')
+        ? pc.replace('hsl(', 'hsla(').replace(')', `, ${a})`)
+        : `rgba(255,255,255,${a})`;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 14);
+      grad.addColorStop(0, haloC);
+      grad.addColorStop(1, 'transparent');
+      ctx.beginPath();
+      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+  }
+
+  for (const p of points) {
+    const { cx, cy } = toCanvas(p.nx, p.ny);
+    const isSel = selectedPoint && selectedPoint.id === p.id;
+    const isHov = hoveredPoint && hoveredPoint.id === p.id;
+    const isDimmed = activeGenreFilter && (
+      mapMode === 'moods'
+        ? (p.mood || 'Uncharted') !== activeGenreFilter
+        : !(p.playlists || []).includes(activeGenreFilter)
+    );
+
+    const base = pointColor(p);
+    const r = isSel ? pointRadius(p, 6) : isHov ? pointRadius(p, 5) : pointRadius(p, 3.5);
+    const color = isSel ? COLOR_SEL : isHov ? COLOR_HOVER : base;
+    const alpha = isDimmed ? 0.12 : 1;
+
+    if (isSel) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(29,185,84,0.12)';
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    if ((isHov || isSel) && !isDimmed) {
+      const label = p.name.length > 28 ? p.name.slice(0, 26) + '…' : p.name;
+      ctx.font = '11px DM Mono, monospace';
+      const tw = ctx.measureText(label).width;
+      const lx = cx + r + 6;
+      const ly = cy - 4;
+      ctx.fillStyle = 'rgba(10,10,15,0.75)';
+      ctx.fillRect(lx - 3, ly - 11, tw + 8, 16);
+      ctx.fillStyle = isSel ? COLOR_SEL : COLOR_HOVER;
+      ctx.fillText(label, lx + 1, ly);
+    }
+  }
+}
+
+function buildLegend() {
+  if (mapMode === 'playlists') return buildPlaylistLegend();
+  return buildMoodLegend();
+}
+
+function buildMoodLegend() {
+  const counts = {};
+  for (const p of points) {
+    const key = p.mood || 'Uncharted';
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  _renderLegendItems(counts, k => moodColors[k] || COLOR_UNTAGGED, k => points.filter(p => (p.mood || 'Uncharted') === k));
+}
+
+function buildPlaylistLegend() {
+  const counts = {};
+  for (const p of points) {
+    const pls = p.playlists || [];
+    if (!pls.length) {
+      counts['Unsorted'] = (counts['Unsorted'] || 0) + 1;
+    } else {
+      // Count under primary playlist only so totals roughly equal track count
+      const primary = pls[0];
+      counts[primary] = (counts[primary] || 0) + 1;
+    }
+  }
+  _renderLegendItems(
+    counts,
+    k => k === 'Unsorted' ? COLOR_UNTAGGED : (playlistColors[k] || COLOR_UNTAGGED),
+    k => k === 'Unsorted'
+      ? points.filter(p => !(p.playlists || []).length)
+      : points.filter(p => (p.playlists || []).includes(k))
+  );
+}
+
+function _renderLegendItems(counts, colorFor, ptsFor) {
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const legend = document.getElementById('map-legend');
+  legend.innerHTML = `
+    <div class="legend-title"><span>${points.length}</span> tracks · ${mapMode === 'moods' ? 'moods' : 'playlists'}</div>
+    <div class="legend-items">
+      ${sorted.map(([label, count]) => {
+        const color = colorFor(label);
+        const safeLabel = label.replace(/"/g, '&quot;');
+        return `<div class="legend-item" data-key="${safeLabel}">
+          <div class="legend-dot" style="background:${color}"></div>
+          <span class="legend-label" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</span>
+          <span style="color:var(--text-dim);margin-left:auto;padding-left:.5rem">${count}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  legend.querySelectorAll('.legend-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const key = el.dataset.key;
+      if (activeGenreFilter === key) {
+        activeGenreFilter = null;
+        buildLegend();
+        render();
+        return;
+      }
+      activeGenreFilter = key;
+      const filteredPts = ptsFor(key);
+      showFilterTracks(key, colorFor(key), filteredPts);
+      panToCluster(filteredPts);
+      render();
+    });
+  });
+}
+
+function showFilterTracks(key, color, pts) {
+  const sorted = [...pts].sort((a, b) => (b.play_score || 1) - (a.play_score || 1));
+  const legend = document.getElementById('map-legend');
+  // Single-track playlists/moods (Unsorted) shouldn't expose the save button — Spotify needs ≥1 track
+  const showSave = pts.length > 0 && key !== 'Unsorted';
+
+  legend.innerHTML = `
+    <div class="legend-back" id="legend-back">
+      ← <span style="display:inline-flex;align-items:center;gap:.35rem">
+           <span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></span>
+           <span style="color:var(--text);font-weight:600">${key}</span>
+         </span>
+      <span style="color:var(--text-dim);margin-left:auto">${pts.length}</span>
+    </div>
+    ${showSave ? `
+      <button id="legend-save-zone" style="
+        width:100%;padding:.4rem .6rem;margin-bottom:.55rem;
+        background:transparent;border:1px solid var(--accent);
+        color:var(--accent);border-radius:6px;
+        font-family:'DM Mono',monospace;font-size:.68rem;
+        cursor:pointer;transition:background .15s">
+        → Save as Spotify playlist
+      </button>` : ''}
+    <div>
+      ${sorted.map(p => `
+        <div class="legend-track-item" data-id="${p.id}">
+          <div class="legend-track-name">${p.name}</div>
+          <div class="legend-track-artist">${p.artist}</div>
+        </div>`).join('')}
+    </div>`;
+
+  legend.querySelector('#legend-back').addEventListener('click', () => {
+    activeGenreFilter = null;
+    buildLegend();
+    render();
+  });
+
+  legend.querySelectorAll('.legend-track-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const pt = points.find(p => p.id === el.dataset.id);
+      if (pt) { panTo(pt); selectPoint(pt); }
+    });
+  });
+
+  const saveBtn = legend.querySelector('#legend-save-zone');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Creating…';
+      try {
+        // In mood mode the backend already filters by mood. In playlist mode,
+        // we send the playlist name as a "mood" — but the backend groups by p.mood,
+        // not by playlist. So in playlist mode use /merge-playlists with one playlist.
+        let resp, data;
+        if (mapMode === 'moods') {
+          resp = await fetch('/create-mood-playlists', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ moods: [key] }),
+          });
+          data = await resp.json();
+          if (!resp.ok) throw new Error(data.detail || 'Failed');
+          const c = (data.created || [])[0];
+          if (!c) throw new Error('Nothing created');
+          alert(`✓ Created "🗺 ${c.mood}" — ${c.track_count} tracks\n${c.url}`);
+        } else {
+          resp = await fetch('/merge-playlists', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_playlists: [key], new_name: `🗺 ${key}` }),
+          });
+          data = await resp.json();
+          if (!resp.ok) throw new Error(data.detail || 'Failed');
+          alert(`✓ Created "${data.name}" — ${data.track_count} tracks\n${data.url}`);
+        }
+        saveBtn.textContent = '✓ Saved';
+      } catch (err) {
+        alert(`Error: ${err.message}`);
+        saveBtn.disabled = false;
+        saveBtn.textContent = '→ Save as Spotify playlist';
+      }
+    });
+  }
+}
+
+// Pan & zoom to fit a cluster of points centered in the viewport
+function panToCluster(pts) {
+  if (!pts || pts.length === 0) return;
+  if (pts.length === 1) { panTo(pts[0]); return; }
+
+  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+  for (const p of pts) {
+    if (p.nx < xMin) xMin = p.nx;
+    if (p.nx > xMax) xMax = p.nx;
+    if (p.ny < yMin) yMin = p.ny;
+    if (p.ny > yMax) yMax = p.ny;
+  }
+  const cx = (xMin + xMax) / 2;
+  const cy = (yMin + yMax) / 2;
+  const w = Math.max(xMax - xMin, 0.04);
+  const h = Math.max(yMax - yMin, 0.04);
+
+  // Aim for the cluster to take ~55% of available viewport, with margins
+  const usableW = W - 360; // leave room for sidebar/legend
+  const usableH = H - 200;
+  const targetScale = Math.min(usableW / (w * 1.6), usableH / (h * 1.6));
+  // Clamp so we don't zoom absurdly far in/out
+  const newScale = Math.min(Math.max(targetScale, 250), 5000);
+
+  transform.scale = newScale;
+  transform.x = W / 2 - cx * newScale;
+  transform.y = H / 2 - cy * newScale;
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// Hit test
+// ---------------------------------------------------------------------------
+const HIT_RADIUS = 16;
+
+function hitTestOwn(cx, cy) {
+  let best = null, bestDist = HIT_RADIUS;
+  for (const p of points) {
+    const { cx: px, cy: py } = toCanvas(p.nx, p.ny);
+    const d = Math.hypot(cx - px, cy - py);
+    if (d < bestDist) { bestDist = d; best = p; }
+  }
+  return best;
+}
+
+function hitTest(cx, cy) {
+  return comparePoints.length ? hitTestAll(cx, cy) : hitTestOwn(cx, cy);
+}
+
+// ---------------------------------------------------------------------------
+// Interaction — mouse
+// ---------------------------------------------------------------------------
+let isDragging = false, dragStart = null, transformStart = null;
+
+canvas.addEventListener('mousedown', e => {
+  isDragging = false;
+  dragStart = { x: e.clientX, y: e.clientY };
+  transformStart = { ...transform };
+  canvas.classList.add('panning');
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (dragStart) {
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    if (Math.hypot(dx, dy) > 4) {
+      isDragging = true;
+      transform.x = transformStart.x + dx;
+      transform.y = transformStart.y + dy;
+      render();
+    }
+    return;
+  }
+
+  const hit = hitTest(e.clientX, e.clientY);
+  if (hit !== hoveredPoint) {
+    hoveredPoint = hit;
+    canvas.style.cursor = hit ? 'pointer' : 'grab';
+    render();
+  }
+});
+
+canvas.addEventListener('mouseup', e => {
+  canvas.classList.remove('panning');
+  if (!isDragging) {
+    const hit = hitTest(e.clientX, e.clientY);
+    if (hit) selectPoint(hit);
+  }
+  dragStart = null;
+  transformStart = null;
+  isDragging = false;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  dragStart = null; isDragging = false;
+  canvas.classList.remove('panning');
+});
+
+// Wheel zoom
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.88 : 1.14;
+  const cx = e.clientX, cy = e.clientY;
+  const nx = (cx - transform.x) / transform.scale;
+  const ny = (cy - transform.y) / transform.scale;
+  transform.scale *= factor;
+  transform.x = cx - nx * transform.scale;
+  transform.y = cy - ny * transform.scale;
+  render();
+}, { passive: false });
+
+// Touch
+let lastTouchDist = null;
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    dragStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    transformStart = { ...transform };
+    isDragging = false;
+  }
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    lastTouchDist = Math.hypot(dx, dy);
+    transformStart = { ...transform };
+  }
+}, { passive: true });
+
+canvas.addEventListener('touchmove', e => {
+  if (e.touches.length === 1 && dragStart) {
+    const dx = e.touches[0].clientX - dragStart.x;
+    const dy = e.touches[0].clientY - dragStart.y;
+    if (Math.hypot(dx, dy) > 4) isDragging = true;
+    transform.x = transformStart.x + dx;
+    transform.y = transformStart.y + dy;
+    render();
+  }
+  if (e.touches.length === 2 && lastTouchDist !== null) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.hypot(dx, dy);
+    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    const factor = dist / lastTouchDist;
+    const nx = (midX - transform.x) / transform.scale;
+    const ny = (midY - transform.y) / transform.scale;
+    transform.scale = transformStart.scale * factor;
+    transform.x = midX - nx * transform.scale;
+    transform.y = midY - ny * transform.scale;
+    lastTouchDist = dist;
+    transformStart = { ...transform };
+    render();
+  }
+}, { passive: true });
+
+canvas.addEventListener('touchend', e => {
+  if (e.changedTouches.length === 1 && !isDragging) {
+    const t = e.changedTouches[0];
+    const hit = hitTest(t.clientX, t.clientY);
+    if (hit) selectPoint(hit);
+  }
+  dragStart = null; lastTouchDist = null; isDragging = false;
+});
+
+// ---------------------------------------------------------------------------
+// Zoom buttons
+// ---------------------------------------------------------------------------
+function zoomAround(factor) {
+  const cx = W / 2, cy = H / 2;
+  const nx = (cx - transform.x) / transform.scale;
+  const ny = (cy - transform.y) / transform.scale;
+  transform.scale *= factor;
+  transform.x = cx - nx * transform.scale;
+  transform.y = cy - ny * transform.scale;
+  render();
+}
+
+document.getElementById('btn-zoom-in').addEventListener('click', () => zoomAround(1.25));
+document.getElementById('btn-zoom-out').addEventListener('click', () => zoomAround(0.8));
+
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+function selectPoint(p) {
+  selectedPoint = p;
+  render();
+  showSidebar(p);
+}
+
+function dist2(a, b) {
+  return (a.nx - b.nx) ** 2 + (a.ny - b.ny) ** 2;
+}
+
+function showSidebar(p) {
+  document.getElementById('sidebar-title').textContent = 'Track info';
+  document.getElementById('sidebar-name').textContent = p.name;
+  document.getElementById('sidebar-artist').textContent = p.artist;
+  document.getElementById('sidebar-album').textContent = p.album;
+  const genreEl = document.getElementById('sidebar-genre');
+  const mood = p.mood;
+  const moodColor = moodColors[mood] || COLOR_UNTAGGED;
+  const playlists = p.playlists || [];
+  genreEl.innerHTML = mood && mood !== 'Uncharted'
+    ? `<span style="width:8px;height:8px;border-radius:50%;background:${moodColor};display:inline-block;flex-shrink:0;margin-right:6px"></span>` +
+      `<span style="color:var(--text)">${mood}</span>` +
+      (playlists.length ? `<span style="color:var(--text-dim);font-size:.75rem;margin-left:6px">from: ${playlists.join(', ')}</span>` : '')
+    : (playlists.length ? `<span style="color:var(--text-dim)">${playlists.join(', ')}</span>` : '');
+
+  const art = document.getElementById('sidebar-art');
+  art.src = p.album_art || '';
+  art.style.display = p.album_art ? 'block' : 'none';
+
+  const audioEl = document.getElementById('audio-player');
+  if (p.preview_url) {
+    audioEl.innerHTML = `<audio controls src="${p.preview_url}"></audio>`;
+  } else {
+    audioEl.innerHTML = `<div class="no-preview">No preview available</div>`;
+  }
+
+  const link = document.getElementById('sidebar-spotify-link');
+  link.href = p.external_url || `https://open.spotify.com/track/${p.id}`;
+
+  // Nearby tracks
+  const nearby = points
+    .filter(q => q.id !== p.id)
+    .sort((a, b) => dist2(a, p) - dist2(b, p))
+    .slice(0, 6);
+
+  const list = document.getElementById('nearby-list');
+  list.innerHTML = nearby.map(q => `
+    <div class="nearby-track" data-id="${q.id}">
+      <img src="${q.album_art || ''}" alt="" onerror="this.style.display='none'" />
+      <div>
+        <div class="nearby-name">${q.name}</div>
+        <div class="nearby-artist">${q.artist}</div>
+      </div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.nearby-track').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      const pt = points.find(p => p.id === id);
+      if (pt) {
+        panTo(pt);
+        selectPoint(pt);
+      }
+    });
+  });
+
+  document.getElementById('sidebar').classList.add('open');
+}
+
+function panTo(p) {
+  const { cx, cy } = toCanvas(p.nx, p.ny);
+  transform.x += W / 2 - cx;
+  transform.y += H / 2 - cy;
+  render();
+}
+
+document.getElementById('btn-close-sidebar').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.remove('open');
+  selectedPoint = null;
+  render();
+});
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+const searchInput = document.getElementById('search-input');
+const searchResults = document.getElementById('search-results');
+
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim().toLowerCase();
+  if (!q) { searchResults.style.display = 'none'; return; }
+
+  const hits = points.filter(p =>
+    p.name.toLowerCase().includes(q) || p.artist.toLowerCase().includes(q)
+  ).slice(0, 8);
+
+  if (!hits.length) { searchResults.style.display = 'none'; return; }
+
+  searchResults.innerHTML = hits.map(p => `
+    <div class="search-result" data-id="${p.id}">
+      <img src="${p.album_art || ''}" alt="" onerror="this.style.display='none'" />
+      <div class="search-result-text">
+        <div class="search-result-name">${p.name}</div>
+        <div class="search-result-artist">${p.artist}</div>
+      </div>
+    </div>
+  `).join('');
+
+  searchResults.style.display = 'block';
+
+  searchResults.querySelectorAll('.search-result').forEach(el => {
+    el.addEventListener('click', () => {
+      const pt = points.find(p => p.id === el.dataset.id);
+      if (pt) { panTo(pt); selectPoint(pt); }
+      searchResults.style.display = 'none';
+      searchInput.value = '';
+    });
+  });
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap')) {
+    searchResults.style.display = 'none';
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Save mood playlists to Spotify — selection modal
+// ---------------------------------------------------------------------------
+document.getElementById('btn-save-moods').addEventListener('click', () => {
+  // Build mood → track count
+  const counts = {};
+  for (const p of points) {
+    const key = p.mood || 'Uncharted';
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+  const container = document.getElementById('mood-checkboxes');
+  container.innerHTML = sorted.map(([mood, count]) => {
+    const color = moodColors[mood] || COLOR_UNTAGGED;
+    return `
+      <label class="mood-check-item selected" data-mood="${mood}">
+        <input type="checkbox" checked value="${mood}" />
+        <div class="mood-check-dot" style="background:${color}"></div>
+        <span class="mood-check-name">${mood}</span>
+        <span class="mood-check-count">${count} tracks</span>
+      </label>`;
+  }).join('');
+
+  container.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('.mood-check-item').classList.toggle('selected', cb.checked);
+      _updateMoodCreateBtn();
+    });
+  });
+
+  _updateMoodCreateBtn();
+  document.getElementById('mood-select-modal').classList.add('open');
+});
+
+function _updateMoodCreateBtn() {
+  const checked = document.querySelectorAll('#mood-checkboxes input:checked');
+  const total = document.querySelectorAll('#mood-checkboxes input').length;
+  const btn = document.getElementById('mood-select-create');
+  const hint = document.getElementById('mood-select-hint');
+  const toggleBtn = document.getElementById('mood-toggle-all');
+
+  if (checked.length === 0) {
+    btn.textContent = 'Select at least one';
+    btn.disabled = true;
+    hint.textContent = 'None selected';
+    toggleBtn.textContent = 'Select all';
+  } else {
+    btn.textContent = `Create ${checked.length} playlist${checked.length !== 1 ? 's' : ''}`;
+    btn.disabled = false;
+    hint.textContent = checked.length === total ? 'All selected' : `${checked.length} of ${total} selected`;
+    toggleBtn.textContent = checked.length === total ? 'Deselect all' : 'Select all';
+  }
+}
+
+document.getElementById('mood-toggle-all').addEventListener('click', () => {
+  const checkboxes = document.querySelectorAll('#mood-checkboxes input');
+  const allChecked = [...checkboxes].every(cb => cb.checked);
+  checkboxes.forEach(cb => {
+    cb.checked = !allChecked;
+    cb.closest('.mood-check-item').classList.toggle('selected', !allChecked);
+  });
+  _updateMoodCreateBtn();
+});
+
+document.getElementById('mood-select-cancel').addEventListener('click', () => {
+  document.getElementById('mood-select-modal').classList.remove('open');
+});
+
+document.getElementById('mood-select-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+document.getElementById('mood-select-create').addEventListener('click', async () => {
+  const selected = [...document.querySelectorAll('#mood-checkboxes input:checked')].map(cb => cb.value);
+  if (!selected.length) return;
+
+  const btn = document.getElementById('mood-select-create');
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+
+  try {
+    const resp = await fetch('/create-mood-playlists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ moods: selected }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed');
+
+    document.getElementById('mood-select-modal').classList.remove('open');
+
+    const lines = data.created.map(p => `🗺 ${p.mood}  —  ${p.track_count} tracks`).join('\n');
+    alert(`Created ${data.created.length} playlist${data.created.length !== 1 ? 's' : ''} in your Spotify:\n\n${lines}`);
+
+    const saveBtn = document.getElementById('btn-save-moods');
+    saveBtn.textContent = '✓ Saved';
+    saveBtn.disabled = true;
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+    btn.disabled = false;
+    _updateMoodCreateBtn();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Map mode toggle (Mood Zones ↔ Playlists)
+// ---------------------------------------------------------------------------
+document.getElementById('map-mode-toggle').addEventListener('click', e => {
+  const btn = e.target.closest('.mode-btn');
+  if (!btn || btn.dataset.mode === mapMode) return;
+  mapMode = btn.dataset.mode;
+  document.querySelectorAll('#map-mode-toggle .mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mapMode));
+  activeGenreFilter = null;
+  buildLegend();
+  render();
+});
+
+// ---------------------------------------------------------------------------
+// Merge playlists modal
+// ---------------------------------------------------------------------------
+document.getElementById('btn-merge').addEventListener('click', () => {
+  const playlists = (mapData && mapData.playlists) || [];
+  if (!playlists.length) {
+    alert('No playlists found in your map data.');
+    return;
+  }
+
+  // Compute track counts per playlist
+  const counts = {};
+  for (const p of points) {
+    for (const pl of (p.playlists || [])) {
+      counts[pl] = (counts[pl] || 0) + 1;
+    }
+  }
+
+  const sorted = [...playlists].sort((a, b) => (counts[b.name] || 0) - (counts[a.name] || 0));
+  const container = document.getElementById('merge-checkboxes');
+  container.innerHTML = sorted.map(pl => {
+    const color = playlistColors[pl.name] || COLOR_UNTAGGED;
+    const ct = counts[pl.name] || 0;
+    const safe = pl.name.replace(/"/g, '&quot;');
+    return `
+      <label class="mood-check-item" data-name="${safe}">
+        <input type="checkbox" value="${safe}" />
+        <div class="mood-check-dot" style="background:${color}"></div>
+        <span class="mood-check-name">${pl.name}</span>
+        <span class="mood-check-count">${ct} tracks</span>
+      </label>`;
+  }).join('');
+
+  container.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('.mood-check-item').classList.toggle('selected', cb.checked);
+      _updateMergeBtn();
+    });
+  });
+
+  document.getElementById('merge-name').value = '';
+  document.getElementById('merge-error').style.display = 'none';
+  _updateMergeBtn();
+  document.getElementById('merge-modal').classList.add('open');
+  setTimeout(() => document.getElementById('merge-name').focus(), 80);
+});
+
+function _updateMergeBtn() {
+  const checked = document.querySelectorAll('#merge-checkboxes input:checked');
+  const btn = document.getElementById('merge-confirm');
+  if (checked.length < 2) {
+    btn.textContent = 'Select 2+ playlists';
+    btn.disabled = true;
+    // Auto-suggest a name when 2+ playlists checked
+    return;
+  }
+  const nameInput = document.getElementById('merge-name');
+  if (!nameInput.value.trim()) {
+    const names = [...checked].map(cb => cb.value).slice(0, 2);
+    nameInput.placeholder = `e.g. ${names.join(' + ')}`;
+  }
+  btn.textContent = `Merge ${checked.length} playlists`;
+  btn.disabled = false;
+}
+
+document.getElementById('merge-cancel').addEventListener('click', () => {
+  document.getElementById('merge-modal').classList.remove('open');
+});
+
+document.getElementById('merge-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+document.getElementById('merge-confirm').addEventListener('click', async () => {
+  const selected = [...document.querySelectorAll('#merge-checkboxes input:checked')].map(cb => cb.value);
+  const newName = document.getElementById('merge-name').value.trim();
+  const errEl = document.getElementById('merge-error');
+  errEl.style.display = 'none';
+
+  if (selected.length < 2) {
+    errEl.textContent = 'Select at least two playlists.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (!newName) {
+    errEl.textContent = 'Give the new playlist a name.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('merge-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Merging…';
+
+  try {
+    const resp = await fetch('/merge-playlists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_playlists: selected, new_name: newName }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed');
+
+    document.getElementById('merge-modal').classList.remove('open');
+    alert(`✓ Created "${data.name}"\n${data.track_count} tracks merged from ${selected.length} playlists.\n\n${data.url}`);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = `Merge ${selected.length} playlists`;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Refresh button
+// ---------------------------------------------------------------------------
+document.getElementById('btn-refresh').addEventListener('click', () => {
+  if (confirm('Rebuild your map with your latest Spotify library? This takes ~2 minutes.')) {
+    location.href = '/auth/login';
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Compare
+// ---------------------------------------------------------------------------
+let comparePoints = [];
+let compareDisplayName = '';
+
+function renderWithCompare() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Draw your points
+  for (const p of points) {
+    const { cx, cy } = toCanvas(p.nx, p.ny);
+    const isSel = selectedPoint && selectedPoint.id === p.id && selectedPoint._source === 'mine';
+    const isHov = hoveredPoint && hoveredPoint.id === p.id && hoveredPoint._source === 'mine';
+    const isDimmed = activeGenreFilter && (
+      mapMode === 'moods'
+        ? (p.mood || 'Uncharted') !== activeGenreFilter
+        : !(p.playlists || []).includes(activeGenreFilter)
+    );
+    const base = pointColor(p);
+    const r = isSel ? pointRadius(p, 6) : isHov ? pointRadius(p, 5) : pointRadius(p, 3.5);
+    const color = isSel ? COLOR_SEL : isHov ? COLOR_HOVER : base;
+
+    if (isSel) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(29,185,84,0.12)';
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = isDimmed ? 0.12 : 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    if ((isHov || isSel) && !isDimmed) drawLabel(cx, cy, r, p.name, isSel ? COLOR_SEL : COLOR_HOVER);
+  }
+
+  // Draw friend's points as hollow circles
+  for (const p of comparePoints) {
+    const { cx, cy } = toCanvas(p.nx, p.ny);
+    const isSel = selectedPoint && selectedPoint.id === p.id && selectedPoint._source === 'friend';
+    const isHov = hoveredPoint && hoveredPoint.id === p.id && hoveredPoint._source === 'friend';
+    const r = isSel ? pointRadius(p, 6) : isHov ? pointRadius(p, 5) : pointRadius(p, 3.5);
+
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = COMPARE_COLOR;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    if (isHov || isSel) drawLabel(cx, cy, r, p.name, COMPARE_COLOR);
+  }
+}
+
+function drawLabel(cx, cy, r, name, color) {
+  const label = name.length > 28 ? name.slice(0, 26) + '…' : name;
+  ctx.font = '11px DM Mono, monospace';
+  const tw = ctx.measureText(label).width;
+  const lx = cx + r + 6, ly = cy - 4;
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(10,10,15,0.75)';
+  ctx.fillRect(lx - 3, ly - 11, tw + 8, 16);
+  ctx.fillStyle = color;
+  ctx.fillText(label, lx + 1, ly);
+}
+
+function hitTestAll(cx, cy) {
+  let best = null, bestDist = HIT_RADIUS;
+
+  for (const p of points) {
+    const { cx: px, cy: py } = toCanvas(p.nx, p.ny);
+    const d = Math.hypot(cx - px, cy - py);
+    if (d < bestDist) { bestDist = d; best = { ...p, _source: 'mine' }; }
+  }
+  for (const p of comparePoints) {
+    const { cx: px, cy: py } = toCanvas(p.nx, p.ny);
+    const d = Math.hypot(cx - px, cy - py);
+    if (d < bestDist) { bestDist = d; best = { ...p, _source: 'friend' }; }
+  }
+  return best;
+}
+
+function normaliseComparePoints(raw) {
+  // Reuse the same normalisation space as the primary map so coordinates align
+  const allPts = [...points, ...raw];
+  const xs = allPts.map(p => p.x ?? p.nx);
+  const ys = allPts.map(p => p.y ?? p.ny);
+  // primary points are already normalised (nx/ny). raw compare points have x/y
+  const xMin = Math.min(...raw.map(p => p.x));
+  const xMax = Math.max(...raw.map(p => p.x));
+  const yMin = Math.min(...raw.map(p => p.y));
+  const yMax = Math.max(...raw.map(p => p.y));
+  const xRange = xMax - xMin || 1;
+  const yRange = yMax - yMin || 1;
+  return raw.map(p => ({ ...p, nx: (p.x - xMin) / xRange, ny: (p.y - yMin) / yRange }));
+}
+
+async function loadCompare(friendId) {
+  const errEl = document.getElementById('compare-error');
+  errEl.style.display = 'none';
+
+  try {
+    const resp = await fetch(`/map/${encodeURIComponent(friendId)}`);
+    if (resp.status === 404) throw new Error("No map found for that user ID — have they logged in yet?");
+    if (!resp.ok) throw new Error(`Server error (${resp.status})`);
+    const data = await resp.json();
+
+    comparePoints = normaliseComparePoints(data.points);
+    compareDisplayName = data.display_name || friendId;
+
+    // Switch render + hit functions to compare-aware versions
+    document.getElementById('compare-modal').classList.remove('open');
+    document.getElementById('compare-badge').classList.add('visible');
+    document.getElementById('compare-name').textContent = compareDisplayName;
+
+    render();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+
+// Compare modal controls
+document.getElementById('btn-compare').addEventListener('click', () => {
+  document.getElementById('compare-input').value = '';
+  document.getElementById('compare-error').style.display = 'none';
+  document.getElementById('compare-modal').classList.add('open');
+  setTimeout(() => document.getElementById('compare-input').focus(), 50);
+});
+
+document.getElementById('compare-cancel').addEventListener('click', () => {
+  document.getElementById('compare-modal').classList.remove('open');
+});
+
+document.getElementById('compare-load').addEventListener('click', () => {
+  const id = document.getElementById('compare-input').value.trim();
+  if (id) loadCompare(id);
+});
+
+document.getElementById('compare-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const id = e.target.value.trim();
+    if (id) loadCompare(id);
+  }
+});
+
+document.getElementById('compare-badge').addEventListener('click', () => {
+  comparePoints = [];
+  compareDisplayName = '';
+  document.getElementById('compare-badge').classList.remove('visible');
+  render();
+});
+
+// Close modal on backdrop click
+document.getElementById('compare-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+resize();
+loadMap();
+</script>
+</body>
+</html>

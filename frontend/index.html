@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SoundMap — Your music as a landscape</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --bg2: #111118;
+      --surface: #18181f;
+      --border: #2a2a35;
+      --text: #e8e8f0;
+      --text-dim: #888899;
+      --accent: #1db954;
+      --accent-dim: #158a3e;
+      --accent-glow: rgba(29, 185, 84, 0.15);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      overflow: hidden;
+    }
+
+    /* ---- Background canvas ---- */
+    #bg-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    /* ---- Layout ---- */
+    .page {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Wordmark ---- */
+    .wordmark {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: clamp(3rem, 10vw, 6rem);
+      letter-spacing: -0.03em;
+      line-height: 1;
+      background: linear-gradient(135deg, #fff 40%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 1rem;
+    }
+
+    .tagline {
+      font-family: 'Syne', sans-serif;
+      font-weight: 400;
+      font-size: clamp(1.1rem, 3vw, 1.5rem);
+      color: var(--text-dim);
+      margin-bottom: 2rem;
+      letter-spacing: 0.01em;
+    }
+
+    .description {
+      max-width: 480px;
+      font-size: 0.9rem;
+      line-height: 1.7;
+      color: var(--text-dim);
+      margin-bottom: 3rem;
+    }
+
+    /* ---- CTA ---- */
+    .cta-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.25rem;
+    }
+
+    .btn-connect {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 2.5rem;
+      background: var(--accent);
+      color: #000;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 1.05rem;
+      letter-spacing: 0.02em;
+      text-decoration: none;
+      border-radius: 100px;
+      transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+      box-shadow: 0 0 32px var(--accent-glow);
+    }
+
+    .btn-connect:hover {
+      background: #1ed760;
+      transform: translateY(-2px);
+      box-shadow: 0 0 48px rgba(29, 185, 84, 0.3);
+    }
+
+    .btn-connect:active { transform: translateY(0); }
+
+    .btn-connect svg { flex-shrink: 0; }
+
+    .demo-link {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .demo-link:hover { color: var(--text); border-color: var(--border); }
+
+    /* ---- Error banner ---- */
+    .error-banner {
+      display: none;
+      margin-bottom: 1.5rem;
+      padding: 0.75rem 1.25rem;
+      background: rgba(220, 50, 50, 0.1);
+      border: 1px solid rgba(220, 50, 50, 0.3);
+      border-radius: 8px;
+      color: #f87171;
+      font-size: 0.85rem;
+    }
+
+    /* ---- Footer ---- */
+    .footer {
+      position: fixed;
+      bottom: 1.5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      opacity: 0.5;
+      white-space: nowrap;
+    }
+
+    /* ---- Mobile ---- */
+    @media (max-width: 480px) {
+      .btn-connect { padding: 0.85rem 2rem; font-size: 0.95rem; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<div class="page">
+  <div class="wordmark">SoundMap</div>
+  <div class="tagline">Your music as a landscape.</div>
+
+  <p class="description">
+    Every track in your Spotify library gets a position in space — placed by
+    how it sounds, not how it's labelled. Similar music clusters together.
+    Genres form territories. Explore the shape of your taste.
+  </p>
+
+  <div id="error-banner" class="error-banner"></div>
+
+  <div class="cta-group">
+    <a href="/auth/login" class="btn-connect">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+      </svg>
+      Connect Spotify
+    </a>
+    <a href="/soundmap-demo.html" class="demo-link" target="_blank">See a demo first →</a>
+  </div>
+</div>
+
+<div class="footer">soundmap &nbsp;·&nbsp; powered by Spotify</div>
+
+<script>
+  // Show error from query param
+  const params = new URLSearchParams(location.search);
+  const err = params.get('error');
+  if (err) {
+    const msgs = {
+      spotify_denied: 'Spotify login was cancelled.',
+      session_expired: 'Session expired — please try again.',
+      token_exchange_failed: 'Could not connect to Spotify. Please try again.',
+      profile_fetch_failed: 'Could not load your Spotify profile. Please try again.',
+    };
+    const banner = document.getElementById('error-banner');
+    banner.textContent = msgs[err] || 'Something went wrong. Please try again.';
+    banner.style.display = 'block';
+  }
+
+  // ---- Animated background: floating dots ----
+  const canvas = document.getElementById('bg-canvas');
+  const ctx = canvas.getContext('2d');
+
+  const ACCENT = '29, 185, 84';
+  const WHITE = '200, 200, 220';
+
+  let dots = [];
+  let W, H;
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+
+  function randomDot() {
+    return {
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: 1 + Math.random() * 2.5,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      color: Math.random() < 0.15 ? ACCENT : WHITE,
+      alpha: 0.3 + Math.random() * 0.5,
+    };
+  }
+
+  function init() {
+    resize();
+    const count = Math.floor((W * H) / 8000);
+    dots = Array.from({ length: count }, randomDot);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw edges between nearby dots
+    for (let i = 0; i < dots.length; i++) {
+      for (let j = i + 1; j < dots.length; j++) {
+        const dx = dots[i].x - dots[j].x;
+        const dy = dots[i].y - dots[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 120) {
+          const alpha = (1 - dist / 120) * 0.08;
+          ctx.strokeStyle = `rgba(${WHITE}, ${alpha})`;
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(dots[i].x, dots[i].y);
+          ctx.lineTo(dots[j].x, dots[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Draw dots
+    for (const d of dots) {
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${d.color}, ${d.alpha})`;
+      ctx.fill();
+
+      d.x += d.vx;
+      d.y += d.vy;
+      if (d.x < -10) d.x = W + 10;
+      if (d.x > W + 10) d.x = -10;
+      if (d.y < -10) d.y = H + 10;
+      if (d.y > H + 10) d.y = -10;
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', () => { resize(); });
+  init();
+  draw();
+</script>
+</body>
+</html>

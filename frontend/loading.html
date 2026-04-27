@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SoundMap — Building your map…</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --bg2: #111118;
+      --surface: #18181f;
+      --border: #2a2a35;
+      --text: #e8e8f0;
+      --text-dim: #888899;
+      --accent: #1db954;
+      --accent-dim: #158a3e;
+      --accent-glow: rgba(29, 185, 84, 0.15);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      overflow: hidden;
+    }
+
+    #bg-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.2;
+      filter: blur(2px);
+      pointer-events: none;
+    }
+
+    .page {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    .wordmark {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1.5rem;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #fff 40%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 3rem;
+      opacity: 0.7;
+    }
+
+    .status-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2.5rem 3rem;
+      width: min(480px, 90vw);
+    }
+
+    .status-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 1.3rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .status-message {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      min-height: 1.4em;
+      margin-bottom: 2rem;
+      transition: opacity 0.3s;
+    }
+
+    /* Progress bar */
+    .progress-track {
+      height: 4px;
+      background: var(--border);
+      border-radius: 100px;
+      overflow: hidden;
+      margin-bottom: 0.75rem;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 100px;
+      width: 0%;
+      transition: width 0.6s ease;
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    .progress-label {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2rem;
+    }
+
+    /* ETA */
+    .eta {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Error state */
+    .error-box {
+      display: none;
+      background: rgba(220, 50, 50, 0.08);
+      border: 1px solid rgba(220, 50, 50, 0.25);
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-top: 1.5rem;
+      font-size: 0.82rem;
+      color: #f87171;
+      line-height: 1.6;
+    }
+
+    .btn-retry {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.6rem 1.5rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.82rem;
+      border-radius: 100px;
+      text-decoration: none;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .btn-retry:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Spinner dots */
+    .dots {
+      display: inline-flex;
+      gap: 5px;
+      margin-bottom: 1.5rem;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes pulse {
+      0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+      40% { transform: scale(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<div class="page">
+  <div class="wordmark">SoundMap</div>
+
+  <div class="status-card">
+    <div class="dots">
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
+
+    <div class="status-title" id="status-title">Building your map…</div>
+    <div class="status-message" id="status-message">Starting up…</div>
+
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+    <div class="progress-label">
+      <span id="progress-pct">0%</span>
+      <span id="eta-text"></span>
+    </div>
+
+    <div class="eta" id="eta-note">
+      Audio features: ~2 min &nbsp;·&nbsp; CLAP embeddings: ~20 min
+    </div>
+
+    <div class="error-box" id="error-box">
+      <strong>Something went wrong.</strong><br />
+      <span id="error-detail"></span>
+      <br />
+      <a href="/" class="btn-retry">Try Again</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const jobId = params.get('job');
+  const userId = params.get('user');
+
+  if (!jobId) {
+    location.href = '/';
+  }
+
+  const fillEl = document.getElementById('progress-fill');
+  const pctEl = document.getElementById('progress-pct');
+  const msgEl = document.getElementById('status-message');
+  const titleEl = document.getElementById('status-title');
+  const etaEl = document.getElementById('eta-text');
+  const errorBox = document.getElementById('error-box');
+  const errorDetail = document.getElementById('error-detail');
+
+  let startTime = Date.now();
+  let lastPct = 0;
+
+  function updateETA(pct) {
+    if (pct <= 0 || pct >= 100) { etaEl.textContent = ''; return; }
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate = pct / elapsed; // pct per second
+    const remaining = (100 - pct) / rate;
+    if (remaining < 60) {
+      etaEl.textContent = `~${Math.ceil(remaining)}s left`;
+    } else {
+      etaEl.textContent = `~${Math.ceil(remaining / 60)}m left`;
+    }
+  }
+
+  async function poll() {
+    try {
+      const resp = await fetch(`/status/${jobId}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const job = await resp.json();
+
+      const pct = job.progress || 0;
+      fillEl.style.width = pct + '%';
+      pctEl.textContent = pct + '%';
+      msgEl.textContent = job.message || '…';
+      updateETA(pct);
+      lastPct = pct;
+
+      if (job.status === 'done') {
+        titleEl.textContent = 'Map ready!';
+        msgEl.textContent = 'Redirecting…';
+        fillEl.style.width = '100%';
+        pctEl.textContent = '100%';
+        etaEl.textContent = '';
+        setTimeout(() => {
+          location.href = `/map.html?user=${userId}`;
+        }, 800);
+        return;
+      }
+
+      if (job.status === 'error') {
+        titleEl.textContent = 'Processing failed';
+        errorDetail.textContent = job.error || 'Unknown error.';
+        errorBox.style.display = 'block';
+        document.querySelector('.dots').style.display = 'none';
+        return;
+      }
+
+      setTimeout(poll, 2000);
+    } catch (err) {
+      console.error('Poll error:', err);
+      setTimeout(poll, 3000);
+    }
+  }
+
+  poll();
+
+  // ---- Background canvas (same as index.html) ----
+  const canvas = document.getElementById('bg-canvas');
+  const ctx = canvas.getContext('2d');
+  const ACCENT = '29, 185, 84';
+  const WHITE = '200, 200, 220';
+  let dots = [];
+  let W, H;
+
+  function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+
+  function randomDot() {
+    return {
+      x: Math.random() * W, y: Math.random() * H,
+      r: 1 + Math.random() * 3,
+      vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
+      color: Math.random() < 0.2 ? ACCENT : WHITE,
+      alpha: 0.3 + Math.random() * 0.5,
+    };
+  }
+
+  function init() {
+    resize();
+    dots = Array.from({ length: Math.floor((W * H) / 6000) }, randomDot);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    for (const d of dots) {
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${d.color}, ${d.alpha})`;
+      ctx.fill();
+      d.x += d.vx; d.y += d.vy;
+      if (d.x < -10) d.x = W + 10;
+      if (d.x > W + 10) d.x = -10;
+      if (d.y < -10) d.y = H + 10;
+      if (d.y > H + 10) d.y = -10;
+    }
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', resize);
+  init(); draw();
+</script>
+</body>
+</html>
