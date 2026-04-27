@@ -1250,8 +1250,10 @@ function buildMoodLegend() {
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || 'Failed');
         localStorage.setItem('sm_ai_key_anthropic', key);
-        // Apply updated points and re-render
-        points = data.points;
+        // Patch only the mood field — preserve nx/ny so the map stays visible
+        const moodMap = {};
+        for (const p of data.points) moodMap[p.id] = p.mood;
+        for (const p of points) { if (moodMap[p.id] !== undefined) p.mood = moodMap[p.id]; }
         if (data.persona) {
           const badge = document.getElementById('user-badge-persona');
           badge.textContent = data.persona;

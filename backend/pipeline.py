@@ -674,13 +674,13 @@ def _llm_mood_groups(
             messages=[{"role": "user", "content": user_msg}],
         )
 
+        import re as _re
         raw = resp.content[0].text.strip()
         print(f"[pipeline] LLM raw response: {raw[:500]}")
-        # Strip markdown code fences if present
-        if raw.startswith("```"):
-            raw = "\n".join(raw.split("\n")[1:])
-            raw = raw.rsplit("```", 1)[0]
-        data = json.loads(raw)
+        match = _re.search(r'\{.*\}', raw, _re.DOTALL)
+        if not match:
+            raise ValueError(f"No JSON object in LLM response: {raw[:200]}")
+        data = json.loads(match.group(0))
 
         persona = data.get("persona", "")
         pl_to_mood: dict[str, str] = {}

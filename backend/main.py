@@ -505,11 +505,13 @@ async def ai_playlist(request: Request) -> JSONResponse:
             )
             raw = resp.choices[0].message.content.strip()
 
-        if raw.startswith("```"):
-            raw = "\n".join(raw.split("\n")[1:]).rsplit("```", 1)[0].strip()
-        llm_data = json.loads(raw)
+        import re as _re
+        match = _re.search(r'\{.*\}', raw, _re.DOTALL)
+        if not match:
+            raise json.JSONDecodeError("no JSON object found", raw, 0)
+        llm_data = json.loads(match.group(0))
     except json.JSONDecodeError as exc:
-        print(f"[ai-playlist] JSON parse error: {exc}\nRaw: {raw[:300]}")
+        print(f"[ai-playlist] JSON parse error: {exc}\nRaw: {raw[:500]}")
         raise HTTPException(status_code=502, detail="AI returned malformed JSON — try again")
     except Exception as exc:
         print(f"[ai-playlist] LLM error: {exc}")
