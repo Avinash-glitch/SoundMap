@@ -320,6 +320,135 @@ async def generate_remaining_playlists(request: Request) -> JSONResponse:
     return JSONResponse({"created": created, "total_organised": sum(p["track_count"] for p in created)})
 
 
+@app.post("/suggest-remaining")
+async def suggest_remaining(request: Request) -> JSONResponse:
+    """
+    Match remaining liked tracks to existing playlists using MusicBrainz genre tags.
+    Zero AI tokens — entirely free. Slow on first call (1 req/s), instant after caching.
+    Returns {track_id: {playlist, genre, confidence}} for up to 60 remaining tracks.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    map_data = storage.load_map(user_id)
+    if not map_data:
+        raise HTTPException(status_code=404, detail="Map not found — process your library first")
+
+    remaining: list[dict] = map_data.get("remaining", [])
+    if not remaining:
+        raise HTTPException(status_code=400, detail="No remaining tracks — all liked songs are already in playlists")
+
+    points: list[dict] = map_data.get("points", [])
+
+    # Build genre fingerprint for each playlist from the existing map tracks
+    # genre field is one of our broad buckets (rock, pop, electronic, …)
+    playlist_profile: dict[str, dict[str, int]] = {}
+    for p in points:
+        genre = p.get("genre") or "other"
+        for pl in p.get("playlists") or []:
+            playlist_profile.setdefault(pl, {})[genre] = playlist_profile[pl].get(genre, 0) + 1
+
+    if not playlist_profile:
+        raise HTTPException(status_code=400, detail="No playlist data in map — regenerate your map first")
+
+    # Limit to 60 most-recently-liked tracks to bound API time on cold cache
+    batch = remaining[:60]
+
+    from .musicbrainz import get_tags_batch
+    from .pipeline import _primary_genre
+
+    total_fetched = 0
+    def _prog(done, total):
+        nonlocal total_fetched
+        total_fetched = done
+        print(f"[suggest-remaining] MusicBrainz: {done}/{total}")
+
+    tag_map = get_tags_batch(batch, on_progress=_prog)
+
+    suggestions: dict[str, dict] = {}
+    for t in batch:
+        tid = t["id"]
+        tags = tag_map.get(tid, [])
+        genre = _primary_genre(tags) if tags else "other"
+
+        best_pl, best_score = None, 0.0
+        for pl, counts in playlist_profile.items():
+            total = sum(counts.values()) or 1
+            score = counts.get(genre, 0) / total
+            if score > best_score:
+                best_score, best_pl = score, pl
+
+        suggestions[tid] = {
+            "playlist": best_pl,
+            "genre": genre,
+            "confidence": round(best_score, 3),
+            "mb_tags": tags[:5],
+        }
+
+    return JSONResponse({
+        "suggestions": suggestions,
+        "tracks": {t["id"]: {"name": t["name"], "artist": t["artist"]} for t in batch},
+        "playlists_profiled": len(playlist_profile),
+        "cache_misses": total_fetched,
+    })
+
+
+@app.post("/add-to-playlists")
+async def add_to_playlists(request: Request) -> JSONResponse:
+    """
+    Add tracks to existing Spotify playlists in batch.
+    Body: {"assignments": {"PlaylistName": ["track_id1", "track_id2", ...]}}
+    """
+    token = request.session.get("access_token")
+    user_id = request.session.get("user_id")
+    if not token or not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    try:
+        body = await request.json()
+        assignments: dict[str, list[str]] = body.get("assignments", {})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not assignments:
+        raise HTTPException(status_code=400, detail="No assignments provided")
+
+    h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # Resolve playlist names → IDs
+    pl_resp = _requests.get("https://api.spotify.com/v1/me/playlists", headers=h, params={"limit": 50})
+    if pl_resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Could not fetch your playlists")
+
+    name_to_id: dict[str, str] = {}
+    for pl in pl_resp.json().get("items", []):
+        if pl and pl.get("id"):
+            name_to_id[pl["name"]] = pl["id"]
+
+    results = []
+    for pl_name, track_ids in assignments.items():
+        pl_id = name_to_id.get(pl_name)
+        if not pl_id:
+            results.append({"playlist": pl_name, "error": "playlist not found"})
+            continue
+
+        uris = [f"spotify:track:{tid}" for tid in track_ids if tid]
+        added = 0
+        for i in range(0, len(uris), 100):
+            r = _requests.post(
+                f"https://api.spotify.com/v1/playlists/{pl_id}/items",
+                headers=h, json={"uris": uris[i:i+100]},
+            )
+            if r.status_code in (200, 201):
+                added += min(100, len(uris) - i)
+
+        results.append({"playlist": pl_name, "added": added})
+        print(f"[add-to-playlists] '{pl_name}' ← {added} tracks")
+
+    return JSONResponse({"results": results})
+
+
 @app.get("/now-playing")
 async def now_playing(request: Request) -> JSONResponse:
     """Return the user's currently playing track from Spotify."""

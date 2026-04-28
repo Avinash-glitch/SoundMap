@@ -1033,15 +1033,42 @@
 
 <!-- Remaining tracks modal -->
 <div class="modal-backdrop" id="remaining-modal">
-  <div class="modal" style="width:min(520px,92vw)">
+  <div class="modal" style="width:min(560px,92vw)">
     <div class="modal-title">Liked but not in any playlist</div>
-    <div class="modal-sub" id="remaining-modal-sub">These tracks are in your Liked Songs but not organised into any of your playlists.</div>
-    <div id="remaining-list" style="max-height:240px;overflow-y:auto;margin-bottom:1rem;display:flex;flex-direction:column;gap:.35rem;scrollbar-width:thin"></div>
+    <div class="modal-sub" id="remaining-modal-sub"></div>
+
+    <!-- Track list -->
+    <div id="remaining-list" style="max-height:200px;overflow-y:auto;margin-bottom:.85rem;display:flex;flex-direction:column;gap:.3rem;scrollbar-width:thin"></div>
+
+    <!-- MusicBrainz suggestion section -->
+    <div id="remaining-suggest-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+        <span style="font-size:.72rem;color:var(--text-dim)">Match to existing playlists — no AI tokens</span>
+        <button id="remaining-suggest-btn" style="
+          padding:.32rem .75rem;background:transparent;border:1px solid var(--border);
+          color:var(--text-dim);border-radius:6px;font-family:'DM Mono',monospace;
+          font-size:.68rem;cursor:pointer;transition:border-color .15s,color .15s"
+          onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">
+          ⬡ Suggest via MusicBrainz
+        </button>
+      </div>
+      <div id="remaining-suggest-status" style="font-size:.7rem;color:var(--text-dim);display:none;margin-bottom:.5rem"></div>
+      <div id="remaining-suggestions" style="display:none;max-height:180px;overflow-y:auto;margin-bottom:.75rem;scrollbar-width:thin"></div>
+      <div id="remaining-add-row" style="display:none;margin-bottom:.75rem">
+        <button class="btn-primary" id="remaining-add-btn" style="width:100%">Add accepted tracks to playlists</button>
+      </div>
+    </div>
+
     <div id="remaining-gen-error" style="font-size:.78rem;color:#f87171;margin-bottom:.5rem;display:none"></div>
     <div id="remaining-gen-result" style="display:none;margin-bottom:.75rem"></div>
-    <div class="modal-actions">
-      <button class="btn-secondary" id="remaining-cancel">Close</button>
-      <button class="btn-primary" id="remaining-generate">✦ Generate Playlists</button>
+
+    <div style="border-top:1px solid var(--border);padding-top:.75rem;margin-top:.25rem">
+      <div style="font-size:.7rem;color:var(--text-dim);margin-bottom:.5rem">Or let AI create new playlists for them:</div>
+      <div class="modal-actions" style="justify-content:space-between">
+        <button class="btn-secondary" id="remaining-cancel">Close</button>
+        <button class="btn-primary" id="remaining-generate">✦ Generate new playlists (AI)</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2781,6 +2808,152 @@ document.getElementById('remaining-generate').addEventListener('click', async ()
     errEl.style.display = 'block';
     btn.disabled = false;
     btn.textContent = '✦ Try Again';
+  }
+});
+
+// MusicBrainz suggest handler
+// ---------------------------------------------------------------------------
+let _mbSuggestions = {}; // {track_id: {playlist, genre, confidence, mb_tags}}
+let _mbAccepted = {};    // {track_id: playlist_name}
+
+document.getElementById('remaining-suggest-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('remaining-suggest-btn');
+  const statusEl = document.getElementById('remaining-suggest-status');
+  const suggestionsEl = document.getElementById('remaining-suggestions');
+  const addRow = document.getElementById('remaining-add-row');
+
+  _mbSuggestions = {};
+  _mbAccepted = {};
+  btn.disabled = true;
+  btn.textContent = 'Looking up genres…';
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Querying MusicBrainz (this may take a minute)…';
+  suggestionsEl.style.display = 'none';
+  addRow.style.display = 'none';
+
+  try {
+    const resp = await fetch('/suggest-remaining', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed');
+
+    _mbSuggestions = data; // {track_id: {playlist, genre, confidence, mb_tags}}
+
+    const remaining = (mapData && mapData.remaining) || [];
+    const suggested = remaining.filter(t => data[t.id] && data[t.id].playlist);
+    const unmatched = remaining.filter(t => !data[t.id] || !data[t.id].playlist);
+
+    statusEl.textContent = `${suggested.length} tracks matched · ${unmatched.length} unmatched`;
+
+    if (suggested.length === 0) {
+      suggestionsEl.innerHTML = '<div style="font-size:.72rem;color:var(--text-dim);padding:.4rem 0">No confident matches found — try AI generation instead.</div>';
+      suggestionsEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = '✦ Suggest via MusicBrainz';
+      return;
+    }
+
+    // Render per-track chips — all start accepted
+    suggested.forEach(t => { _mbAccepted[t.id] = data[t.id].playlist; });
+
+    function _renderSuggestions() {
+      suggestionsEl.innerHTML = suggested.map(t => {
+        const s = data[t.id];
+        const accepted = t.id in _mbAccepted;
+        const conf = Math.round((s.confidence || 0) * 100);
+        return `
+          <div data-tid="${t.id}" style="display:flex;align-items:center;gap:.5rem;padding:.35rem 0;border-bottom:1px solid var(--border)">
+            <img src="${t.album_art || ''}" alt="" onerror="this.style.display='none'"
+                 style="width:26px;height:26px;border-radius:3px;object-fit:cover;flex-shrink:0;background:var(--border)" />
+            <div style="min-width:0;flex:1">
+              <div style="font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.name}</div>
+              <div style="font-size:.65rem;color:var(--text-dim)">${t.artist}</div>
+            </div>
+            <div style="flex-shrink:0;text-align:right">
+              <div style="font-size:.7rem;color:var(--accent)">${s.playlist}</div>
+              <div style="font-size:.62rem;color:var(--text-dim)">${s.genre || ''} · ${conf}%</div>
+            </div>
+            <button data-tid="${t.id}" class="mb-accept-btn" style="
+              flex-shrink:0;padding:.2rem .45rem;border-radius:4px;font-size:.65rem;
+              cursor:pointer;border:1px solid;transition:background .15s,color .15s;
+              background:${accepted ? 'var(--accent)' : 'transparent'};
+              color:${accepted ? '#000' : 'var(--text-dim)'};
+              border-color:${accepted ? 'var(--accent)' : 'var(--border)'};
+            ">${accepted ? '✓' : '✕'}</button>
+          </div>`;
+      }).join('');
+
+      suggestionsEl.querySelectorAll('.mb-accept-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tid = btn.dataset.tid;
+          if (tid in _mbAccepted) {
+            delete _mbAccepted[tid];
+          } else {
+            _mbAccepted[tid] = data[tid].playlist;
+          }
+          _renderSuggestions();
+          document.getElementById('remaining-add-btn').textContent =
+            `Add ${Object.keys(_mbAccepted).length} tracks to playlists`;
+        });
+      });
+    }
+
+    _renderSuggestions();
+    suggestionsEl.style.display = 'block';
+    addRow.style.display = 'block';
+    document.getElementById('remaining-add-btn').textContent =
+      `Add ${suggested.length} tracks to playlists`;
+
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '✦ Suggest via MusicBrainz';
+});
+
+document.getElementById('remaining-add-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('remaining-add-btn');
+  const statusEl = document.getElementById('remaining-suggest-status');
+
+  if (Object.keys(_mbAccepted).length === 0) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
+
+  // Build {playlist_name: [track_id, ...]}
+  const byPlaylist = {};
+  for (const [tid, pl] of Object.entries(_mbAccepted)) {
+    if (!byPlaylist[pl]) byPlaylist[pl] = [];
+    byPlaylist[pl].push(tid);
+  }
+  const assignments = Object.entries(byPlaylist).map(([playlist, track_ids]) => ({ playlist, track_ids }));
+
+  try {
+    const resp = await fetch('/add-to-playlists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Failed');
+
+    const total = data.results.reduce((s, r) => s + (r.added || 0), 0);
+    statusEl.textContent = `✓ Added ${total} track${total !== 1 ? 's' : ''} to ${data.results.length} playlist${data.results.length !== 1 ? 's' : ''}`;
+    statusEl.style.color = 'var(--accent)';
+
+    // Remove accepted tracks from remaining modal list
+    if (mapData && mapData.remaining) {
+      const acceptedIds = new Set(Object.keys(_mbAccepted));
+      mapData.remaining = mapData.remaining.filter(t => !acceptedIds.has(t.id));
+    }
+    _mbAccepted = {};
+    document.getElementById('remaining-add-row').style.display = 'none';
+
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+    statusEl.style.color = '';
+    btn.disabled = false;
+    btn.textContent = `Add ${Object.keys(_mbAccepted).length} tracks to playlists`;
   }
 });
 

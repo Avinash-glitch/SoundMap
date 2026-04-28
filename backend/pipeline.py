@@ -155,7 +155,7 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "") -> tup
     remaining.sort(key=lambda t: t.get("liked_at") or "", reverse=True)
     # Strip heavy fields not needed for the remaining panel
     remaining_slim = [
-        {k: t[k] for k in ("id", "name", "artist", "album_art", "liked_at", "release_year") if k in t}
+        {k: t[k] for k in ("id", "name", "artist", "album_art", "liked_at", "release_year", "isrc") if k in t}
         for t in remaining
     ]
 
@@ -330,6 +330,7 @@ def _normalise_track(t: dict) -> dict:
         "duration_ms": t.get("duration_ms", 0),
         "popularity": t.get("popularity", 0),
         "release_year": release_year,
+        "isrc": (t.get("external_ids") or {}).get("isrc"),
     }
 
 
