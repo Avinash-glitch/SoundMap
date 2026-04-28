@@ -147,6 +147,9 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
         top_s = _fetch_top_tracks_range(headers, "short_term")
         _score(top_s, 3)
         all_sources.append(top_s)
+    else:
+        top_s = []
+    top_track_ids: set[str] = {t["id"] for t in top_s if t.get("id")}
 
     if not _stopped():
         top_m = _fetch_top_tracks_range(headers, "medium_term")
@@ -177,6 +180,7 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
     for t in all_candidates:
         t["playlists"] = pl_lookup.get(t["id"], [])
         t["play_score"] = max(scored.get(t["id"], 1), 1)
+        t["is_top_track"] = t["id"] in top_track_ids
 
     tracks = sorted(all_candidates, key=lambda t: t["play_score"], reverse=True)
 
@@ -882,6 +886,7 @@ def _build_map_data(
             "y": float(y),
             "genre": genre,
             "mood": mood,
+            "is_top_track": bool(track.get("is_top_track")),
         })
 
     return {

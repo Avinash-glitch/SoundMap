@@ -840,7 +840,7 @@
     <div class="mode-toggle" id="map-mode-toggle">
       <button class="mode-btn" data-mode="moods">Mood Zones</button>
       <button class="mode-btn active" data-mode="playlists">Playlists</button>
-      <button class="mode-btn" data-mode="chart">Chart</button>
+      <button class="mode-btn" data-mode="chart">Top Tracks</button>
     </div>
     <button class="btn-icon" id="btn-ai" title="AI Playlist Curator" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(29,185,84,.4)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
@@ -1233,11 +1233,12 @@ async function loadMap() {
     buildMoodColors(mapData.moods || []);
     buildPlaylistColors(mapData.playlists || []);
 
-    // Chart ranges
-    const likedAts = points.filter(p => p.liked_at).map(p => new Date(p.liked_at).getTime());
-    if (likedAts.length) chartLikedAtRange = [Math.min(...likedAts), Math.max(...likedAts)];
-    const years = points.map(p => p.release_year).filter(y => y && y > 1900);
-    if (years.length) chartYearRange = [Math.min(...years) - 1, Math.max(...years) + 1];
+    // Chart ranges — derived from top tracks only (they have is_top_track=true)
+    const topPts = points.filter(p => p.is_top_track && p.liked_at && p.release_year);
+    const topLikedAts = topPts.map(p => new Date(p.liked_at).getTime());
+    if (topLikedAts.length) chartLikedAtRange = [Math.min(...topLikedAts), Math.max(...topLikedAts)];
+    const topYears = topPts.map(p => p.release_year).filter(y => y > 1900);
+    if (topYears.length) chartYearRange = [Math.min(...topYears) - 1, Math.max(...topYears) + 1];
 
     buildLegend();
 
@@ -1373,6 +1374,9 @@ function _renderDots() {
   }
 
   for (const p of points) {
+    // Hide unsorted (playlist-less) tracks in playlists and moods view
+    if (mapMode === 'playlists' && !(p.playlists && p.playlists.length)) continue;
+
     const { cx, cy } = toCanvas(p.nx, p.ny);
     const isSel = selectedPoint && selectedPoint.id === p.id;
     const isHov = hoveredPoint && hoveredPoint.id === p.id;
@@ -1703,6 +1707,8 @@ const HIT_RADIUS = 16;
 function hitTestOwn(cx, cy) {
   let best = null, bestDist = HIT_RADIUS;
   for (const p of points) {
+    // Skip unsorted tracks in playlists mode (they're not rendered)
+    if (mapMode === 'playlists' && !(p.playlists && p.playlists.length)) continue;
     const { cx: px, cy: py } = toCanvas(p.nx, p.ny);
     const d = Math.hypot(cx - px, cy - py);
     if (d < bestDist) { bestDist = d; best = p; }
@@ -2777,7 +2783,7 @@ function renderChart() {
   ctx.fillStyle = '#888899';
   ctx.font = '11px DM Mono, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('Date added to Liked Songs →', W / 2, H - 5);
+  ctx.fillText('Date added to Liked Songs →  (top 50 recent tracks)', W / 2, H - 5);
   ctx.save();
   ctx.translate(13, H / 2);
   ctx.rotate(-Math.PI / 2);
@@ -2793,9 +2799,9 @@ function renderChart() {
   ctx.lineTo(W - CHART_MR, H - CHART_MB);
   ctx.stroke();
 
-  // ---- Dots (only tracks with liked_at + release_year) ----
+  // ---- Dots — top tracks that also have a liked_at date ----
   for (const p of points) {
-    if (!p.liked_at || !p.release_year) continue;
+    if (!p.is_top_track || !p.liked_at || !p.release_year) continue;
     const likedAtMs = new Date(p.liked_at).getTime();
     const { cx, cy } = chartToCanvas(likedAtMs, p.release_year);
     const isSel = selectedPoint && selectedPoint.id === p.id;
