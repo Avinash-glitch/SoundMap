@@ -212,6 +212,114 @@ async def debug_playlists(request: Request) -> JSONResponse:
     })
 
 
+@app.post("/generate-remaining-playlists")
+async def generate_remaining_playlists(request: Request) -> JSONResponse:
+    """
+    AI-groups a user's liked-but-unorganised tracks into new Spotify playlists.
+    Body: {"api_key": "...", "provider": "anthropic"|"openai"}
+    """
+    token = request.session.get("access_token")
+    user_id = request.session.get("user_id")
+    if not token or not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    try:
+        body = await request.json()
+        user_api_key = (body.get("api_key") or "").strip()
+        provider = (body.get("provider") or "anthropic").strip().lower()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if provider not in ("anthropic", "openai"):
+        raise HTTPException(status_code=400, detail="provider must be 'anthropic' or 'openai'")
+
+    api_key = user_api_key or os.environ.get(
+        "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+    )
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key required")
+
+    map_data = storage.load_map(user_id)
+    if not map_data:
+        raise HTTPException(status_code=404, detail="Map not found — process your library first")
+
+    remaining = map_data.get("remaining", [])
+    if not remaining:
+        raise HTTPException(status_code=400, detail="No unorganised tracks found — all your liked tracks are already in playlists")
+
+    lines = [
+        f"{t['id']} | {t.get('name','')} — {t.get('artist','')} | {t.get('release_year','?')}"
+        for t in remaining
+    ]
+    manifest = "\n".join(lines)
+
+    system_msg = (
+        "You are a music curator. A user has liked these tracks but hasn't put them in any playlist. "
+        "Group them into 2–6 coherent new playlists by genre, mood, or era. "
+        "Each playlist must be sonically cohesive and have a short punchy name (2–4 words).\n\n"
+        "Each input line is: TRACK_ID | Name — Artist | Release Year\n\n"
+        "Respond ONLY with valid JSON, no markdown:\n"
+        '{"playlists": [{"name": "Playlist name", "track_ids": ["id1", ...]}, ...]}'
+    )
+    user_msg = f"Organise these {len(remaining)} unorganised liked tracks:\n\n{manifest}"
+
+    raw = ""
+    try:
+        if provider == "anthropic":
+            import anthropic as _anthropic
+            resp = _anthropic.Anthropic(api_key=api_key).messages.create(
+                model="claude-sonnet-4-6", max_tokens=4000,
+                system=system_msg, messages=[{"role": "user", "content": user_msg}],
+            )
+            raw = resp.content[0].text.strip()
+        else:
+            from openai import OpenAI as _OpenAI
+            resp = _OpenAI(api_key=api_key).chat.completions.create(
+                model="gpt-4o", max_tokens=4000,
+                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
+            )
+            raw = resp.choices[0].message.content.strip()
+
+        import re as _re
+        m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+        if not m:
+            raise json.JSONDecodeError("no JSON", raw, 0)
+        llm_data = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="AI returned malformed JSON — try again")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI error: {exc}")
+
+    valid_ids = {t["id"] for t in remaining}
+    h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    created = []
+
+    for pl in llm_data.get("playlists", []):
+        pl_name = (pl.get("name") or "").strip()
+        track_ids = [tid for tid in pl.get("track_ids", []) if tid in valid_ids]
+        if not pl_name or not track_ids:
+            continue
+
+        pl_resp = _requests.post(
+            "https://api.spotify.com/v1/me/playlists", headers=h,
+            json={"name": pl_name, "description": "SoundMap — auto-generated from unorganised liked tracks", "public": False},
+        )
+        if pl_resp.status_code not in (200, 201):
+            print(f"[remaining] failed to create '{pl_name}': {pl_resp.status_code}")
+            continue
+
+        pl_id = pl_resp.json()["id"]
+        pl_url = pl_resp.json()["external_urls"]["spotify"]
+        uris = [f"spotify:track:{tid}" for tid in track_ids]
+        for i in range(0, len(uris), 100):
+            _requests.post(f"https://api.spotify.com/v1/playlists/{pl_id}/items", headers=h, json={"uris": uris[i:i+100]})
+
+        created.append({"name": pl_name, "track_count": len(track_ids), "url": pl_url})
+        print(f"[remaining] created '{pl_name}' ({len(track_ids)} tracks)")
+
+    return JSONResponse({"created": created, "total_organised": sum(p["track_count"] for p in created)})
+
+
 @app.get("/now-playing")
 async def now_playing(request: Request) -> JSONResponse:
     """Return the user's currently playing track from Spotify."""

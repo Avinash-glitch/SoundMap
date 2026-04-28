@@ -52,7 +52,7 @@ def process_user(
 
     # ---- 1. Collect tracks ------------------------------------------------
     progress(5, "Fetching your library…")
-    tracks, playlist_meta, pl_track_samples = _collect_tracks(headers, progress, user_id=user_id)
+    tracks, playlist_meta, pl_track_samples, remaining = _collect_tracks(headers, progress, user_id=user_id)
 
     if not tracks:
         raise RuntimeError("No tracks found in your Spotify library.")
@@ -78,7 +78,7 @@ def process_user(
 
     # ---- 5. Build output --------------------------------------------------
     progress(90, "Building map…")
-    map_data = _build_map_data(tracks, coords, track_genres, display_name=display_name, playlist_meta=playlist_meta, pl_to_mood=pl_to_mood, persona=persona)
+    map_data = _build_map_data(tracks, coords, track_genres, display_name=display_name, playlist_meta=playlist_meta, pl_to_mood=pl_to_mood, persona=persona, remaining=remaining)
 
     storage.save_map(user_id, map_data)
     progress(100, "Done!")
@@ -144,12 +144,27 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "") -> tup
 
     tracks = sorted(all_candidates, key=lambda t: t["play_score"], reverse=True)[:MAX_TRACKS]
 
+    # Step 5: compute remaining = liked tracks not in any user-owned playlist
+    liked_by_id: dict[str, dict] = {t["id"]: t for t in saved if t.get("id")}
+    playlist_ids: set[str] = set(pl_lookup.keys())
+    remaining: list[dict] = [
+        t for tid, t in liked_by_id.items()
+        if tid not in playlist_ids
+    ]
+    # Sort most-recently liked first
+    remaining.sort(key=lambda t: t.get("liked_at") or "", reverse=True)
+    # Strip heavy fields not needed for the remaining panel
+    remaining_slim = [
+        {k: t[k] for k in ("id", "name", "artist", "album_art", "liked_at", "release_year") if k in t}
+        for t in remaining
+    ]
+
     tagged = sum(1 for t in tracks if t["playlists"])
     with_preview = sum(1 for t in tracks if t.get("preview_url"))
     max_score = max((t["play_score"] for t in tracks), default=1)
     min_score = min((t["play_score"] for t in tracks), default=1)
-    print(f"[pipeline] {len(all_candidates)} candidates → top {len(tracks)} by play_score (range {min_score}–{max_score}), {tagged} in playlists, {with_preview} have preview URLs ({int(with_preview/max(len(tracks),1)*100)}%)")
-    return tracks, playlist_meta, pl_track_samples
+    print(f"[pipeline] {len(all_candidates)} candidates → top {len(tracks)} by play_score (range {min_score}–{max_score}), {tagged} in playlists, {with_preview} previews, {len(remaining_slim)} remaining (liked but not in any playlist)")
+    return tracks, playlist_meta, pl_track_samples, remaining_slim
 
 
 def _spotify_get(url: str, headers: dict, params: dict | None = None, retries: int = 3) -> requests.Response:
@@ -242,7 +257,7 @@ def _fetch_playlists_data(
 
 
 def _fetch_saved_tracks(headers: dict) -> list[dict]:
-    """Fetch all of the user's liked tracks — no cap, paginates fully."""
+    """Fetch all of the user's liked tracks. Attaches liked_at from the item wrapper."""
     out: list[dict] = []
     url = "https://api.spotify.com/v1/me/tracks"
     while url:
@@ -253,7 +268,9 @@ def _fetch_saved_tracks(headers: dict) -> list[dict]:
         for item in data.get("items", []):
             t = item.get("track")
             if t and t.get("id"):
-                out.append(_normalise_track(t))
+                track = _normalise_track(t)
+                track["liked_at"] = item.get("added_at")  # ISO 8601 e.g. "2023-04-15T12:30:00Z"
+                out.append(track)
         url = data.get("next")
         if len(out) % 200 == 0 and len(out) > 0:
             print(f"[pipeline] liked tracks fetched so far: {len(out)}")
@@ -725,6 +742,7 @@ def _build_map_data(
     playlist_meta: list[dict] | None = None,
     pl_to_mood: dict[str, str] | None = None,
     persona: str = "",
+    remaining: list[dict] | None = None,
 ) -> dict:
     pl_to_mood = pl_to_mood or {}
     points = []
@@ -748,4 +766,5 @@ def _build_map_data(
         "playlists": playlist_meta or [],
         "moods": sorted(set(p["mood"] for p in points)),
         "persona": persona,
+        "remaining": remaining or [],
     }
