@@ -2551,9 +2551,13 @@ function normaliseComparePoints(raw) {
 
 async function loadCompare(friendId) {
   const errEl = document.getElementById('compare-error');
+  const loadBtn = document.getElementById('compare-load');
   errEl.style.display = 'none';
+  loadBtn.disabled = true;
+  loadBtn.textContent = 'Loading…';
 
   try {
+    // Load friend's map for canvas overlay
     const resp = await fetch(`/map/${encodeURIComponent(friendId)}`);
     if (resp.status === 404) throw new Error("No map found for that user ID — have they logged in yet?");
     if (!resp.ok) throw new Error(`Server error (${resp.status})`);
@@ -2562,16 +2566,72 @@ async function loadCompare(friendId) {
     comparePoints = normaliseComparePoints(data.points);
     compareDisplayName = data.display_name || friendId;
 
-    // Switch render + hit functions to compare-aware versions
-    document.getElementById('compare-modal').classList.remove('open');
     document.getElementById('compare-badge').classList.add('visible');
     document.getElementById('compare-name').textContent = compareDisplayName;
-
     render();
+
+    // Fetch similarity analysis
+    const cResp = await fetch(`/compare/${encodeURIComponent(userId)}/${encodeURIComponent(friendId)}`);
+    if (cResp.ok) {
+      const cData = await cResp.json();
+      _renderCompareResults(cData);
+    }
   } catch (e) {
     errEl.textContent = e.message;
     errEl.style.display = 'block';
+  } finally {
+    loadBtn.disabled = false;
+    loadBtn.textContent = 'Load';
   }
+}
+
+function _renderCompareResults(d) {
+  const pct = Math.round(d.compatibility * 100);
+  const label = pct >= 70 ? '🎯 High match' : pct >= 40 ? '🎵 Good overlap' : '🔍 Low overlap';
+
+  let html = `
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.7rem">Similarity Results</div>
+      <div style="font-size:1.3rem;font-weight:700;color:var(--accent2);margin-bottom:.2rem">${pct}% compatible</div>
+      <div style="font-size:.72rem;color:var(--text-dim);margin-bottom:.9rem">${label} — ${d.shared_count} shared track${d.shared_count !== 1 ? 's' : ''}</div>`;
+
+  if (d.similar_playlists.length) {
+    html += `<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">Most similar playlists</div>`;
+    html += d.similar_playlists.slice(0, 6).map(p => `
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:.4rem;align-items:center;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
+        <div style="font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(p.playlist_a)}">${_esc(p.playlist_a)}</div>
+        <div style="font-size:.6rem;color:var(--accent2);background:rgba(124,106,247,.15);border-radius:4px;padding:.1rem .35rem;white-space:nowrap">${Math.round(p.score*100)}%</div>
+        <div style="font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right" title="${_esc(p.playlist_b)}">${_esc(p.playlist_b)}</div>
+      </div>`).join('');
+  }
+
+  if (d.shared_tracks.length) {
+    html += `<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin:.9rem 0 .5rem">Shared tracks</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto;scrollbar-width:thin">
+        ${d.shared_tracks.slice(0, 24).map(t => t.album_art
+          ? `<a href="${_esc(t.external_url)}" target="_blank" title="${_esc(t.name)} — ${_esc(t.artist)}"><img src="${_esc(t.album_art)}" style="width:36px;height:36px;border-radius:3px;object-fit:cover;display:block" loading="lazy"></a>`
+          : `<div style="width:36px;height:36px;border-radius:3px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:.5rem;color:var(--text-dim)" title="${_esc(t.name)}">♪</div>`
+        ).join('')}
+      </div>`;
+  }
+
+  html += `<a href="/compare.html?a=${encodeURIComponent(d.user_a.id)}&b=${encodeURIComponent(d.user_b.id)}" target="_blank"
+    style="display:inline-block;margin-top:.9rem;font-size:.7rem;color:var(--accent2)">Open full comparison →</a>
+  </div>`;
+
+  // Inject into modal (reopen to show results)
+  let resultsEl = document.getElementById('compare-results');
+  if (!resultsEl) {
+    resultsEl = document.createElement('div');
+    resultsEl.id = 'compare-results';
+    document.querySelector('#compare-modal .modal').appendChild(resultsEl);
+  }
+  resultsEl.innerHTML = html;
+  document.getElementById('compare-modal').classList.add('open');
+}
+
+function _esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 
@@ -2585,6 +2645,8 @@ document.getElementById('btn-compare').addEventListener('click', () => {
 
 document.getElementById('compare-cancel').addEventListener('click', () => {
   document.getElementById('compare-modal').classList.remove('open');
+  const r = document.getElementById('compare-results');
+  if (r) r.innerHTML = '';
 });
 
 document.getElementById('compare-load').addEventListener('click', () => {

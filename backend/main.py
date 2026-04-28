@@ -63,6 +63,11 @@ async def map_page():
     return FileResponse(FRONTEND / "map.html")
 
 
+@app.get("/compare.html")
+async def compare_page():
+    return FileResponse(FRONTEND / "compare.html")
+
+
 @app.get("/status/{job_id}")
 async def job_status(job_id: str) -> JSONResponse:
     job = get_job(job_id)
@@ -509,6 +514,103 @@ async def now_playing(request: Request) -> JSONResponse:
         "external_url": (item.get("external_urls") or {}).get("spotify"),
         "progress_ms": data.get("progress_ms", 0),
         "duration_ms": item.get("duration_ms", 0),
+    })
+
+
+@app.get("/compare/{user_id_a}/{user_id_b}")
+async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
+    """Compare two users' music libraries — shared tracks and similar playlists."""
+    import math
+
+    map_a = storage.load_map(user_id_a)
+    map_b = storage.load_map(user_id_b)
+    if not map_a:
+        raise HTTPException(status_code=404, detail=f"No map found for {user_id_a} — they need to process their library first")
+    if not map_b:
+        raise HTTPException(status_code=404, detail=f"No map found for {user_id_b} — they need to process their library first")
+
+    pts_a = map_a.get("points", [])
+    pts_b = map_b.get("points", [])
+
+    ids_a = {p["id"]: p for p in pts_a if p.get("id")}
+    ids_b = {p["id"]: p for p in pts_b if p.get("id")}
+    shared_ids = set(ids_a) & set(ids_b)
+
+    shared_tracks = sorted(
+        [
+            {
+                "id": tid,
+                "name": ids_a[tid].get("name", ""),
+                "artist": ids_a[tid].get("artist", ""),
+                "album_art": ids_a[tid].get("album_art", ""),
+                "external_url": ids_a[tid].get("external_url", ""),
+                "playlists_a": ids_a[tid].get("playlists") or [],
+                "playlists_b": ids_b[tid].get("playlists") or [],
+            }
+            for tid in shared_ids
+        ],
+        key=lambda t: (ids_a[t["id"]].get("play_score", 0) + ids_b[t["id"]].get("play_score", 0)),
+        reverse=True,
+    )
+
+    # Build per-playlist genre vectors (11-dim, one per genre bucket)
+    GENRES = ["metal", "hip-hop", "electronic", "rock", "pop", "jazz", "classical", "folk", "latin", "world", "other"]
+
+    def build_vectors(pts: list[dict]) -> dict[str, list[float]]:
+        pl_counts: dict[str, dict[str, int]] = {}
+        for p in pts:
+            genre = p.get("genre") or "other"
+            for pl in (p.get("playlists") or []):
+                pl_counts.setdefault(pl, {})
+                pl_counts[pl][genre] = pl_counts[pl].get(genre, 0) + 1
+        vecs = {}
+        for pl, counts in pl_counts.items():
+            total = sum(counts.values()) or 1
+            if total < 3:
+                continue
+            vecs[pl] = [counts.get(g, 0) / total for g in GENRES]
+        return vecs
+
+    def cosine(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        mag = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(x * x for x in b))
+        return dot / mag if mag else 0.0
+
+    vecs_a = build_vectors(pts_a)
+    vecs_b = build_vectors(pts_b)
+
+    pairs = []
+    for pl_a, vec_a in vecs_a.items():
+        for pl_b, vec_b in vecs_b.items():
+            score = cosine(vec_a, vec_b)
+            if score >= 0.25:
+                pairs.append({"playlist_a": pl_a, "playlist_b": pl_b, "score": round(score, 3)})
+    pairs.sort(key=lambda x: x["score"], reverse=True)
+
+    # Compatibility score: genre similarity + shared track bonus
+    if vecs_a and vecs_b:
+        best_per_a = [max((cosine(va, vb) for vb in vecs_b.values()), default=0.0) for va in vecs_a.values()]
+        genre_compat = sum(best_per_a) / len(best_per_a)
+        track_bonus = len(shared_ids) / max(len(ids_a), len(ids_b), 1) * 0.3
+        compatibility = round(min(genre_compat * 0.7 + track_bonus, 1.0), 3)
+    else:
+        compatibility = round(len(shared_ids) / max(len(ids_a), len(ids_b), 1), 3)
+
+    return JSONResponse({
+        "user_a": {
+            "id": user_id_a,
+            "display_name": map_a.get("display_name") or user_id_a,
+            "track_count": len(pts_a),
+        },
+        "user_b": {
+            "id": user_id_b,
+            "display_name": map_b.get("display_name") or user_id_b,
+            "track_count": len(pts_b),
+        },
+        "shared_tracks": shared_tracks[:50],
+        "shared_count": len(shared_ids),
+        "similar_playlists": pairs[:20],
+        "compatibility": compatibility,
     })
 
 
