@@ -724,9 +724,9 @@ def _llm_genre_detect(
     )
 
     results = list(fallback)
-    BATCH = 50
+    BATCH = 100  # larger batches = fewer API calls, stays under rate limit
 
-    for batch_start in range(0, len(tracks), BATCH):
+    for batch_idx, batch_start in enumerate(range(0, len(tracks), BATCH)):
         batch = tracks[batch_start: batch_start + BATCH]
         lines = []
         for i, t in enumerate(batch):
@@ -734,7 +734,7 @@ def _llm_genre_detect(
         user_msg = "\n".join(lines)
 
         try:
-            raw = _call_llm_chat(system_msg, user_msg, api_key, provider, max_tokens=800)
+            raw = _call_llm_chat(system_msg, user_msg, api_key, provider, max_tokens=1200)
             m = _re.search(r'\{.*\}', raw, _re.DOTALL)
             if not m:
                 continue
@@ -744,7 +744,11 @@ def _llm_genre_detect(
                 if idx < len(results) and genre in _GENRE_BUCKETS_SET:
                     results[idx] = genre
         except Exception as exc:
-            print(f"[pipeline] LLM genre batch {batch_start//BATCH + 1} failed ({exc})")
+            print(f"[pipeline] LLM genre batch {batch_idx + 1} failed ({exc})")
+
+        # Pace requests to stay under 40 RPM (1.5s gap = safe for concurrent users)
+        if batch_start + BATCH < len(tracks):
+            time.sleep(1.5)
 
     detected = sum(1 for g in results if g != "other")
     print(f"[pipeline] LLM genre detection: {detected}/{len(tracks)} tracks classified")
