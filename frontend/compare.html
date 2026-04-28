@@ -59,6 +59,7 @@
   .form-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
   .form-row input {
     flex: 1;
+    min-width: 0;
     background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -67,7 +68,6 @@
     font-size: .8rem;
     padding: .55rem .8rem;
     outline: none;
-    min-width: 160px;
   }
   .form-row input:focus { border-color: var(--accent); }
   .form-row input::placeholder { color: var(--text-dim); }
@@ -88,6 +88,17 @@
     background: transparent;
     border: 1px solid var(--border);
     color: var(--text-dim);
+  }
+
+  @media (max-width: 480px) {
+    body { padding: 1.2rem .75rem; }
+    h1 { font-size: 1.3rem; }
+    .card { padding: 1rem 1rem; }
+    .form-row { flex-direction: column; align-items: stretch; }
+    .form-row input { width: 100%; }
+    .btn { width: 100%; text-align: center; }
+    .compat-row { flex-direction: column; align-items: flex-start; gap: .8rem; }
+    .pl-name, .pl-name.right { font-size: .7rem; }
   }
 
   .error { color: var(--red); font-size: .78rem; margin-top: .6rem; }
