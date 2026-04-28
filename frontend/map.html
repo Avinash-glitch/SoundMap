@@ -687,9 +687,123 @@
     .mood-check-name { font-size: 0.82rem; color: var(--text); flex: 1; }
     .mood-check-count { font-size: 0.7rem; color: var(--text-dim); }
 
+    /* ---- Now Playing widget ---- */
+    #now-playing {
+      position: fixed;
+      bottom: 1.25rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 15;
+      display: none;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.55rem 0.9rem 0.55rem 0.6rem;
+      background: rgba(17,17,24,0.94);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      backdrop-filter: blur(10px);
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      max-width: min(340px, calc(100vw - 2rem));
+      user-select: none;
+    }
+    #now-playing:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    #now-playing.visible { display: flex; }
+
+    #now-playing-art {
+      width: 34px;
+      height: 34px;
+      border-radius: 4px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: var(--border);
+    }
+
+    .np-eq {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+    .np-eq-bar {
+      width: 3px;
+      background: var(--accent);
+      border-radius: 2px;
+      animation: np-eq 0.9s ease-in-out infinite alternate;
+    }
+    .np-eq-bar:nth-child(2) { animation-delay: 0.2s; }
+    .np-eq-bar:nth-child(3) { animation-delay: 0.45s; }
+
+    @keyframes np-eq {
+      from { height: 4px; opacity: 0.6; }
+      to   { height: 14px; opacity: 1; }
+    }
+
+    .np-paused .np-eq-bar { animation-play-state: paused; height: 4px; opacity: 0.4; }
+
+    #now-playing-text { min-width: 0; flex: 1; }
+    #now-playing-name {
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #now-playing-artist {
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #now-playing-onmap {
+      font-size: 0.65rem;
+      color: var(--accent);
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
     /* ---- Mobile ---- */
     @media (max-width: 600px) {
       .legend { display: none; }
+
+      /* Topbar: logo + minimal right side only */
+      .topbar { padding: 0.55rem 0.75rem; background: rgba(10,10,15,0.95); }
+      .topbar-right { gap: 0.4rem; }
+
+      /* Hide desktop-only topbar items on mobile */
+      #btn-compare,
+      #btn-merge,
+      #map-mode-toggle,
+      #btn-save-moods,
+      .compare-badge { display: none !important; }
+
+      /* Shrink remaining buttons */
+      #btn-ai { padding: 0 0.6rem; font-size: .65rem; }
+      #btn-refresh { width: 30px; height: 30px; }
+      .user-badge { padding: 0.3rem 0.6rem; font-size: .72rem; }
+      #user-badge-persona { display: none !important; }
+
+      /* Search bar full-width below topbar */
+      .search-wrap {
+        top: 3rem;
+        width: calc(100vw - 1.5rem);
+        left: 0.75rem;
+        transform: none;
+      }
+
+      /* Sidebar full-width on mobile */
+      .sidebar { width: 100vw; }
+
+      /* Zoom controls smaller on mobile */
+      .btn-zoom { width: 30px; height: 30px; font-size: 1rem; }
+
+      /* Now Playing shifts up above zoom controls */
+      #now-playing { bottom: 4.5rem; }
     }
   </style>
 </head>
@@ -926,6 +1040,21 @@
 <div class="zoom-controls">
   <button class="btn-zoom" id="btn-zoom-in">+</button>
   <button class="btn-zoom" id="btn-zoom-out">−</button>
+</div>
+
+<!-- Now Playing widget -->
+<div id="now-playing" title="Click to find on map">
+  <img id="now-playing-art" src="" alt="" />
+  <div class="np-eq" id="np-eq">
+    <div class="np-eq-bar"></div>
+    <div class="np-eq-bar"></div>
+    <div class="np-eq-bar"></div>
+  </div>
+  <div id="now-playing-text">
+    <div id="now-playing-name"></div>
+    <div id="now-playing-artist"></div>
+  </div>
+  <span id="now-playing-onmap"></span>
 </div>
 
 <script>
@@ -1705,6 +1834,25 @@ document.getElementById('btn-close-sidebar').addEventListener('click', () => {
   render();
 });
 
+// Swipe right on sidebar to close (mobile)
+(function() {
+  const sb = document.getElementById('sidebar');
+  let sbTouchX = null;
+  sb.addEventListener('touchstart', e => {
+    sbTouchX = e.touches[0].clientX;
+  }, { passive: true });
+  sb.addEventListener('touchend', e => {
+    if (sbTouchX === null) return;
+    const dx = e.changedTouches[0].clientX - sbTouchX;
+    if (dx > 60) {
+      sb.classList.remove('open');
+      selectedPoint = null;
+      render();
+    }
+    sbTouchX = null;
+  }, { passive: true });
+})();
+
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
@@ -2380,10 +2528,78 @@ document.getElementById('compare-modal').addEventListener('click', e => {
 });
 
 // ---------------------------------------------------------------------------
+// Now Playing
+// ---------------------------------------------------------------------------
+let _npCurrentId = null;
+
+async function pollNowPlaying() {
+  try {
+    const resp = await fetch('/now-playing');
+    if (resp.status === 401) return; // not logged in — stop polling silently
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    const widget = document.getElementById('now-playing');
+    const eq = document.getElementById('np-eq');
+
+    if (!data.playing && !data.id) {
+      widget.classList.remove('visible');
+      _npCurrentId = null;
+      return;
+    }
+
+    // Update DOM
+    const artEl = document.getElementById('now-playing-art');
+    artEl.src = data.album_art || '';
+    artEl.style.display = data.album_art ? 'block' : 'none';
+    document.getElementById('now-playing-name').textContent = data.name || '';
+    document.getElementById('now-playing-artist').textContent = data.artist || '';
+
+    // Paused vs playing animation
+    if (data.playing) {
+      eq.classList.remove('np-paused');
+    } else {
+      eq.classList.add('np-paused');
+    }
+
+    // Check if track is in user's library map
+    const inMap = points.some(p => p.id === data.id);
+    const onMapEl = document.getElementById('now-playing-onmap');
+    onMapEl.textContent = inMap ? '→ map' : '';
+
+    widget.classList.add('visible');
+    _npCurrentId = data.id;
+  } catch (_) {
+    // network error — ignore, try again next poll
+  }
+}
+
+document.getElementById('now-playing').addEventListener('click', () => {
+  if (!_npCurrentId) return;
+  const pt = points.find(p => p.id === _npCurrentId);
+  if (pt) {
+    panTo(pt);
+    selectPoint(pt);
+  } else {
+    // Track not in library — open in Spotify
+    const artEl = document.getElementById('now-playing-art');
+    const name = document.getElementById('now-playing-name').textContent;
+    window.open(`https://open.spotify.com/track/${_npCurrentId}`, '_blank', 'noopener');
+  }
+});
+
+// Start polling after map loads so `points` is populated
+function startNowPlayingPolling() {
+  pollNowPlaying();
+  setInterval(pollNowPlaying, 5000);
+}
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 resize();
 loadMap();
+startNowPlayingPolling();
 </script>
 </body>
 </html>

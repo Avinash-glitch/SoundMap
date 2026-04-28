@@ -25,6 +25,8 @@ SCOPES = " ".join([
     "user-top-read",
     "user-read-recently-played",
     "user-read-private",
+    "user-read-currently-playing",
+    "user-read-playback-state",
 ])
 
 router = APIRouter(prefix="/auth")

@@ -212,6 +212,47 @@ async def debug_playlists(request: Request) -> JSONResponse:
     })
 
 
+@app.get("/now-playing")
+async def now_playing(request: Request) -> JSONResponse:
+    """Return the user's currently playing track from Spotify."""
+    token = request.session.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    resp = _requests.get(
+        "https://api.spotify.com/v1/me/player/currently-playing",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"additional_types": "track"},
+    )
+
+    if resp.status_code == 204 or not resp.content:
+        return JSONResponse({"playing": False})
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Spotify error {resp.status_code}")
+
+    data = resp.json()
+    item = data.get("item")
+    if not item or data.get("currently_playing_type") != "track":
+        return JSONResponse({"playing": False})
+
+    album = item.get("album", {})
+    images = album.get("images", [])
+    album_art = images[0]["url"] if images else None
+
+    return JSONResponse({
+        "playing": data.get("is_playing", False),
+        "id": item.get("id"),
+        "name": item.get("name"),
+        "artist": ", ".join(a["name"] for a in item.get("artists", [])),
+        "album": album.get("name"),
+        "album_art": album_art,
+        "external_url": (item.get("external_urls") or {}).get("spotify"),
+        "progress_ms": data.get("progress_ms", 0),
+        "duration_ms": item.get("duration_ms", 0),
+    })
+
+
 @app.get("/map/{user_id}")
 async def get_map(user_id: str) -> JSONResponse:
     data = storage.load_map(user_id)
