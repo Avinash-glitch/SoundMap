@@ -77,13 +77,18 @@ async def analyze_moods(request: Request) -> JSONResponse:
     if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
 
-    api_key = ""
     try:
         body = await request.json()
-        api_key = (body.get("api_key") or "").strip()
+        user_api_key = (body.get("api_key") or "").strip()
+        provider = (body.get("provider") or "anthropic").strip().lower()
     except Exception:
-        pass
+        user_api_key, provider = "", "anthropic"
 
+    if provider not in ("anthropic", "openai", "nvidia"):
+        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
+
+    _env_key_map = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "nvidia": "NVIDIA_API_KEY"}
+    api_key = user_api_key or os.environ.get(_env_key_map[provider], "")
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key required")
 
@@ -108,7 +113,7 @@ async def analyze_moods(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="No playlist data to analyze")
 
     from .pipeline import _llm_mood_groups
-    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_tracks, api_key=api_key)
+    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_tracks, api_key=api_key, provider=provider)
 
     if not pl_to_mood:
         raise HTTPException(status_code=500, detail="Mood analysis returned no results — check your API key")
@@ -137,13 +142,15 @@ async def start_job(request: Request) -> JSONResponse:
         raise HTTPException(status_code=401, detail="Not logged in")
 
     api_key = ""
+    provider = ""
     try:
         body = await request.json()
         api_key = (body.get("api_key") or "").strip()
+        provider = (body.get("provider") or "").strip().lower()
     except Exception:
         pass
 
-    job_id = submit_job(token, user_id, display_name, api_key=api_key)
+    job_id = submit_job(token, user_id, display_name, api_key=api_key, provider=provider)
     return JSONResponse({"job_id": job_id, "user_id": user_id})
 
 
@@ -230,12 +237,11 @@ async def generate_remaining_playlists(request: Request) -> JSONResponse:
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
-    if provider not in ("anthropic", "openai"):
-        raise HTTPException(status_code=400, detail="provider must be 'anthropic' or 'openai'")
+    if provider not in ("anthropic", "openai", "nvidia"):
+        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
-    api_key = user_api_key or os.environ.get(
-        "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
-    )
+    _env_key_map = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "nvidia": "NVIDIA_API_KEY"}
+    api_key = user_api_key or os.environ.get(_env_key_map[provider], "")
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key required")
 
@@ -272,6 +278,13 @@ async def generate_remaining_playlists(request: Request) -> JSONResponse:
                 system=system_msg, messages=[{"role": "user", "content": user_msg}],
             )
             raw = resp.content[0].text.strip()
+        elif provider == "nvidia":
+            from openai import OpenAI as _OpenAI
+            resp = _OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1").chat.completions.create(
+                model="z-ai/glm-5.1", max_tokens=4000,
+                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
+            )
+            raw = resp.choices[0].message.content.strip()
         else:
             from openai import OpenAI as _OpenAI
             resp = _OpenAI(api_key=api_key).chat.completions.create(
@@ -695,18 +708,15 @@ async def ai_playlist(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Prompt is required")
     if len(prompt) > 600:
         raise HTTPException(status_code=400, detail="Prompt too long (max 600 chars)")
-    if provider not in ("anthropic", "openai"):
-        raise HTTPException(status_code=400, detail="provider must be 'anthropic' or 'openai'")
+    if provider not in ("anthropic", "openai", "nvidia"):
+        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
     # Resolve API key: user-supplied key takes priority over server key
-    if provider == "anthropic":
-        api_key = user_api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=500, detail="No Anthropic API key — add yours in AI settings or ask the server admin to configure ANTHROPIC_API_KEY")
-    else:
-        api_key = user_api_key or os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise HTTPException(status_code=500, detail="No OpenAI API key — add yours in AI settings")
+    _env_key_map = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "nvidia": "NVIDIA_API_KEY"}
+    api_key = user_api_key or os.environ.get(_env_key_map[provider], "")
+    if not api_key:
+        _labels = {"anthropic": "Anthropic", "openai": "OpenAI", "nvidia": "NVIDIA"}
+        raise HTTPException(status_code=500, detail=f"No {_labels[provider]} API key — add yours in AI settings or configure {_env_key_map[provider]}")
 
     map_data = storage.load_map(user_id)
     if not map_data:
@@ -770,6 +780,18 @@ async def ai_playlist(request: Request) -> JSONResponse:
                 messages=[{"role": "user", "content": user_msg}],
             )
             raw = resp.content[0].text.strip()
+        elif provider == "nvidia":
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1")
+            resp = client.chat.completions.create(
+                model="z-ai/glm-5.1",
+                max_tokens=4000,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+            raw = resp.choices[0].message.content.strip()
         else:
             from openai import OpenAI
             client = OpenAI(api_key=api_key)

@@ -33,6 +33,7 @@ def process_user(
     on_progress: Callable[[int, str], None] | None = None,
     display_name: str = "",
     api_key: str = "",
+    provider: str = "",
 ) -> dict:
     """
     Full pipeline for one user.
@@ -58,7 +59,7 @@ def process_user(
         raise RuntimeError("No tracks found in your Spotify library.")
 
     progress(28, "Grouping playlists into moods…")
-    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_track_samples, api_key=api_key)
+    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_track_samples, api_key=api_key, provider=provider or "anthropic")
 
     progress(30, f"Processing {len(tracks)} tracks across {len(playlist_meta)} playlists…")
 
@@ -71,6 +72,14 @@ def process_user(
     else:
         progress(35, "Fetching audio features…")
         embeddings, track_genres = _audio_feature_embeddings(tracks, headers, on_progress=progress)
+
+    # ---- 3b. AI genre detection (enriches map labels) --------------------
+    if api_key:
+        progress(71, "Detecting genres with AI…")
+        try:
+            track_genres = _llm_genre_detect(tracks, api_key, provider or "anthropic")
+        except Exception as _ge:
+            print(f"[pipeline] LLM genre detection failed ({_ge}) — keeping keyword genres")
 
     # ---- 4. UMAP ----------------------------------------------------------
     progress(75, "Running UMAP dimensionality reduction…")
@@ -645,6 +654,94 @@ def _run_umap(embeddings: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# LLM helpers
+# ---------------------------------------------------------------------------
+
+def _call_llm_chat(system: str, user: str, api_key: str, provider: str = "anthropic", max_tokens: int = 1200) -> str:
+    """Route a chat completion to Anthropic, OpenAI, or NVIDIA NIM (GLM-5.1)."""
+    if provider == "nvidia":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1")
+        resp = client.chat.completions.create(
+            model="z-ai/glm-5.1",
+            max_tokens=max_tokens,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        )
+        return resp.choices[0].message.content.strip()
+    elif provider == "openai":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            max_tokens=max_tokens,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        )
+        return resp.choices[0].message.content.strip()
+    else:  # anthropic default
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return resp.content[0].text.strip()
+
+
+_GENRE_BUCKETS_SET = {"metal", "hip-hop", "electronic", "rock", "pop", "jazz", "classical", "folk", "latin", "world", "other"}
+
+
+def _llm_genre_detect(
+    tracks: list[dict],
+    api_key: str,
+    provider: str = "anthropic",
+) -> list[str]:
+    """
+    Batch-classify each track's genre using an LLM.
+    Falls back to keyword bucketing on failure.
+    """
+    import json
+    import re as _re
+
+    fallback = ["other"] * len(tracks)
+
+    system_msg = (
+        "You are a music genre classifier. For each numbered track, assign exactly one genre "
+        "from this fixed list: metal, hip-hop, electronic, rock, pop, jazz, classical, folk, latin, world, other.\n"
+        "Use Spotify genre tags when provided, otherwise use your knowledge of the artist.\n"
+        'Respond ONLY with valid JSON: {"genres": ["genre1", "genre2", ...]}'
+    )
+
+    results = list(fallback)
+    BATCH = 50
+
+    for batch_start in range(0, len(tracks), BATCH):
+        batch = tracks[batch_start: batch_start + BATCH]
+        lines = []
+        for i, t in enumerate(batch):
+            lines.append(f'{batch_start + i}. "{t["name"]}" by {t["artist"]}')
+        user_msg = "\n".join(lines)
+
+        try:
+            raw = _call_llm_chat(system_msg, user_msg, api_key, provider, max_tokens=800)
+            m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+            if not m:
+                continue
+            data = json.loads(m.group(0))
+            for i, genre in enumerate(data.get("genres", [])):
+                idx = batch_start + i
+                if idx < len(results) and genre in _GENRE_BUCKETS_SET:
+                    results[idx] = genre
+        except Exception as exc:
+            print(f"[pipeline] LLM genre batch {batch_start//BATCH + 1} failed ({exc})")
+
+    detected = sum(1 for g in results if g != "other")
+    print(f"[pipeline] LLM genre detection: {detected}/{len(tracks)} tracks classified")
+    return results
+
+
+# ---------------------------------------------------------------------------
 # LLM mood grouping
 # ---------------------------------------------------------------------------
 
@@ -652,6 +749,7 @@ def _llm_mood_groups(
     playlist_meta: list[dict],
     pl_track_samples: dict[str, list[str]],
     api_key: str = "",
+    provider: str = "anthropic",
 ) -> tuple[dict[str, str], str]:
     """
     Group playlists into persona-aware mood categories using Claude.
@@ -664,9 +762,6 @@ def _llm_mood_groups(
         return {}, ""
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-
         # Build the user message with playlist names + track samples
         lines = ["Playlists and sample tracks:"]
         for p in playlist_meta:
@@ -699,16 +794,9 @@ def _llm_mood_groups(
             '{"persona": "...", "categories": [{"mood": "...", "playlists": ["...", "..."]}, ...]}'
         )
 
-        print(f"[pipeline] sending {len(playlist_meta)} playlists to LLM for mood grouping")
-        resp = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=1200,
-            system=system_msg,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-
+        print(f"[pipeline] sending {len(playlist_meta)} playlists to LLM ({provider}) for mood grouping")
         import re as _re
-        raw = resp.content[0].text.strip()
+        raw = _call_llm_chat(system_msg, user_msg, api_key, provider, max_tokens=1200)
         print(f"[pipeline] LLM raw response: {raw[:500]}")
         match = _re.search(r'\{.*\}', raw, _re.DOTALL)
         if not match:

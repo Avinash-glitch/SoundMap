@@ -10,7 +10,7 @@ _executor = ThreadPoolExecutor(max_workers=4)
 jobs: dict[str, dict] = {}
 
 
-def submit_job(access_token: str, user_id: str, display_name: str, api_key: str = "") -> str:
+def submit_job(access_token: str, user_id: str, display_name: str, api_key: str = "", provider: str = "") -> str:
     """Queue a pipeline job and return the job_id."""
     from . import pipeline  # lazy import avoids circular deps at module load
 
@@ -31,7 +31,7 @@ def submit_job(access_token: str, user_id: str, display_name: str, api_key: str 
     def _run() -> None:
         jobs[job_id]["status"] = "processing"
         try:
-            pipeline.process_user(access_token, user_id, on_progress=_on_progress, display_name=display_name, api_key=api_key)
+            pipeline.process_user(access_token, user_id, on_progress=_on_progress, display_name=display_name, api_key=api_key, provider=provider)
             jobs[job_id]["status"] = "done"
             jobs[job_id]["progress"] = 100
             jobs[job_id]["message"] = "Done!"
