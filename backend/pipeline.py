@@ -211,12 +211,17 @@ def _fetch_playlists_data(
     Returns (track_objects, playlist_meta, pl_track_samples) and builds pl_lookup in-place.
     pl_track_samples: {playlist_name: ["Track — Artist", ...]} up to 10 per playlist.
     """
-    pl_resp = _spotify_get("https://api.spotify.com/v1/me/playlists", headers, params={"limit": 50})
-    if pl_resp.status_code != 200:
-        print(f"[pipeline] /me/playlists failed: HTTP {pl_resp.status_code}")
-        return [], [], {}
-
-    playlists = pl_resp.json().get("items", [])
+    playlists: list[dict] = []
+    pl_list_url: str | None = "https://api.spotify.com/v1/me/playlists"
+    base_pl_url = pl_list_url
+    while pl_list_url:
+        pl_resp = _spotify_get(pl_list_url, headers, params={"limit": 50} if pl_list_url == base_pl_url else None)
+        if pl_resp.status_code != 200:
+            print(f"[pipeline] /me/playlists failed: HTTP {pl_resp.status_code}")
+            return [], [], {}
+        body = pl_resp.json()
+        playlists.extend(body.get("items", []))
+        pl_list_url = body.get("next")
 
     # Only include playlists this user owns or collaborates on
     owned = [
