@@ -294,21 +294,25 @@ def _fetch_recent_tracks(headers: dict) -> list[dict]:
 
 def _normalise_track(t: dict) -> dict:
     artists = t.get("artists", [])
+    album = t.get("album", {}) or {}
+    release_date = album.get("release_date", "") or ""
+    release_year = int(release_date[:4]) if len(release_date) >= 4 and release_date[:4].isdigit() else None
     return {
         "id": t["id"],
         "name": t.get("name", ""),
         "artist": artists[0]["name"] if artists else "",
         "artists": [a["name"] for a in artists],
         "artist_ids": [a["id"] for a in artists if a.get("id")],
-        "album": t.get("album", {}).get("name", ""),
+        "album": album.get("name", ""),
         "album_art": (
-            t.get("album", {}).get("images", [{}])[0].get("url", "")
-            if t.get("album", {}).get("images") else ""
+            album.get("images", [{}])[0].get("url", "")
+            if album.get("images") else ""
         ),
         "preview_url": t.get("preview_url"),
         "external_url": t.get("external_urls", {}).get("spotify", ""),
         "duration_ms": t.get("duration_ms", 0),
         "popularity": t.get("popularity", 0),
+        "release_year": release_year,
     }
 
 
@@ -490,8 +494,9 @@ def _genre_embeddings(
     pl_index = {pl: i for i, pl in enumerate(all_playlists)}
     n_pl = max(len(all_playlists), 1)
 
-    # Feature matrix: genre one-hot + playlist one-hot (2x weight) + popularity
-    n_cols = n_genres + n_pl * 2 + 1
+    # Feature matrix: genre one-hot + playlist one-hot (4x weight) + popularity
+    # 4x playlist weight means UMAP's KNN graph treats same-playlist tracks as close neighbours
+    n_cols = n_genres + n_pl * 4 + 1
     matrix = np.zeros((len(tracks), n_cols), dtype=float)
     track_genres: list[str] = []
 
@@ -504,11 +509,15 @@ def _genre_embeddings(
             if genre in genre_index:
                 matrix[ti, genre_index[genre]] = 1.0
 
-        # Playlist features at 2x weight so same-playlist tracks cluster together
+        # 4x weight: fills 4 columns per playlist so playlist co-membership
+        # dominates the KNN neighbourhood in UMAP
         for pl in track.get("playlists", []):
             if pl in pl_index:
-                matrix[ti, n_genres + pl_index[pl] * 2] = 2.0
-                matrix[ti, n_genres + pl_index[pl] * 2 + 1] = 2.0
+                base = n_genres + pl_index[pl] * 4
+                matrix[ti, base]     = 1.0
+                matrix[ti, base + 1] = 1.0
+                matrix[ti, base + 2] = 1.0
+                matrix[ti, base + 3] = 1.0
 
         matrix[ti, n_cols - 1] = (track.get("popularity", 50) or 50) / 100.0
         track_genres.append(_primary_genre(genres_for_track))

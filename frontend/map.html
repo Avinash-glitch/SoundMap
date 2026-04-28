@@ -838,8 +838,9 @@
       <span style="opacity:0.5;margin-left:2px">✕</span>
     </div>
     <div class="mode-toggle" id="map-mode-toggle">
-      <button class="mode-btn active" data-mode="moods">Mood Zones</button>
-      <button class="mode-btn" data-mode="playlists">Playlists</button>
+      <button class="mode-btn" data-mode="moods">Mood Zones</button>
+      <button class="mode-btn active" data-mode="playlists">Playlists</button>
+      <button class="mode-btn" data-mode="chart">Chart</button>
     </div>
     <button class="btn-icon" id="btn-ai" title="AI Playlist Curator" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(29,185,84,.4)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
@@ -1081,7 +1082,7 @@ function buildPlaylistColors(playlists) {
 }
 
 function pointColor(p) {
-  if (mapMode === 'playlists') {
+  if (mapMode === 'playlists' || mapMode === 'chart') {
     const pl = (p.playlists || [])[0];
     return playlistColors[pl] || COLOR_UNTAGGED;
   }
@@ -1089,9 +1090,9 @@ function pointColor(p) {
 }
 
 function pointRadius(p, base) {
-  // play_score 1–9+ → scale radius logarithmically so the range feels natural
-  const s = Math.max(1, p.play_score || 1);
-  return base * (1 + Math.log(s) / Math.log(9) * 0.8);
+  // popularity 0-100 (Spotify score) → radius 0.5×–2.0× base
+  const pop = Math.max(0, Math.min(100, p.popularity || 0));
+  return base * (0.5 + (pop / 100) * 1.5);
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,8 +1108,15 @@ let points = [];
 let transform = { x: 0, y: 0, scale: 1 };
 let selectedPoint = null;
 let hoveredPoint = null;
-let mapMode = 'moods'; // 'moods' | 'playlists'
+let mapMode = 'playlists'; // 'moods' | 'playlists' | 'chart'
 let aiHighlightSet = null; // Set<string> | null — IDs returned by AI curator
+
+// Chart mode state
+let chartYearRange = [1960, 2025];
+const CHART_ML = 52;   // left margin (Y-axis labels)
+const CHART_MB = 38;   // bottom margin (X-axis labels)
+const CHART_MT = 24;   // top margin
+const CHART_MR = 20;   // right margin
 
 // ---------------------------------------------------------------------------
 // Canvas setup
@@ -1155,6 +1163,13 @@ async function loadMap() {
 
     buildMoodColors(mapData.moods || []);
     buildPlaylistColors(mapData.playlists || []);
+
+    // Set year range for chart mode
+    const years = points.map(p => p.release_year).filter(y => y && y > 1900);
+    if (years.length) {
+      chartYearRange = [Math.min(...years) - 1, Math.max(...years) + 1];
+    }
+
     buildLegend();
 
     // Show persona string under user badge if available
@@ -1219,6 +1234,7 @@ const COMPARE_COLOR = '#818cf8';
 let activeGenreFilter = null;
 
 function render() {
+  if (mapMode === 'chart') { renderChart(); return; }
   if (comparePoints.length) { renderWithCompare(); return; }
   _renderDots();
 }
@@ -1332,7 +1348,7 @@ function _renderDots() {
 }
 
 function buildLegend() {
-  if (mapMode === 'playlists') return buildPlaylistLegend();
+  if (mapMode === 'playlists' || mapMode === 'chart') return buildPlaylistLegend();
   return buildMoodLegend();
 }
 
@@ -1468,7 +1484,7 @@ function showFilterTracks(key, color, pts) {
   const sorted = [...pts].sort((a, b) => (b.play_score || 1) - (a.play_score || 1));
   const legend = document.getElementById('map-legend');
   // Only show save button in mood mode — playlists already exist in Spotify
-  const showSave = mapMode === 'moods' && pts.length > 0 && key !== 'Uncharted';
+  const showSave = (mapMode === 'moods') && pts.length > 0 && key !== 'Uncharted';
 
   legend.innerHTML = `
     <div class="legend-back" id="legend-back">
@@ -1605,6 +1621,7 @@ function hitTestOwn(cx, cy) {
 }
 
 function hitTest(cx, cy) {
+  if (mapMode === 'chart') return hitTestChart(cx, cy);
   return comparePoints.length ? hitTestAll(cx, cy) : hitTestOwn(cx, cy);
 }
 
@@ -1614,6 +1631,7 @@ function hitTest(cx, cy) {
 let isDragging = false, dragStart = null, transformStart = null;
 
 canvas.addEventListener('mousedown', e => {
+  if (mapMode === 'chart') return;
   isDragging = false;
   dragStart = { x: e.clientX, y: e.clientY };
   transformStart = { ...transform };
@@ -1671,6 +1689,7 @@ canvas.addEventListener('mouseleave', () => {
 
 // Wheel zoom
 canvas.addEventListener('wheel', e => {
+  if (mapMode === 'chart') return;
   e.preventDefault();
   const factor = e.deltaY > 0 ? 0.88 : 1.14;
   const cx = e.clientX, cy = e.clientY;
@@ -2227,7 +2246,7 @@ function _showAiBadge(name, count) {
 
 _bindAiModalBtns();
 
-// Map mode toggle (Mood Zones ↔ Playlists)
+// Map mode toggle (Mood Zones | Playlists | Chart)
 // ---------------------------------------------------------------------------
 document.getElementById('map-mode-toggle').addEventListener('click', e => {
   const btn = e.target.closest('.mode-btn');
@@ -2236,6 +2255,8 @@ document.getElementById('map-mode-toggle').addEventListener('click', e => {
   document.querySelectorAll('#map-mode-toggle .mode-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.mode === mapMode));
   activeGenreFilter = null;
+  // In chart mode hide zoom controls and legend (chart has its own axes)
+  document.querySelector('.zoom-controls').style.display = mapMode === 'chart' ? 'none' : '';
   buildLegend();
   render();
 });
@@ -2526,6 +2547,124 @@ document.getElementById('compare-badge').addEventListener('click', () => {
 document.getElementById('compare-modal').addEventListener('click', e => {
   if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
 });
+
+// ---------------------------------------------------------------------------
+// Chart mode — Popularity vs Release Year
+// ---------------------------------------------------------------------------
+
+function chartToCanvas(year, popularity) {
+  const [minY, maxY] = chartYearRange;
+  const cx = CHART_ML + (year - minY) / Math.max(maxY - minY, 1) * (W - CHART_ML - CHART_MR);
+  const cy = CHART_MT + (1 - popularity / 100) * (H - CHART_MT - CHART_MB);
+  return { cx, cy };
+}
+
+function renderChart() {
+  ctx.clearRect(0, 0, W, H);
+  const [minY, maxY] = chartYearRange;
+
+  ctx.font = '10px DM Mono, monospace';
+
+  // ---- Grid lines ----
+  // Year grid (every 5 years, label every decade)
+  const startDecade = Math.ceil(minY / 5) * 5;
+  for (let year = startDecade; year <= maxY; year += 5) {
+    const { cx } = chartToCanvas(year, 50);
+    const isDecade = year % 10 === 0;
+    ctx.strokeStyle = isDecade ? 'rgba(42,42,53,0.9)' : 'rgba(42,42,53,0.4)';
+    ctx.lineWidth = isDecade ? 1 : 0.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, CHART_MT);
+    ctx.lineTo(cx, H - CHART_MB);
+    ctx.stroke();
+
+    if (isDecade) {
+      ctx.fillStyle = '#666677';
+      ctx.textAlign = 'center';
+      ctx.fillText(year.toString(), cx, H - CHART_MB + 14);
+    }
+  }
+
+  // Popularity grid (0, 25, 50, 75, 100)
+  for (const pop of [0, 25, 50, 75, 100]) {
+    const { cy } = chartToCanvas(minY, pop);
+    ctx.strokeStyle = pop % 50 === 0 ? 'rgba(42,42,53,0.9)' : 'rgba(42,42,53,0.4)';
+    ctx.lineWidth = pop % 50 === 0 ? 1 : 0.5;
+    ctx.beginPath();
+    ctx.moveTo(CHART_ML, cy);
+    ctx.lineTo(W - CHART_MR, cy);
+    ctx.stroke();
+
+    ctx.fillStyle = '#666677';
+    ctx.textAlign = 'right';
+    ctx.fillText(pop.toString(), CHART_ML - 6, cy + 3);
+  }
+
+  // ---- Axis labels ----
+  ctx.fillStyle = '#888899';
+  ctx.font = '11px DM Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('Release Year', W / 2, H - 6);
+
+  ctx.save();
+  ctx.translate(13, H / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('Popularity', 0, 0);
+  ctx.restore();
+
+  // ---- Axis border ----
+  ctx.strokeStyle = '#2a2a35';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(CHART_ML, CHART_MT);
+  ctx.lineTo(CHART_ML, H - CHART_MB);
+  ctx.lineTo(W - CHART_MR, H - CHART_MB);
+  ctx.stroke();
+
+  // ---- Dots ----
+  for (const p of points) {
+    const year = p.release_year;
+    const pop = p.popularity ?? 0;
+    if (!year) continue;
+
+    const { cx, cy } = chartToCanvas(year, pop);
+    const isSel = selectedPoint && selectedPoint.id === p.id;
+    const isHov = hoveredPoint && hoveredPoint.id === p.id;
+    const color = pointColor(p);
+
+    // Bigger base radius in chart view so dots are easy to click
+    const r = isSel ? 9 : isHov ? 7 : Math.max(3, 2.5 + (pop / 100) * 3);
+
+    if (isSel) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 7, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(29,185,84,0.12)';
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = aiHighlightSet ? (aiHighlightSet.has(p.id) ? 1 : 0.12) : 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = isSel ? COLOR_SEL : isHov ? COLOR_HOVER : color;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    if (isHov || isSel) {
+      drawLabel(cx, cy, r, p.name, isSel ? COLOR_SEL : COLOR_HOVER);
+    }
+  }
+}
+
+function hitTestChart(cx, cy) {
+  let best = null, bestDist = HIT_RADIUS + 4; // slightly larger target in chart
+  for (const p of points) {
+    if (!p.release_year) continue;
+    const { cx: px, cy: py } = chartToCanvas(p.release_year, p.popularity ?? 0);
+    const d = Math.hypot(cx - px, cy - py);
+    if (d < bestDist) { bestDist = d; best = p; }
+  }
+  return best;
+}
 
 // ---------------------------------------------------------------------------
 // Now Playing
