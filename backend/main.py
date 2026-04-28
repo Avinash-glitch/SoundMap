@@ -18,6 +18,17 @@ from . import storage
 
 load_dotenv()
 
+_ENV_KEY_MAP = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "nvidia": "NVIDIA_API_KEY"}
+
+
+def _default_provider() -> str:
+    """Pick the first provider whose API key is configured in the environment."""
+    for provider in ("nvidia", "anthropic", "openai"):
+        if os.environ.get(_ENV_KEY_MAP[provider]):
+            return provider
+    return "anthropic"
+
+
 app = FastAPI(title="SoundMap")
 
 app.add_middleware(
@@ -80,15 +91,14 @@ async def analyze_moods(request: Request) -> JSONResponse:
     try:
         body = await request.json()
         user_api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or "anthropic").strip().lower()
+        provider = (body.get("provider") or _default_provider()).strip().lower()
     except Exception:
         user_api_key, provider = "", "anthropic"
 
     if provider not in ("anthropic", "openai", "nvidia"):
         raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
-    _env_key_map = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "nvidia": "NVIDIA_API_KEY"}
-    api_key = user_api_key or os.environ.get(_env_key_map[provider], "")
+    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key required")
 
@@ -233,15 +243,14 @@ async def generate_remaining_playlists(request: Request) -> JSONResponse:
     try:
         body = await request.json()
         user_api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or "anthropic").strip().lower()
+        provider = (body.get("provider") or _default_provider()).strip().lower()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
     if provider not in ("anthropic", "openai", "nvidia"):
         raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
-    _env_key_map = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "nvidia": "NVIDIA_API_KEY"}
-    api_key = user_api_key or os.environ.get(_env_key_map[provider], "")
+    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key required")
 
@@ -700,7 +709,7 @@ async def ai_playlist(request: Request) -> JSONResponse:
         prompt = (body.get("prompt") or "").strip()
         custom_name = (body.get("name") or "").strip()
         user_api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or "anthropic").strip().lower()
+        provider = (body.get("provider") or _default_provider()).strip().lower()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
@@ -712,11 +721,10 @@ async def ai_playlist(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
     # Resolve API key: user-supplied key takes priority over server key
-    _env_key_map = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "nvidia": "NVIDIA_API_KEY"}
-    api_key = user_api_key or os.environ.get(_env_key_map[provider], "")
+    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
     if not api_key:
         _labels = {"anthropic": "Anthropic", "openai": "OpenAI", "nvidia": "NVIDIA"}
-        raise HTTPException(status_code=500, detail=f"No {_labels[provider]} API key — add yours in AI settings or configure {_env_key_map[provider]}")
+        raise HTTPException(status_code=500, detail=f"No {_labels[provider]} API key — add yours in AI settings or configure {_ENV_KEY_MAP[provider]}")
 
     map_data = storage.load_map(user_id)
     if not map_data:

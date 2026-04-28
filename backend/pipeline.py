@@ -22,6 +22,16 @@ MAX_TRACKS = 500
 ARTIST_BATCH = 50
 PREVIEW_CONCURRENCY = 5
 
+_ENV_KEY_MAP = {"nvidia": "NVIDIA_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
+
+
+def _default_provider() -> str:
+    import os
+    for p in ("nvidia", "anthropic", "openai"):
+        if os.environ.get(_ENV_KEY_MAP[p]):
+            return p
+    return "anthropic"
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -59,7 +69,7 @@ def process_user(
         raise RuntimeError("No tracks found in your Spotify library.")
 
     progress(28, "Grouping playlists into moods…")
-    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_track_samples, api_key=api_key, provider=provider or "anthropic")
+    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_track_samples, api_key=api_key, provider=provider or _default_provider())
 
     progress(30, f"Processing {len(tracks)} tracks across {len(playlist_meta)} playlists…")
 
@@ -77,7 +87,7 @@ def process_user(
     if api_key:
         progress(71, "Detecting genres with AI…")
         try:
-            track_genres = _llm_genre_detect(tracks, api_key, provider or "anthropic")
+            track_genres = _llm_genre_detect(tracks, api_key, provider or _default_provider())
         except Exception as _ge:
             print(f"[pipeline] LLM genre detection failed ({_ge}) — keeping keyword genres")
 
