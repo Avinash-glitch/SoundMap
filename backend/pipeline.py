@@ -243,16 +243,20 @@ def _fetch_playlists_data(
         pl_name = pl.get("name", pl_id)
         pl_track_samples[pl_name] = []
 
-        url = f"https://api.spotify.com/v1/playlists/{pl_id}/items"
+        base_url = f"https://api.spotify.com/v1/playlists/{pl_id}/items"
+        url: str | None = base_url
         while url:
-            resp = _spotify_get(url, headers, params={"limit": 50})
+            # Only pass params on the first request — pagination URLs already
+            # contain limit/offset and adding params again causes duplicates.
+            resp = _spotify_get(url, headers, params={"limit": 50} if url == base_url else None)
             if resp.status_code != 200:
                 print(f"[pipeline] playlist '{pl_name}': HTTP {resp.status_code}")
                 break
             data = resp.json()
 
             for item in data.get("items", []):
-                t = (item or {}).get("item")
+                # Spotify returns "track" key for tracks (both old and new endpoint)
+                t = (item or {}).get("track") or (item or {}).get("item")
                 if not t or not t.get("id") or t.get("type") == "episode":
                     continue
                 tid = t["id"]
@@ -263,7 +267,7 @@ def _fetch_playlists_data(
                 if pl_name not in pl_lookup[tid]:
                     pl_lookup[tid].append(pl_name)
                 track_objects.append(_normalise_track(t))
-                if len(pl_track_samples[pl_name]) < 10:
+                if len(pl_track_samples[pl_name]) < 15:
                     artists = t.get("artists", [])
                     artist_name = artists[0]["name"] if artists else ""
                     pl_track_samples[pl_name].append(f'{t.get("name", "")} — {artist_name}')
