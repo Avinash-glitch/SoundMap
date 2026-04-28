@@ -94,6 +94,7 @@ async def callback(request: Request, code: str | None = None, error: str | None 
 
     token_data = token_resp.json()
     access_token = token_data["access_token"]
+    refresh_token = token_data.get("refresh_token", "")
 
     # Fetch user profile
     async with httpx.AsyncClient() as client:
@@ -111,8 +112,9 @@ async def callback(request: Request, code: str | None = None, error: str | None 
 
     print(f"[auth] User logged in: {display_name} ({user_id})")
 
-    # Store token in session for debug endpoints and playlist creation
+    # Store tokens in session for downstream endpoints and playlist creation
     request.session["access_token"] = access_token
+    request.session["refresh_token"] = refresh_token
     request.session["user_id"] = user_id
     request.session["display_name"] = display_name
 
@@ -122,3 +124,26 @@ async def callback(request: Request, code: str | None = None, error: str | None 
         return RedirectResponse(f"{app_url}/map.html?user={user_id}")
 
     return RedirectResponse(f"{app_url}/loading.html?user={user_id}")
+
+
+async def refresh_access_token(request: Request) -> str | None:
+    """Exchange the stored refresh token for a new access token. Updates session in place."""
+    refresh_token = request.session.get("refresh_token", "")
+    if not refresh_token:
+        return None
+    client_id = os.environ["SPOTIFY_CLIENT_ID"]
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            SPOTIFY_TOKEN_URL,
+            data={"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": client_id},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    if resp.status_code != 200:
+        return None
+    data = resp.json()
+    new_token = data.get("access_token")
+    if new_token:
+        request.session["access_token"] = new_token
+    if data.get("refresh_token"):
+        request.session["refresh_token"] = data["refresh_token"]
+    return new_token

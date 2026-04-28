@@ -11,8 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from .auth import router as auth_router
-from .jobs import get_job, submit_job
+from .auth import router as auth_router, refresh_access_token
+from .jobs import get_job, submit_job, stop_job
 from .models import JobStatus
 from . import storage
 
@@ -46,6 +46,19 @@ app.add_middleware(
 app.include_router(auth_router)
 
 FRONTEND = Path(__file__).parent.parent / "frontend"
+
+
+async def _get_valid_token(request: Request) -> str | None:
+    """Return a valid Spotify access token, auto-refreshing if the stored one is expired."""
+    token = request.session.get("access_token")
+    if not token:
+        return None
+    # Check if still valid with a lightweight call
+    test = _requests.get("https://api.spotify.com/v1/me",
+                         headers={"Authorization": f"Bearer {token}"}, timeout=5)
+    if test.status_code != 401:
+        return token
+    return await refresh_access_token(request)
 
 
 @app.get("/")
@@ -169,6 +182,19 @@ async def start_job(request: Request) -> JSONResponse:
     return JSONResponse({"job_id": job_id, "user_id": user_id})
 
 
+@app.post("/stop-job/{job_id}")
+async def stop_job_endpoint(job_id: str, request: Request) -> JSONResponse:
+    """Signal the pipeline to stop fetching early and build the map with what it has."""
+    user_id = request.session.get("user_id")
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Not your job")
+    stopped = stop_job(job_id)
+    return JSONResponse({"stopped": stopped})
+
+
 @app.get("/debug/token")
 async def debug_token(request: Request) -> JSONResponse:
     """Return the current session's Spotify token for testing."""
@@ -240,10 +266,12 @@ async def generate_remaining_playlists(request: Request) -> JSONResponse:
     AI-groups a user's liked-but-unorganised tracks into new Spotify playlists.
     Body: {"api_key": "...", "provider": "anthropic"|"openai"}
     """
-    token = request.session.get("access_token")
     user_id = request.session.get("user_id")
-    if not token or not user_id:
+    if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
+    token = await _get_valid_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
 
     try:
         body = await request.json()
@@ -801,10 +829,12 @@ async def ai_playlist(request: Request) -> JSONResponse:
     Body: {"prompt": "...", "name": "..." (optional), "api_key": "..." (optional), "provider": "anthropic"|"openai" (optional)}
     Returns: {name, url, track_count, duration_min, reasoning, track_ids}
     """
-    token = request.session.get("access_token")
     user_id = request.session.get("user_id")
-    if not token or not user_id:
+    if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
+    token = await _get_valid_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
 
     try:
         body = await request.json()

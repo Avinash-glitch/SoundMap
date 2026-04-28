@@ -1,13 +1,14 @@
 """Background job processing with ThreadPoolExecutor — no Redis needed for V1."""
 
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable
 
 _executor = ThreadPoolExecutor(max_workers=4)
 
 # job_id → {status, progress, message, user_id, display_name, error}
 jobs: dict[str, dict] = {}
+_stop_events: dict[str, threading.Event] = {}
 
 
 def submit_job(access_token: str, user_id: str, display_name: str, api_key: str = "", provider: str = "") -> str:
@@ -15,6 +16,9 @@ def submit_job(access_token: str, user_id: str, display_name: str, api_key: str 
     from . import pipeline  # lazy import avoids circular deps at module load
 
     job_id = str(uuid.uuid4())
+    stop_event = threading.Event()
+    _stop_events[job_id] = stop_event
+
     jobs[job_id] = {
         "status": "queued",
         "progress": 0,
@@ -31,7 +35,14 @@ def submit_job(access_token: str, user_id: str, display_name: str, api_key: str 
     def _run() -> None:
         jobs[job_id]["status"] = "processing"
         try:
-            pipeline.process_user(access_token, user_id, on_progress=_on_progress, display_name=display_name, api_key=api_key, provider=provider)
+            pipeline.process_user(
+                access_token, user_id,
+                on_progress=_on_progress,
+                display_name=display_name,
+                api_key=api_key,
+                provider=provider,
+                stop_event=stop_event,
+            )
             jobs[job_id]["status"] = "done"
             jobs[job_id]["progress"] = 100
             jobs[job_id]["message"] = "Done!"
@@ -43,6 +54,16 @@ def submit_job(access_token: str, user_id: str, display_name: str, api_key: str 
 
     _executor.submit(_run)
     return job_id
+
+
+def stop_job(job_id: str) -> bool:
+    """Signal the pipeline to stop fetching and build the map with what it has."""
+    job = jobs.get(job_id)
+    event = _stop_events.get(job_id)
+    if job and event and job["status"] == "processing":
+        event.set()
+        return True
+    return False
 
 
 def get_job(job_id: str) -> dict | None:

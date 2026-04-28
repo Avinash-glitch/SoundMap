@@ -256,12 +256,12 @@
     <!-- Step 1: API key entry -->
     <div id="setup-panel" class="setup-panel">
       <div class="setup-title">Almost there</div>
-      <p class="setup-sub">SoundMap uses Claude AI to group your playlists into mood territories. Add your Anthropic API key to enable this — or skip and get a basic map.</p>
-      <label for="api-key-input">Anthropic API Key (optional)</label>
-      <input type="text" id="api-key-input" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
-      <div class="key-hint">Your key is sent directly to Anthropic and never stored on our servers. Get one at console.anthropic.com.</div>
+      <p class="setup-sub">SoundMap uses NVIDIA GLM-5.1 to group your playlists into mood territories. Paste your NVIDIA API key to use your own quota — or skip and use the server's key.</p>
+      <label for="api-key-input">NVIDIA API Key (optional)</label>
+      <input type="text" id="api-key-input" placeholder="nvapi-…" autocomplete="off" spellcheck="false" />
+      <div class="key-hint">Get a free key at <a href="https://build.nvidia.com/settings/api-keys" target="_blank" rel="noopener" style="color:var(--accent)">build.nvidia.com</a>. Your key is never stored on our servers.</div>
       <button class="btn-generate" id="btn-generate">Generate My Map</button>
-      <span class="skip-link" id="skip-link">Skip — generate without AI moods</span>
+      <span class="skip-link" id="skip-link">Skip — use server key</span>
     </div>
 
     <!-- Step 2: Progress -->
@@ -285,6 +285,12 @@
 
       <div class="eta" id="eta-note">
         Audio features: ~2 min &nbsp;·&nbsp; CLAP embeddings: ~20 min
+      </div>
+
+      <div style="margin-top:1.25rem">
+        <button id="btn-stop" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:'DM Mono',monospace;font-size:0.75rem;border-radius:100px;padding:0.45rem 1.2rem;cursor:pointer;transition:border-color .15s,color .15s" title="Stop fetching and build the map with tracks collected so far">
+          Build map now with what's fetched
+        </button>
       </div>
 
       <div class="error-box" id="error-box">
@@ -318,10 +324,11 @@
   const errorDetail = document.getElementById('error-detail');
 
   // Pre-fill from localStorage if user has saved a key in the map UI
-  const savedKey = localStorage.getItem('sm_ai_key_anthropic') || '';
+  const savedKey = localStorage.getItem('sm_ai_key_nvidia') || localStorage.getItem('sm_ai_key_anthropic') || '';
   if (savedKey) apiKeyInput.value = savedKey;
 
   let startTime = Date.now();
+  let currentJobId = null;
 
   function updateETA(pct) {
     if (pct <= 0 || pct >= 100) { etaEl.textContent = ''; return; }
@@ -380,9 +387,9 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
 
-      // Save the key to localStorage for use in the map UI
-      if (apiKey) localStorage.setItem('sm_ai_key_anthropic', apiKey);
+      if (apiKey) localStorage.setItem('sm_ai_key_nvidia', apiKey);
 
+      currentJobId = data.job_id;
       setupPanel.style.display = 'none';
       progressPanel.style.display = 'block';
       startTime = Date.now();
@@ -396,6 +403,16 @@
 
   btnGenerate.addEventListener('click', () => startJob(apiKeyInput.value.trim()));
   skipLink.addEventListener('click', () => startJob(''));
+
+  document.getElementById('btn-stop').addEventListener('click', async () => {
+    if (!currentJobId) return;
+    const btn = document.getElementById('btn-stop');
+    btn.disabled = true;
+    btn.textContent = 'Stopping…';
+    try {
+      await fetch(`/stop-job/${currentJobId}`, { method: 'POST' });
+    } catch (_) {}
+  });
 
   // ---- Background canvas (same as index.html) ----
   const canvas = document.getElementById('bg-canvas');

@@ -44,6 +44,7 @@ def process_user(
     display_name: str = "",
     api_key: str = "",
     provider: str = "",
+    stop_event=None,
 ) -> dict:
     """
     Full pipeline for one user.
@@ -63,7 +64,7 @@ def process_user(
 
     # ---- 1. Collect tracks ------------------------------------------------
     progress(5, "Fetching your library…")
-    tracks, playlist_meta, pl_track_samples, remaining = _collect_tracks(headers, progress, user_id=user_id)
+    tracks, playlist_meta, pl_track_samples, remaining = _collect_tracks(headers, progress, user_id=user_id, stop_event=stop_event)
 
     if not tracks:
         raise RuntimeError("No tracks found in your Spotify library.")
@@ -108,20 +109,25 @@ def process_user(
 # Track collection
 # ---------------------------------------------------------------------------
 
-def _collect_tracks(headers: dict, progress: Callable, user_id: str = "") -> tuple[list[dict], list[dict], dict[str, list[str]]]:
+def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_event=None) -> tuple[list[dict], list[dict], dict[str, list[str]]]:
     """
-    Gather up to MAX_TRACKS unique tracks. Returns (tracks, playlist_meta).
+    Gather all unique tracks — no cap. Returns (tracks, playlist_meta).
     Each track gets 'playlists' (list of playlist names) and 'play_score' (int).
-    play_score is a personal listening-frequency proxy scored across data sources.
+    stop_event: threading.Event — if set mid-fetch, skips remaining sources and
+    builds the map with whatever has been collected so far.
     """
+    def _stopped() -> bool:
+        return stop_event is not None and stop_event.is_set()
+
     # Step 1: fetch playlists once — builds pl_lookup and collects track objects
     pl_lookup: dict[str, list[str]] = {}
     pl_trks, playlist_meta, pl_track_samples = _fetch_playlists_data(headers, pl_lookup, user_id=user_id)
 
     # Step 2: gather from each source separately so we can score per-source
     scored: dict[str, int] = {}
+    all_sources: list[list[dict]] = []
 
-    def _score(tracks_list: list[dict], weight: int, cap: int | None = None) -> list[dict]:
+    def _score(tracks_list: list[dict], weight: int, cap: int | None = None) -> None:
         for t in tracks_list:
             tid = t.get("id")
             if not tid:
@@ -129,39 +135,50 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "") -> tup
             current = scored.get(tid, 0)
             add = weight if cap is None else min(weight, cap - current)
             scored[tid] = current + max(add, 0)
-        return tracks_list
-
-    saved   = _fetch_saved_tracks(headers)
-    _score(saved, 2)  # liked = stronger signal than a playlist entry
 
     _score(pl_trks, 1)
+    all_sources.append(pl_trks)
 
-    top_s   = _fetch_top_tracks_range(headers, "short_term")
-    _score(top_s, 3)
+    saved = _fetch_saved_tracks(headers)
+    _score(saved, 2)
+    all_sources.append(saved)
 
-    top_m   = _fetch_top_tracks_range(headers, "medium_term")
-    _score(top_m, 2)
+    if not _stopped():
+        top_s = _fetch_top_tracks_range(headers, "short_term")
+        _score(top_s, 3)
+        all_sources.append(top_s)
 
-    top_l   = _fetch_top_tracks_range(headers, "long_term")
-    _score(top_l, 1)
+    if not _stopped():
+        top_m = _fetch_top_tracks_range(headers, "medium_term")
+        _score(top_m, 2)
+        all_sources.append(top_m)
 
-    recent  = _fetch_recent_tracks(headers)  # may contain duplicates = more plays
-    _score(recent, 1, cap=3)  # cap recent bonus at +3 per track
+    if not _stopped():
+        top_l = _fetch_top_tracks_range(headers, "long_term")
+        _score(top_l, 1)
+        all_sources.append(top_l)
+
+    if not _stopped():
+        recent = _fetch_recent_tracks(headers)
+        _score(recent, 1, cap=3)
+        all_sources.append(recent)
+    elif stop_event and stop_event.is_set():
+        progress(20, "Stopped early — building map with tracks collected so far…")
 
     # Step 3: deduplicate by track id (preserve first occurrence for track metadata)
     seen: dict[str, dict] = {}
-    for t in saved + pl_trks + top_s + top_m + top_l + recent:
+    for t in (t for source in all_sources for t in source):
         tid = t.get("id")
         if tid and tid not in seen:
             seen[tid] = t
 
-    # Step 4: assign play_score to all candidates, then take top MAX_TRACKS by score
+    # Step 4: assign play_score — no hard cap, include everything
     all_candidates = list(seen.values())
     for t in all_candidates:
         t["playlists"] = pl_lookup.get(t["id"], [])
         t["play_score"] = max(scored.get(t["id"], 1), 1)
 
-    tracks = sorted(all_candidates, key=lambda t: t["play_score"], reverse=True)[:MAX_TRACKS]
+    tracks = sorted(all_candidates, key=lambda t: t["play_score"], reverse=True)
 
     # Step 5: compute remaining = liked tracks not in any user-owned playlist
     liked_by_id: dict[str, dict] = {t["id"]: t for t in saved if t.get("id")}
@@ -170,9 +187,7 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "") -> tup
         t for tid, t in liked_by_id.items()
         if tid not in playlist_ids
     ]
-    # Sort most-recently liked first
     remaining.sort(key=lambda t: t.get("liked_at") or "", reverse=True)
-    # Strip heavy fields not needed for the remaining panel
     remaining_slim = [
         {k: t[k] for k in ("id", "name", "artist", "album_art", "liked_at", "release_year", "isrc") if k in t}
         for t in remaining
@@ -182,7 +197,7 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "") -> tup
     with_preview = sum(1 for t in tracks if t.get("preview_url"))
     max_score = max((t["play_score"] for t in tracks), default=1)
     min_score = min((t["play_score"] for t in tracks), default=1)
-    print(f"[pipeline] {len(all_candidates)} candidates → top {len(tracks)} by play_score (range {min_score}–{max_score}), {tagged} in playlists, {with_preview} previews, {len(remaining_slim)} remaining (liked but not in any playlist)")
+    print(f"[pipeline] {len(all_candidates)} total tracks (range {min_score}–{max_score}), {tagged} in playlists, {with_preview} previews, {len(remaining_slim)} remaining")
     return tracks, playlist_meta, pl_track_samples, remaining_slim
 
 
