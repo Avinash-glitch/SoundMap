@@ -1005,22 +1005,35 @@
     <div class="modal-sub">Use your own API key so you're not sharing the server's quota. Keys are stored only in your browser.</div>
 
     <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">Provider</div>
-    <div style="display:flex;gap:.5rem;margin-bottom:1.1rem">
-      <label style="flex:1;display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-anthropic">
+    <div style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:1.1rem">
+      <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-nvidia">
+        <input type="radio" name="ai-provider" value="nvidia" style="accent-color:var(--accent)" />
+        <span>GLM-5.1 (NVIDIA)</span>
+        <span style="margin-left:auto;font-size:.65rem;color:var(--accent2);background:rgba(124,106,247,.15);border-radius:4px;padding:.1rem .4rem">server key</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-anthropic">
         <input type="radio" name="ai-provider" value="anthropic" style="accent-color:var(--accent)" /> Claude (Anthropic)
       </label>
-      <label style="flex:1;display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-openai">
+      <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-openai">
         <input type="radio" name="ai-provider" value="openai" style="accent-color:var(--accent)" /> GPT-4o (OpenAI)
       </label>
     </div>
 
-    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">API Key</div>
-    <input class="modal-input" id="ai-key-input" type="password"
-      placeholder="Paste your API key here…"
-      style="margin-bottom:.4rem;font-family:'DM Mono',monospace" autocomplete="off" />
-    <div style="font-size:.7rem;color:var(--text-dim);margin-bottom:1.25rem;line-height:1.5">
-      Stored in your browser's localStorage. Never sent anywhere except the AI provider via our server.
-      Leave blank to use the server's key (if configured).
+    <div id="ai-key-section">
+      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">API Key</div>
+      <input class="modal-input" id="ai-key-input" type="password"
+        placeholder="Paste your API key here…"
+        style="margin-bottom:.4rem;font-family:'DM Mono',monospace" autocomplete="off" />
+      <div style="font-size:.7rem;color:var(--text-dim);margin-bottom:1.25rem;line-height:1.5">
+        Stored in your browser only. Leave blank to use the server's key.
+      </div>
+    </div>
+    <div id="ai-nvidia-note" style="display:none;font-size:.75rem;color:var(--text-dim);margin-bottom:1.25rem;line-height:1.6;padding:.6rem .8rem;background:rgba(124,106,247,.08);border-radius:6px;border:1px solid rgba(124,106,247,.2)">
+      Using the server's NVIDIA key — no setup needed.<br>
+      <span style="color:var(--text-dim)">Optionally paste your own <code style="font-size:.7rem">nvapi-…</code> key below to use your own quota.</span>
+      <input class="modal-input" id="ai-key-input-nvidia" type="password"
+        placeholder="nvapi-… (optional)"
+        style="margin-top:.5rem;font-family:'DM Mono',monospace;font-size:.72rem" autocomplete="off" />
     </div>
 
     <div class="modal-actions">
@@ -2132,31 +2145,53 @@ document.getElementById('ai-prompt').addEventListener('keydown', e => {
 // AI Key Settings
 // ---------------------------------------------------------------------------
 const LS_KEY_ANTHROPIC = 'sm_ai_key_anthropic';
-const LS_KEY_OPENAI = 'sm_ai_key_openai';
-const LS_PROVIDER = 'sm_ai_provider';
+const LS_KEY_OPENAI    = 'sm_ai_key_openai';
+const LS_KEY_NVIDIA    = 'sm_ai_key_nvidia';
+const LS_PROVIDER      = 'sm_ai_provider';
 
 function _getAiSettings() {
-  const provider = localStorage.getItem(LS_PROVIDER) || 'anthropic';
-  const key = provider === 'openai'
-    ? (localStorage.getItem(LS_KEY_OPENAI) || '')
-    : (localStorage.getItem(LS_KEY_ANTHROPIC) || '');
+  const provider = localStorage.getItem(LS_PROVIDER) || 'nvidia';
+  let key = '';
+  if (provider === 'openai')    key = localStorage.getItem(LS_KEY_OPENAI)    || '';
+  else if (provider === 'nvidia') key = localStorage.getItem(LS_KEY_NVIDIA)  || '';
+  else                            key = localStorage.getItem(LS_KEY_ANTHROPIC) || '';
   return { provider, key };
 }
 
 function _updateAiModalSub() {
   const { provider, key } = _getAiSettings();
-  const sub = document.getElementById('ai-modal-sub');
+  const sub     = document.getElementById('ai-modal-sub');
   const loading = document.getElementById('ai-loading-text');
-  const label = provider === 'openai' ? 'GPT-4o' : 'Claude';
-  const keyNote = key ? ` · using your ${label} key` : '';
-  sub.textContent = `Describe what you want. ${label} reads your full library and builds a playlist that fits.${keyNote}`;
+  const labels  = { nvidia: 'GLM-5.1', openai: 'GPT-4o', anthropic: 'Claude' };
+  const label   = labels[provider] || 'AI';
+  const keyNote = (provider === 'nvidia' && !key) ? ' · server key' : key ? ` · your key` : '';
+  sub.textContent     = `Describe what you want. ${label} reads your library and builds a playlist that fits.${keyNote}`;
   loading.textContent = `${label} is reading your library…`;
+}
+
+function _highlightProviderLabel(provider) {
+  ['nvidia', 'anthropic', 'openai'].forEach(p => {
+    const lbl = document.getElementById(`provider-label-${p}`);
+    if (lbl) lbl.style.borderColor = p === provider ? 'var(--accent)' : 'var(--border)';
+  });
+  // Show/hide key input sections
+  const nvidiaNote = document.getElementById('ai-nvidia-note');
+  const keySection = document.getElementById('ai-key-section');
+  if (provider === 'nvidia') {
+    nvidiaNote.style.display = 'block';
+    keySection.style.display = 'none';
+  } else {
+    nvidiaNote.style.display = 'none';
+    keySection.style.display = 'block';
+  }
 }
 
 document.getElementById('ai-settings-btn').addEventListener('click', () => {
   const { provider, key } = _getAiSettings();
-  document.querySelector(`input[name="ai-provider"][value="${provider}"]`).checked = true;
-  document.getElementById('ai-key-input').value = key;
+  const radio = document.querySelector(`input[name="ai-provider"][value="${provider}"]`);
+  if (radio) radio.checked = true;
+  document.getElementById('ai-key-input').value = provider !== 'nvidia' ? key : '';
+  document.getElementById('ai-key-input-nvidia').value = provider === 'nvidia' ? key : '';
   _highlightProviderLabel(provider);
   document.getElementById('ai-settings-modal').classList.add('open');
 });
@@ -2165,31 +2200,26 @@ document.querySelectorAll('input[name="ai-provider"]').forEach(radio => {
   radio.addEventListener('change', () => _highlightProviderLabel(radio.value));
 });
 
-function _highlightProviderLabel(provider) {
-  ['anthropic', 'openai'].forEach(p => {
-    const lbl = document.getElementById(`provider-label-${p}`);
-    lbl.style.borderColor = p === provider ? 'var(--accent)' : 'var(--border)';
-  });
-}
-
 document.getElementById('ai-settings-save').addEventListener('click', () => {
-  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'anthropic';
-  const key = document.getElementById('ai-key-input').value.trim();
+  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'nvidia';
+  const key = provider === 'nvidia'
+    ? document.getElementById('ai-key-input-nvidia').value.trim()
+    : document.getElementById('ai-key-input').value.trim();
   localStorage.setItem(LS_PROVIDER, provider);
-  if (provider === 'openai') {
-    localStorage.setItem(LS_KEY_OPENAI, key);
-  } else {
-    localStorage.setItem(LS_KEY_ANTHROPIC, key);
-  }
+  if (provider === 'openai')       localStorage.setItem(LS_KEY_OPENAI,    key);
+  else if (provider === 'nvidia')  localStorage.setItem(LS_KEY_NVIDIA,    key);
+  else                             localStorage.setItem(LS_KEY_ANTHROPIC, key);
   _updateAiModalSub();
   document.getElementById('ai-settings-modal').classList.remove('open');
 });
 
 document.getElementById('ai-settings-clear').addEventListener('click', () => {
-  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'anthropic';
-  if (provider === 'openai') localStorage.removeItem(LS_KEY_OPENAI);
-  else localStorage.removeItem(LS_KEY_ANTHROPIC);
+  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'nvidia';
+  if (provider === 'openai')       localStorage.removeItem(LS_KEY_OPENAI);
+  else if (provider === 'nvidia')  localStorage.removeItem(LS_KEY_NVIDIA);
+  else                             localStorage.removeItem(LS_KEY_ANTHROPIC);
   document.getElementById('ai-key-input').value = '';
+  document.getElementById('ai-key-input-nvidia').value = '';
 });
 
 document.getElementById('ai-settings-cancel').addEventListener('click', () => {
