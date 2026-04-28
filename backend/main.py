@@ -301,41 +301,29 @@ async def generate_remaining_playlists(request: Request) -> JSONResponse:
     ]
     manifest = "\n".join(lines)
 
+    # Existing playlist names so the AI can avoid duplicating them
+    existing_pl_names = sorted({pl for p in map_data.get("points", []) for pl in p.get("playlists", [])})
+    existing_note = (
+        f"\nThe user already has these playlists: {', '.join(existing_pl_names[:20])}. "
+        "Do NOT create playlists with the same name or theme — create genuinely new, distinct ones."
+        if existing_pl_names else ""
+    )
+
     system_msg = (
         "You are a music curator. A user has liked these tracks but hasn't put them in any playlist. "
-        "Group them into 2–6 coherent new playlists by genre, mood, or era. "
-        "Each playlist must be sonically cohesive and have a short punchy name (2–4 words).\n\n"
+        "Group them into 2–6 coherent NEW playlists by genre, mood, or era. "
+        "Each playlist must be sonically cohesive and have a short punchy name (2–4 words)."
+        + existing_note + "\n\n"
         "Each input line is: TRACK_ID | Name — Artist | Release Year\n\n"
         "Respond ONLY with valid JSON, no markdown:\n"
         '{"playlists": [{"name": "Playlist name", "track_ids": ["id1", ...]}, ...]}'
     )
-    user_msg = f"Organise these {len(remaining)} unorganised liked tracks:\n\n{manifest}"
+    user_msg = f"Organise these {len(remaining)} unorganised liked tracks into new playlists:\n\n{manifest}"
 
-    raw = ""
+    from .pipeline import _call_llm_chat
     try:
-        if provider == "anthropic":
-            import anthropic as _anthropic
-            resp = _anthropic.Anthropic(api_key=api_key).messages.create(
-                model="claude-sonnet-4-6", max_tokens=4000,
-                system=system_msg, messages=[{"role": "user", "content": user_msg}],
-            )
-            raw = resp.content[0].text.strip()
-        elif provider == "nvidia":
-            from openai import OpenAI as _OpenAI
-            resp = _OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1").chat.completions.create(
-                model="z-ai/glm-5.1", max_tokens=4000,
-                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
-            )
-            raw = resp.choices[0].message.content.strip()
-        else:
-            from openai import OpenAI as _OpenAI
-            resp = _OpenAI(api_key=api_key).chat.completions.create(
-                model="gpt-4o", max_tokens=4000,
-                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
-            )
-            raw = resp.choices[0].message.content.strip()
-
         import re as _re
+        raw = _call_llm_chat(system_msg, user_msg, api_key=api_key, provider=provider, max_tokens=4000)
         m = _re.search(r'\{.*\}', raw, _re.DOTALL)
         if not m:
             raise json.JSONDecodeError("no JSON", raw, 0)
@@ -373,6 +361,94 @@ async def generate_remaining_playlists(request: Request) -> JSONResponse:
         print(f"[remaining] created '{pl_name}' ({len(track_ids)} tracks)")
 
     return JSONResponse({"created": created, "total_organised": sum(p["track_count"] for p in created)})
+
+
+@app.post("/ai-sort-remaining")
+async def ai_sort_remaining(request: Request) -> JSONResponse:
+    """
+    AI assigns each remaining liked track to the best fitting existing playlist.
+    Returns {assignments: {track_id: playlist_name}, tracks: {track_id: {name, artist, album_art}}}
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    try:
+        body = await request.json()
+        user_api_key = (body.get("api_key") or "").strip()
+        provider = (body.get("provider") or _default_provider()).strip().lower()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if provider not in ("anthropic", "openai", "nvidia"):
+        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
+
+    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key required")
+
+    map_data = storage.load_map(user_id)
+    if not map_data:
+        raise HTTPException(status_code=404, detail="Map not found")
+
+    remaining = map_data.get("remaining", [])
+    if not remaining:
+        raise HTTPException(status_code=400, detail="No remaining tracks found")
+
+    playlist_names = sorted({pl for p in map_data.get("points", []) for pl in p.get("playlists", [])})
+    if not playlist_names:
+        raise HTTPException(status_code=400, detail="No existing playlists in your map — process your library first")
+
+    lines = [
+        f"{t['id']} | {t.get('name','')} — {t.get('artist','')} | {t.get('release_year','?')}"
+        for t in remaining
+    ]
+    manifest = "\n".join(lines)
+    pl_list = "\n".join(f"- {p}" for p in playlist_names)
+
+    system_msg = (
+        "You are a music curator. Assign each track to the single most fitting existing playlist. "
+        "Use only the EXACT playlist names provided — do not invent new ones. "
+        "Assign every track to its closest match even if the fit is imperfect.\n\n"
+        "Each input line is: TRACK_ID | Name — Artist | Release Year\n\n"
+        "Respond ONLY with valid JSON, no markdown:\n"
+        '{"assignments": {"track_id": "Exact Playlist Name", ...}}'
+    )
+    user_msg = (
+        f"Existing playlists:\n{pl_list}\n\n"
+        f"Assign all {len(remaining)} tracks to the playlists above:\n\n{manifest}"
+    )
+
+    from .pipeline import _call_llm_chat
+    try:
+        import re as _re
+        raw = _call_llm_chat(system_msg, user_msg, api_key=api_key, provider=provider, max_tokens=4000)
+        m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+        if not m:
+            raise json.JSONDecodeError("no JSON", raw, 0)
+        llm_data = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="AI returned malformed JSON — try again")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI error: {exc}")
+
+    valid_pls = set(playlist_names)
+    assignments = {
+        tid: pl
+        for tid, pl in llm_data.get("assignments", {}).items()
+        if pl in valid_pls
+    }
+
+    track_info = {
+        t["id"]: {"name": t.get("name", ""), "artist": t.get("artist", ""), "album_art": t.get("album_art", "")}
+        for t in remaining
+    }
+
+    return JSONResponse({
+        "assignments": assignments,
+        "tracks": track_info,
+        "playlist_names": playlist_names,
+    })
 
 
 @app.post("/suggest-remaining")
