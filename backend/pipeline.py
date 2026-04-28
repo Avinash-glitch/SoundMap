@@ -214,7 +214,7 @@ def _fetch_playlists_data(
     pl_resp = _spotify_get("https://api.spotify.com/v1/me/playlists", headers, params={"limit": 50})
     if pl_resp.status_code != 200:
         print(f"[pipeline] /me/playlists failed: HTTP {pl_resp.status_code}")
-        return [], []
+        return [], [], {}
 
     playlists = pl_resp.json().get("items", [])
 

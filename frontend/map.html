@@ -1001,15 +1001,15 @@
 <!-- AI Key Settings modal -->
 <div class="modal-backdrop" id="ai-settings-modal">
   <div class="modal" style="width:min(440px,92vw)">
-    <div class="modal-title">AI Key Settings</div>
-    <div class="modal-sub">Use your own API key so you're not sharing the server's quota. Keys are stored only in your browser.</div>
+    <div class="modal-title">AI Settings</div>
+    <div class="modal-sub">Powered by NVIDIA GLM-5.1. Use the server's key or bring your own.</div>
 
     <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">Provider</div>
     <div style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:1.1rem">
       <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-nvidia">
         <input type="radio" name="ai-provider" value="nvidia" style="accent-color:var(--accent)" />
         <span>GLM-5.1 (NVIDIA)</span>
-        <span style="margin-left:auto;font-size:.65rem;color:var(--accent2);background:rgba(124,106,247,.15);border-radius:4px;padding:.1rem .4rem">server key</span>
+        <span style="margin-left:auto;font-size:.65rem;color:var(--accent2);background:rgba(124,106,247,.15);border-radius:4px;padding:.1rem .4rem">recommended</span>
       </label>
       <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-anthropic">
         <input type="radio" name="ai-provider" value="anthropic" style="accent-color:var(--accent)" /> Claude (Anthropic)
@@ -1019,7 +1019,18 @@
       </label>
     </div>
 
-    <div id="ai-key-section">
+    <div id="ai-nvidia-note" style="font-size:.75rem;color:var(--text-dim);margin-bottom:1.25rem;line-height:1.7;padding:.75rem .9rem;background:rgba(124,106,247,.07);border-radius:8px;border:1px solid rgba(124,106,247,.2)">
+      <div style="color:var(--text);font-weight:500;margin-bottom:.4rem">Get your own NVIDIA API key (free)</div>
+      After creating an account on
+      <a href="https://build.nvidia.com/settings/api-keys" target="_blank" rel="noopener"
+        style="color:var(--accent2)">NVIDIA Build</a>,
+      navigate to your dashboard and generate an API key from the credentials or API access section.
+      Copy the key and paste it below to use your own quota.
+      <input class="modal-input" id="ai-key-input-nvidia" type="password"
+        placeholder="nvapi-… (leave blank to use server key)"
+        style="margin-top:.6rem;font-family:'DM Mono',monospace;font-size:.72rem" autocomplete="off" />
+    </div>
+    <div id="ai-key-section" style="display:none">
       <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">API Key</div>
       <input class="modal-input" id="ai-key-input" type="password"
         placeholder="Paste your API key here…"
@@ -1027,13 +1038,6 @@
       <div style="font-size:.7rem;color:var(--text-dim);margin-bottom:1.25rem;line-height:1.5">
         Stored in your browser only. Leave blank to use the server's key.
       </div>
-    </div>
-    <div id="ai-nvidia-note" style="display:none;font-size:.75rem;color:var(--text-dim);margin-bottom:1.25rem;line-height:1.6;padding:.6rem .8rem;background:rgba(124,106,247,.08);border-radius:6px;border:1px solid rgba(124,106,247,.2)">
-      Using the server's NVIDIA key — no setup needed.<br>
-      <span style="color:var(--text-dim)">Optionally paste your own <code style="font-size:.7rem">nvapi-…</code> key below to use your own quota.</span>
-      <input class="modal-input" id="ai-key-input-nvidia" type="password"
-        placeholder="nvapi-… (optional)"
-        style="margin-top:.5rem;font-family:'DM Mono',monospace;font-size:.72rem" autocomplete="off" />
     </div>
 
     <div class="modal-actions">
