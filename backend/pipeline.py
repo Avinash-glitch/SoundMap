@@ -113,7 +113,7 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "") -> tup
         return tracks_list
 
     saved   = _fetch_saved_tracks(headers)
-    _score(saved, 1)
+    _score(saved, 2)  # liked = stronger signal than a playlist entry
 
     _score(pl_trks, 1)
 
@@ -136,16 +136,19 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "") -> tup
         if tid and tid not in seen:
             seen[tid] = t
 
-    # Step 4: assign playlist labels and play_score
-    tracks = list(seen.values())[:MAX_TRACKS]
-    for t in tracks:
+    # Step 4: assign play_score to all candidates, then take top MAX_TRACKS by score
+    all_candidates = list(seen.values())
+    for t in all_candidates:
         t["playlists"] = pl_lookup.get(t["id"], [])
         t["play_score"] = max(scored.get(t["id"], 1), 1)
+
+    tracks = sorted(all_candidates, key=lambda t: t["play_score"], reverse=True)[:MAX_TRACKS]
 
     tagged = sum(1 for t in tracks if t["playlists"])
     with_preview = sum(1 for t in tracks if t.get("preview_url"))
     max_score = max((t["play_score"] for t in tracks), default=1)
-    print(f"[pipeline] {len(tracks)} tracks — {tagged} in playlists, {with_preview} have preview URLs ({int(with_preview/max(len(tracks),1)*100)}%), max play_score={max_score}")
+    min_score = min((t["play_score"] for t in tracks), default=1)
+    print(f"[pipeline] {len(all_candidates)} candidates → top {len(tracks)} by play_score (range {min_score}–{max_score}), {tagged} in playlists, {with_preview} have preview URLs ({int(with_preview/max(len(tracks),1)*100)}%)")
     return tracks, playlist_meta, pl_track_samples
 
 
@@ -207,7 +210,7 @@ def _fetch_playlists_data(
         pl_track_samples[pl_name] = []
 
         url = f"https://api.spotify.com/v1/playlists/{pl_id}/items"
-        while url and len(track_objects) < MAX_TRACKS:
+        while url:
             resp = _spotify_get(url, headers, params={"limit": 50})
             if resp.status_code != 200:
                 print(f"[pipeline] playlist '{pl_name}': HTTP {resp.status_code}")
@@ -215,18 +218,17 @@ def _fetch_playlists_data(
             data = resp.json()
 
             for item in data.get("items", []):
-                # /items endpoint uses 'item' key (not 'track' which was the old /tracks endpoint)
                 t = (item or {}).get("item")
                 if not t or not t.get("id") or t.get("type") == "episode":
                     continue
                 tid = t["id"]
+                # Always register in pl_lookup so playlist labels are correct
+                # even if this track ends up below the play_score cut-off
                 if tid not in pl_lookup:
                     pl_lookup[tid] = []
                 if pl_name not in pl_lookup[tid]:
                     pl_lookup[tid].append(pl_name)
-                if len(track_objects) < MAX_TRACKS:
-                    track_objects.append(_normalise_track(t))
-                # Collect up to 10 sample track names per playlist for LLM context
+                track_objects.append(_normalise_track(t))
                 if len(pl_track_samples[pl_name]) < 10:
                     artists = t.get("artists", [])
                     artist_name = artists[0]["name"] if artists else ""
@@ -240,9 +242,10 @@ def _fetch_playlists_data(
 
 
 def _fetch_saved_tracks(headers: dict) -> list[dict]:
+    """Fetch all of the user's liked tracks — no cap, paginates fully."""
     out: list[dict] = []
     url = "https://api.spotify.com/v1/me/tracks"
-    while url and len(out) < 200:
+    while url:
         resp = _spotify_get(url, headers, params={"limit": 50})
         if resp.status_code != 200:
             break
@@ -252,6 +255,9 @@ def _fetch_saved_tracks(headers: dict) -> list[dict]:
             if t and t.get("id"):
                 out.append(_normalise_track(t))
         url = data.get("next")
+        if len(out) % 200 == 0 and len(out) > 0:
+            print(f"[pipeline] liked tracks fetched so far: {len(out)}")
+    print(f"[pipeline] liked tracks total: {len(out)}")
     return out
 
 
