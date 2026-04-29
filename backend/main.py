@@ -420,6 +420,11 @@ async def ai_sort_remaining(request: Request) -> StreamingResponse:
 
     from .pipeline import _call_llm_chat
 
+    track_info = {
+        t["id"]: {"name": t.get("name", ""), "artist": t.get("artist", ""), "album_art": t.get("album_art", "")}
+        for t in remaining
+    }
+
     def _sse(obj: dict) -> str:
         return f"data: {json.dumps(obj)}\n\n"
 
@@ -427,14 +432,18 @@ async def ai_sort_remaining(request: Request) -> StreamingResponse:
         BATCH = 60
         n = len(remaining)
         n_batches = max(1, (n + BATCH - 1) // BATCH)
-        all_assignments: dict[str, str] = {}
         valid_pls = set(playlist_names)
         loop = asyncio.get_running_loop()
+        total_assigned = 0
 
         for bi, start in enumerate(range(0, n, BATCH)):
             batch = remaining[start:start + BATCH]
             end = min(start + BATCH, n)
-            yield _sse({"type": "progress", "message": f"Reading through songs {start + 1}–{end} of {n}…", "pct": int(bi / n_batches * 80)})
+            yield _sse({
+                "type": "progress",
+                "message": f"Reading through songs {start + 1}–{end} of {n}…",
+                "processed": start, "total": n,
+            })
 
             lines = [
                 f"{t['id']} | {t.get('name','')} — {t.get('artist','')} | {t.get('release_year','?')}"
@@ -442,26 +451,40 @@ async def ai_sort_remaining(request: Request) -> StreamingResponse:
             ]
             batch_user = f"Existing playlists:\n{pl_list}\n\nAssign these {len(batch)} tracks:\n\n" + "\n".join(lines)
 
+            # Run LLM in executor; send keep-alive pings every 15s so Railway doesn't drop the connection
+            fut = asyncio.ensure_future(loop.run_in_executor(
+                None, lambda u=batch_user: _call_llm_chat(system_msg, u, api_key=api_key, provider=provider, max_tokens=2000)
+            ))
+            while not fut.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(fut), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"  # SSE comment — keeps connection alive, browser ignores it
+
             try:
-                raw = await loop.run_in_executor(
-                    None,
-                    lambda u=batch_user: _call_llm_chat(system_msg, u, api_key=api_key, provider=provider, max_tokens=2000),
-                )
+                raw = fut.result()
                 batch_data = _parse_llm_json(raw)
+                batch_assignments: dict[str, str] = {}
                 for tid, pl in batch_data.get("assignments", {}).items():
                     if pl in valid_pls:
-                        all_assignments[tid] = pl
+                        batch_assignments[tid] = pl
+                total_assigned += len(batch_assignments)
+                # Stream this batch's results immediately so the frontend can render them
+                yield _sse({
+                    "type": "batch_done",
+                    "assignments": batch_assignments,
+                    "tracks": {tid: track_info[tid] for tid in batch_assignments if tid in track_info},
+                    "processed": end,
+                    "total": n,
+                    "batch": bi + 1,
+                    "total_batches": n_batches,
+                    "playlist_names": playlist_names,
+                })
             except Exception as exc:
-                yield _sse({"type": "error", "message": f"AI error on batch {bi + 1}: {exc}"})
+                yield _sse({"type": "error", "message": f"Batch {bi + 1} failed: {exc}"})
                 return
 
-        yield _sse({"type": "progress", "message": f"Finding the right playlist for {len(all_assignments)} tracks…", "pct": 90})
-
-        track_info = {
-            t["id"]: {"name": t.get("name", ""), "artist": t.get("artist", ""), "album_art": t.get("album_art", "")}
-            for t in remaining
-        }
-        yield _sse({"type": "done", "assignments": all_assignments, "tracks": track_info, "playlist_names": playlist_names})
+        yield _sse({"type": "done", "total_assigned": total_assigned, "total": n})
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
