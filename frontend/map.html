@@ -3524,15 +3524,19 @@ async function _openAppleModal() {
     // Wait for MusicKit to be ready (it loads async)
     if (typeof MusicKit === 'undefined') {
       await new Promise((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('MusicKit JS failed to load')), 8000);
+        const t = setTimeout(() => reject(new Error('MusicKit JS failed to load — check browser console')), 8000);
         document.addEventListener('musickitloaded', () => { clearTimeout(t); resolve(); }, { once: true });
       });
     }
 
-    await MusicKit.configure({
-      developerToken: developer_token,
-      app: { name: 'SoundMap', build: '1.0.0' },
-    });
+    try {
+      await MusicKit.configure({
+        developerToken: developer_token,
+        app: { name: 'SoundMap', build: '1.0.0' },
+      });
+    } catch (mkErr) {
+      throw new Error(`MusicKit config failed: ${mkErr.message || mkErr} — visit /apple/test to diagnose`);
+    }
 
     const instance = MusicKit.getInstance();
     if (instance.isAuthorized) {

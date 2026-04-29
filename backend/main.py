@@ -830,6 +830,30 @@ async def apple_start_job(request: Request) -> JSONResponse:
     return JSONResponse({"job_id": job_id, "user_id": apple_user_id})
 
 
+@app.get("/apple/test")
+async def apple_test() -> JSONResponse:
+    """Verify the Apple Music developer token by hitting the catalog API."""
+    try:
+        from .apple_auth import get_developer_token
+        token = get_developer_token()
+    except Exception as exc:
+        return JSONResponse({"step": "token_generation", "ok": False, "error": str(exc)})
+
+    resp = _requests.get(
+        "https://api.music.apple.com/v1/catalog/us/search",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"term": "test", "types": "songs", "limit": 1},
+        timeout=10,
+    )
+    return JSONResponse({
+        "step": "catalog_request",
+        "ok": resp.status_code == 200,
+        "http_status": resp.status_code,
+        "token_prefix": token[:60] + "…",
+        "error": resp.text[:300] if resp.status_code != 200 else None,
+    })
+
+
 @app.get("/apple/configured")
 async def apple_configured() -> JSONResponse:
     """Check whether Apple Music credentials are configured."""
