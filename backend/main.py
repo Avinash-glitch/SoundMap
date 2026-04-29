@@ -352,38 +352,21 @@ async def generate_remaining_playlists(request: Request) -> StreamingResponse:
             yield _sse({"type": "error", "message": f"AI error: {exc}"})
             return
 
-        playlists_to_create = llm_data.get("playlists", [])
+        # Return suggestions — client reviews and calls /create-suggested-playlists
         valid_ids = {t["id"] for t in remaining}
-        h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        created = []
-        n = len(playlists_to_create)
-
-        for i, pl in enumerate(playlists_to_create):
+        remaining_lookup = {t["id"]: {"name": t.get("name",""), "artist": t.get("artist",""), "album_art": t.get("album_art","")} for t in remaining}
+        suggestions = []
+        for pl in llm_data.get("playlists", []):
             pl_name = (pl.get("name") or "").strip()
             track_ids = [tid for tid in pl.get("track_ids", []) if tid in valid_ids]
-            if not pl_name or not track_ids:
-                continue
+            if pl_name and track_ids:
+                suggestions.append({
+                    "name": pl_name,
+                    "track_ids": track_ids,
+                    "tracks": {tid: remaining_lookup[tid] for tid in track_ids if tid in remaining_lookup},
+                })
 
-            yield _sse({"type": "progress", "message": f"Creating "{pl_name}"…", "pct": 30 + int(i / max(n, 1) * 65)})
-
-            pl_resp = _requests.post(
-                "https://api.spotify.com/v1/me/playlists", headers=h,
-                json={"name": pl_name, "description": "SoundMap — auto-generated from unorganised liked tracks", "public": False},
-            )
-            if pl_resp.status_code not in (200, 201):
-                print(f"[remaining] failed to create '{pl_name}': {pl_resp.status_code}")
-                continue
-
-            pl_id = pl_resp.json()["id"]
-            pl_url = pl_resp.json()["external_urls"]["spotify"]
-            uris = [f"spotify:track:{tid}" for tid in track_ids]
-            for j in range(0, len(uris), 100):
-                _requests.post(f"https://api.spotify.com/v1/playlists/{pl_id}/items", headers=h, json={"uris": uris[j:j+100]})
-
-            created.append({"name": pl_name, "track_count": len(track_ids), "url": pl_url})
-            print(f"[remaining] created '{pl_name}' ({len(track_ids)} tracks)")
-
-        yield _sse({"type": "done", "created": created, "total_organised": sum(p["track_count"] for p in created)})
+        yield _sse({"type": "done", "suggestions": suggestions})
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1095,54 +1078,125 @@ async def ai_playlist(request: Request) -> JSONResponse:
     reasoning = llm_data.get("reasoning", "")
     raw_ids: list[str] = llm_data.get("track_ids", [])
 
-    # Validate — only accept IDs that exist in the user's library
     valid_ids = {p["id"] for p in pts if p.get("id")}
     track_ids = [tid for tid in raw_ids if tid in valid_ids]
 
     if not track_ids:
-        raise HTTPException(status_code=502, detail="Claude returned no valid track IDs — try rephrasing")
+        raise HTTPException(status_code=502, detail="AI returned no valid track IDs — try rephrasing")
 
-    # Compute total duration
     dur_map = {p["id"]: (p.get("duration_ms") or 0) for p in pts}
     total_ms = sum(dur_map.get(tid, 0) for tid in track_ids)
     duration_min = round(total_ms / 60000, 1)
 
-    print(f"[ai-playlist] '{pl_name}' — {len(track_ids)} tracks, {duration_min} min")
-    print(f"[ai-playlist] reasoning: {reasoning}")
+    # Return suggestions — client reviews and calls /create-ai-playlist to save
+    track_lookup = {p["id"]: {"name": p.get("name",""), "artist": p.get("artist",""), "album_art": p.get("album_art","")} for p in pts if p.get("id")}
+    print(f"[ai-playlist] suggestion '{pl_name}' — {len(track_ids)} tracks, {duration_min} min")
+    return JSONResponse({
+        "name": pl_name,
+        "reasoning": reasoning,
+        "track_ids": track_ids,
+        "track_count": len(track_ids),
+        "duration_min": duration_min,
+        "tracks": {tid: track_lookup[tid] for tid in track_ids if tid in track_lookup},
+        "prompt": prompt,
+    })
 
-    # Create Spotify playlist
+
+@app.post("/create-ai-playlist")
+async def create_ai_playlist(request: Request) -> JSONResponse:
+    """Create a Spotify playlist from a curated track list. Body: {name, track_ids, prompt}."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    token = await _get_valid_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
+
+    try:
+        body = await request.json()
+        pl_name = (body.get("name") or "AI Curated").strip()
+        track_ids: list[str] = body.get("track_ids", [])
+        prompt = (body.get("prompt") or "")[:120]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not track_ids:
+        raise HTTPException(status_code=400, detail="No tracks provided")
+
     h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     pl_resp = _requests.post(
-        "https://api.spotify.com/v1/me/playlists",
-        headers=h,
-        json={
-            "name": pl_name,
-            "description": f"SoundMap AI · {prompt[:120]}",
-            "public": False,
-        },
+        "https://api.spotify.com/v1/me/playlists", headers=h,
+        json={"name": pl_name, "description": f"SoundMap AI · {prompt}", "public": False},
     )
     if pl_resp.status_code not in (200, 201):
-        raise HTTPException(
-            status_code=502,
-            detail=f"Spotify error {pl_resp.status_code}: {pl_resp.text[:120]}",
-        )
+        raise HTTPException(status_code=502, detail=f"Spotify error {pl_resp.status_code}: {pl_resp.text[:120]}")
 
     pl_id = pl_resp.json()["id"]
     pl_url = pl_resp.json()["external_urls"]["spotify"]
-
     uris = [f"spotify:track:{tid}" for tid in track_ids]
     for i in range(0, len(uris), 100):
-        _requests.post(
-            f"https://api.spotify.com/v1/playlists/{pl_id}/items",
-            headers=h,
-            json={"uris": uris[i: i + 100]},
-        )
+        _requests.post(f"https://api.spotify.com/v1/playlists/{pl_id}/items", headers=h, json={"uris": uris[i:i+100]})
 
-    return JSONResponse({
-        "name": pl_name,
-        "url": pl_url,
-        "track_count": len(track_ids),
-        "duration_min": duration_min,
-        "reasoning": reasoning,
-        "track_ids": track_ids,
-    })
+    print(f"[create-ai-playlist] '{pl_name}' — {len(track_ids)} tracks")
+    return JSONResponse({"name": pl_name, "url": pl_url, "track_count": len(track_ids)})
+
+
+@app.post("/create-suggested-playlists")
+async def create_suggested_playlists(request: Request) -> StreamingResponse:
+    """
+    Create Spotify playlists from AI-suggested groupings. Streams progress per playlist.
+    Body: {"playlists": [{"name": "...", "track_ids": [...]}]}
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    token = await _get_valid_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
+
+    try:
+        body = await request.json()
+        playlists: list[dict] = body.get("playlists", [])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not playlists:
+        raise HTTPException(status_code=400, detail="No playlists provided")
+
+    def _sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj)}\n\n"
+
+    async def stream():
+        h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        created = []
+        n = len(playlists)
+
+        for i, pl in enumerate(playlists):
+            pl_name = (pl.get("name") or "").strip()
+            track_ids = pl.get("track_ids", [])
+            if not pl_name or not track_ids:
+                continue
+
+            yield _sse({"type": "progress", "message": f"Creating '{pl_name}'… ({i+1}/{n})", "pct": int(i / n * 90)})
+
+            pl_resp = _requests.post(
+                "https://api.spotify.com/v1/me/playlists", headers=h,
+                json={"name": pl_name, "description": "SoundMap — organised from liked tracks", "public": False},
+            )
+            if pl_resp.status_code not in (200, 201):
+                print(f"[create-suggested] failed '{pl_name}': {pl_resp.status_code}")
+                continue
+
+            pl_id = pl_resp.json()["id"]
+            pl_url = pl_resp.json()["external_urls"]["spotify"]
+            uris = [f"spotify:track:{tid}" for tid in track_ids]
+            for j in range(0, len(uris), 100):
+                _requests.post(f"https://api.spotify.com/v1/playlists/{pl_id}/items", headers=h, json={"uris": uris[j:j+100]})
+
+            created.append({"name": pl_name, "track_count": len(track_ids), "url": pl_url})
+            print(f"[create-suggested] created '{pl_name}' ({len(track_ids)} tracks)")
+
+        yield _sse({"type": "done", "created": created, "total_organised": sum(p["track_count"] for p in created)})
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
