@@ -1,24 +1,22 @@
 """Apple Music developer token generation via ES256 JWT."""
 
+import base64 as _b64
 import os
 import re as _re
 import time
 
 
-def _rebuild_pem(raw: str) -> str:
+def _load_ec_key(raw: str):
     """
-    Reconstruct a well-formed PEM block regardless of how the key was stored.
-    Handles: real newlines, literal \\n, all-on-one-line, extra whitespace.
+    Load the EC private key from an env var regardless of how it was stored.
+    Strips all PEM headers/footers and whitespace, decodes the raw base64 body
+    as DER, and returns a cryptography key object — no PEM parsing required.
     """
-    s = raw.replace("\\n", "\n").strip()
-    m = _re.match(r"(-----BEGIN[^-]*-----)(.+?)(-----END[^-]*-----)", s, _re.DOTALL)
-    if not m:
-        return s  # already odd — pass through and let JWT lib raise a clear error
-    header = m.group(1).strip()
-    body = _re.sub(r"\s+", "", m.group(2))   # strip ALL whitespace from base64 body
-    footer = m.group(3).strip()
-    wrapped = "\n".join(body[i : i + 64] for i in range(0, len(body), 64))
-    return f"{header}\n{wrapped}\n{footer}\n"
+    from cryptography.hazmat.primitives.serialization import load_der_private_key
+    # Remove everything that is not base64: headers, footers, whitespace, literal \n
+    b64 = _re.sub(r"-----[^-]+-----|\\n|\s+", "", raw)
+    der = _b64.b64decode(b64)
+    return load_der_private_key(der, password=None)
 
 
 def get_developer_token(expiry_seconds: int = 15777000) -> str:
@@ -32,7 +30,7 @@ def get_developer_token(expiry_seconds: int = 15777000) -> str:
             "APPLE_TEAM_ID, APPLE_KEY_ID, and APPLE_PRIVATE_KEY must all be set"
         )
 
-    private_key = _rebuild_pem(private_key_raw)
+    private_key = _load_ec_key(private_key_raw)
 
     import jwt as _jwt  # PyJWT with cryptography backend
     now = int(time.time())
