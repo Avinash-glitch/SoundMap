@@ -3028,7 +3028,7 @@ document.getElementById('remaining-sort-btn').addEventListener('click', async ()
   panel.style.display = 'block';
   listEl.innerHTML = '';
   confirmBtn.style.display = 'none';
-  statusEl.textContent = 'AI is assigning tracks to your playlists…';
+  statusEl.textContent = 'Connecting to AI…';
   btn.disabled = true;
 
   const { provider, key } = _getAiSettings();
@@ -3040,10 +3040,30 @@ document.getElementById('remaining-sort-btn').addEventListener('click', async ()
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider, api_key: key || undefined }),
     });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || 'Failed');
+    if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail || 'Failed'); }
 
-    const { assignments, tracks } = data;
+    // Read SSE stream
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let assignments, tracks;
+
+    outer: while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const evt = JSON.parse(line.slice(6));
+        if (evt.type === 'progress') { statusEl.textContent = evt.message; }
+        else if (evt.type === 'error') { throw new Error(evt.message); }
+        else if (evt.type === 'done') { assignments = evt.assignments; tracks = evt.tracks; break outer; }
+      }
+    }
+    if (!assignments) throw new Error('No response from AI');
+
     const entries = Object.entries(assignments);
     statusEl.textContent = `${entries.length} tracks assigned — accept or reject each suggestion`;
 
@@ -3148,7 +3168,7 @@ document.getElementById('remaining-generate-btn').addEventListener('click', asyn
 
   panel.style.display = 'block';
   resEl.innerHTML = '';
-  statusEl.textContent = `Generating playlists for ${remaining.length} tracks…`;
+  statusEl.textContent = `Sending ${remaining.length} tracks to AI…`;
   btn.disabled = true;
 
   const { provider, key } = _getAiSettings();
@@ -3159,8 +3179,29 @@ document.getElementById('remaining-generate-btn').addEventListener('click', asyn
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider, api_key: key || undefined }),
     });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || 'Failed');
+    if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail || 'Failed'); }
+
+    // Read SSE stream
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let data;
+
+    outer: while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const evt = JSON.parse(line.slice(6));
+        if (evt.type === 'progress') { statusEl.textContent = evt.message; }
+        else if (evt.type === 'error') { throw new Error(evt.message); }
+        else if (evt.type === 'done') { data = evt; break outer; }
+      }
+    }
+    if (!data) throw new Error('No response from AI');
 
     statusEl.textContent = `✓ Created ${data.created.length} playlist${data.created.length !== 1 ? 's' : ''} — ${data.total_organised} tracks organised`;
     resEl.innerHTML = data.created.map(p => `

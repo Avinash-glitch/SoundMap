@@ -1,14 +1,16 @@
 """SoundMap FastAPI application — entry point."""
 
+import asyncio
 import json
 import os
+import re as _re
 from pathlib import Path
 
 import requests as _requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import router as auth_router, refresh_access_token
@@ -27,6 +29,22 @@ def _default_provider() -> str:
         if os.environ.get(_ENV_KEY_MAP[provider]):
             return provider
     return "anthropic"
+
+
+def _parse_llm_json(raw: str) -> dict:
+    """Robust JSON extraction from LLM output — handles markdown fences and stray text."""
+    cleaned = _re.sub(r'```(?:json)?\s*', '', raw).strip().rstrip('`').strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    m = _re.search(r'\{.*\}', cleaned, _re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"No parseable JSON in LLM response: {raw[:300]}")
 
 
 app = FastAPI(title="SoundMap")
@@ -261,10 +279,9 @@ async def debug_playlists(request: Request) -> JSONResponse:
 
 
 @app.post("/generate-remaining-playlists")
-async def generate_remaining_playlists(request: Request) -> JSONResponse:
+async def generate_remaining_playlists(request: Request) -> StreamingResponse:
     """
-    AI-groups a user's liked-but-unorganised tracks into new Spotify playlists.
-    Body: {"api_key": "...", "provider": "anthropic"|"openai"}
+    AI-groups liked-but-unorganised tracks into new Spotify playlists, streaming progress via SSE.
     """
     user_id = request.session.get("user_id")
     if not user_id:
@@ -299,16 +316,12 @@ async def generate_remaining_playlists(request: Request) -> JSONResponse:
         f"{t['id']} | {t.get('name','')} — {t.get('artist','')} | {t.get('release_year','?')}"
         for t in remaining
     ]
-    manifest = "\n".join(lines)
-
-    # Existing playlist names so the AI can avoid duplicating them
     existing_pl_names = sorted({pl for p in map_data.get("points", []) for pl in p.get("playlists", [])})
     existing_note = (
         f"\nThe user already has these playlists: {', '.join(existing_pl_names[:20])}. "
         "Do NOT create playlists with the same name or theme — create genuinely new, distinct ones."
         if existing_pl_names else ""
     )
-
     system_msg = (
         "You are a music curator. A user has liked these tracks but hasn't put them in any playlist. "
         "Group them into 2–6 coherent NEW playlists by genre, mood, or era. "
@@ -318,56 +331,69 @@ async def generate_remaining_playlists(request: Request) -> JSONResponse:
         "Respond ONLY with valid JSON, no markdown:\n"
         '{"playlists": [{"name": "Playlist name", "track_ids": ["id1", ...]}, ...]}'
     )
-    user_msg = f"Organise these {len(remaining)} unorganised liked tracks into new playlists:\n\n{manifest}"
+    user_msg = f"Organise these {len(remaining)} unorganised liked tracks into new playlists:\n\n" + "\n".join(lines)
 
     from .pipeline import _call_llm_chat
-    try:
-        import re as _re
-        raw = _call_llm_chat(system_msg, user_msg, api_key=api_key, provider=provider, max_tokens=4000)
-        m = _re.search(r'\{.*\}', raw, _re.DOTALL)
-        if not m:
-            raise json.JSONDecodeError("no JSON", raw, 0)
-        llm_data = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail="AI returned malformed JSON — try again")
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI error: {exc}")
 
-    valid_ids = {t["id"] for t in remaining}
-    h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    created = []
+    def _sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj)}\n\n"
 
-    for pl in llm_data.get("playlists", []):
-        pl_name = (pl.get("name") or "").strip()
-        track_ids = [tid for tid in pl.get("track_ids", []) if tid in valid_ids]
-        if not pl_name or not track_ids:
-            continue
+    async def stream():
+        loop = asyncio.get_running_loop()
+        yield _sse({"type": "progress", "message": f"Sending {len(remaining)} tracks to AI…", "pct": 10})
 
-        pl_resp = _requests.post(
-            "https://api.spotify.com/v1/me/playlists", headers=h,
-            json={"name": pl_name, "description": "SoundMap — auto-generated from unorganised liked tracks", "public": False},
-        )
-        if pl_resp.status_code not in (200, 201):
-            print(f"[remaining] failed to create '{pl_name}': {pl_resp.status_code}")
-            continue
+        try:
+            raw = await loop.run_in_executor(
+                None,
+                lambda: _call_llm_chat(system_msg, user_msg, api_key=api_key, provider=provider, max_tokens=4000),
+            )
+            llm_data = _parse_llm_json(raw)
+        except Exception as exc:
+            yield _sse({"type": "error", "message": f"AI error: {exc}"})
+            return
 
-        pl_id = pl_resp.json()["id"]
-        pl_url = pl_resp.json()["external_urls"]["spotify"]
-        uris = [f"spotify:track:{tid}" for tid in track_ids]
-        for i in range(0, len(uris), 100):
-            _requests.post(f"https://api.spotify.com/v1/playlists/{pl_id}/items", headers=h, json={"uris": uris[i:i+100]})
+        playlists_to_create = llm_data.get("playlists", [])
+        valid_ids = {t["id"] for t in remaining}
+        h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        created = []
+        n = len(playlists_to_create)
 
-        created.append({"name": pl_name, "track_count": len(track_ids), "url": pl_url})
-        print(f"[remaining] created '{pl_name}' ({len(track_ids)} tracks)")
+        for i, pl in enumerate(playlists_to_create):
+            pl_name = (pl.get("name") or "").strip()
+            track_ids = [tid for tid in pl.get("track_ids", []) if tid in valid_ids]
+            if not pl_name or not track_ids:
+                continue
 
-    return JSONResponse({"created": created, "total_organised": sum(p["track_count"] for p in created)})
+            yield _sse({"type": "progress", "message": f"Creating "{pl_name}"…", "pct": 30 + int(i / max(n, 1) * 65)})
+
+            pl_resp = _requests.post(
+                "https://api.spotify.com/v1/me/playlists", headers=h,
+                json={"name": pl_name, "description": "SoundMap — auto-generated from unorganised liked tracks", "public": False},
+            )
+            if pl_resp.status_code not in (200, 201):
+                print(f"[remaining] failed to create '{pl_name}': {pl_resp.status_code}")
+                continue
+
+            pl_id = pl_resp.json()["id"]
+            pl_url = pl_resp.json()["external_urls"]["spotify"]
+            uris = [f"spotify:track:{tid}" for tid in track_ids]
+            for j in range(0, len(uris), 100):
+                _requests.post(f"https://api.spotify.com/v1/playlists/{pl_id}/items", headers=h, json={"uris": uris[j:j+100]})
+
+            created.append({"name": pl_name, "track_count": len(track_ids), "url": pl_url})
+            print(f"[remaining] created '{pl_name}' ({len(track_ids)} tracks)")
+
+        yield _sse({"type": "done", "created": created, "total_organised": sum(p["track_count"] for p in created)})
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/ai-sort-remaining")
-async def ai_sort_remaining(request: Request) -> JSONResponse:
+async def ai_sort_remaining(request: Request) -> StreamingResponse:
     """
-    AI assigns each remaining liked track to the best fitting existing playlist.
-    Returns {assignments: {track_id: playlist_name}, tracks: {track_id: {name, artist, album_art}}}
+    AI assigns remaining liked tracks to existing playlists, streaming progress via SSE.
+    Processes in batches of 60 so progress is visible and large libraries don't time out.
     """
     user_id = request.session.get("user_id")
     if not user_id:
@@ -399,13 +425,7 @@ async def ai_sort_remaining(request: Request) -> JSONResponse:
     if not playlist_names:
         raise HTTPException(status_code=400, detail="No existing playlists in your map — process your library first")
 
-    lines = [
-        f"{t['id']} | {t.get('name','')} — {t.get('artist','')} | {t.get('release_year','?')}"
-        for t in remaining
-    ]
-    manifest = "\n".join(lines)
     pl_list = "\n".join(f"- {p}" for p in playlist_names)
-
     system_msg = (
         "You are a music curator. Assign each track to the single most fitting existing playlist. "
         "Use only the EXACT playlist names provided — do not invent new ones. "
@@ -414,41 +434,54 @@ async def ai_sort_remaining(request: Request) -> JSONResponse:
         "Respond ONLY with valid JSON, no markdown:\n"
         '{"assignments": {"track_id": "Exact Playlist Name", ...}}'
     )
-    user_msg = (
-        f"Existing playlists:\n{pl_list}\n\n"
-        f"Assign all {len(remaining)} tracks to the playlists above:\n\n{manifest}"
-    )
 
     from .pipeline import _call_llm_chat
-    try:
-        import re as _re
-        raw = _call_llm_chat(system_msg, user_msg, api_key=api_key, provider=provider, max_tokens=4000)
-        m = _re.search(r'\{.*\}', raw, _re.DOTALL)
-        if not m:
-            raise json.JSONDecodeError("no JSON", raw, 0)
-        llm_data = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail="AI returned malformed JSON — try again")
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI error: {exc}")
 
-    valid_pls = set(playlist_names)
-    assignments = {
-        tid: pl
-        for tid, pl in llm_data.get("assignments", {}).items()
-        if pl in valid_pls
-    }
+    def _sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj)}\n\n"
 
-    track_info = {
-        t["id"]: {"name": t.get("name", ""), "artist": t.get("artist", ""), "album_art": t.get("album_art", "")}
-        for t in remaining
-    }
+    async def stream():
+        BATCH = 60
+        n = len(remaining)
+        n_batches = max(1, (n + BATCH - 1) // BATCH)
+        all_assignments: dict[str, str] = {}
+        valid_pls = set(playlist_names)
+        loop = asyncio.get_running_loop()
 
-    return JSONResponse({
-        "assignments": assignments,
-        "tracks": track_info,
-        "playlist_names": playlist_names,
-    })
+        for bi, start in enumerate(range(0, n, BATCH)):
+            batch = remaining[start:start + BATCH]
+            end = min(start + BATCH, n)
+            yield _sse({"type": "progress", "message": f"Reading through songs {start + 1}–{end} of {n}…", "pct": int(bi / n_batches * 80)})
+
+            lines = [
+                f"{t['id']} | {t.get('name','')} — {t.get('artist','')} | {t.get('release_year','?')}"
+                for t in batch
+            ]
+            batch_user = f"Existing playlists:\n{pl_list}\n\nAssign these {len(batch)} tracks:\n\n" + "\n".join(lines)
+
+            try:
+                raw = await loop.run_in_executor(
+                    None,
+                    lambda u=batch_user: _call_llm_chat(system_msg, u, api_key=api_key, provider=provider, max_tokens=2000),
+                )
+                batch_data = _parse_llm_json(raw)
+                for tid, pl in batch_data.get("assignments", {}).items():
+                    if pl in valid_pls:
+                        all_assignments[tid] = pl
+            except Exception as exc:
+                yield _sse({"type": "error", "message": f"AI error on batch {bi + 1}: {exc}"})
+                return
+
+        yield _sse({"type": "progress", "message": f"Finding the right playlist for {len(all_assignments)} tracks…", "pct": 90})
+
+        track_info = {
+            t["id"]: {"name": t.get("name", ""), "artist": t.get("artist", ""), "album_art": t.get("album_art", "")}
+            for t in remaining
+        }
+        yield _sse({"type": "done", "assignments": all_assignments, "tracks": track_info, "playlist_names": playlist_names})
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/suggest-remaining")
