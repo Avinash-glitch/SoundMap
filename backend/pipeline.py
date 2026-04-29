@@ -685,6 +685,207 @@ def _llm_mood_groups(
 # Build output
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Apple Music pipeline
+# ---------------------------------------------------------------------------
+
+def _apple_genre_embeddings(tracks: list[dict]) -> tuple[np.ndarray, list[str]]:
+    """Build feature matrix for Apple Music tracks using Apple-provided genre tags + playlists."""
+    BUCKETS = ["metal", "hip-hop", "electronic", "rock", "pop", "jazz", "classical", "folk", "latin", "world", "other"]
+    bucket_index = {b: i for i, b in enumerate(BUCKETS)}
+    n_buckets = len(BUCKETS)
+
+    all_playlists: list[str] = []
+    seen_pl: set[str] = set()
+    for t in tracks:
+        for pl in t.get("playlists", []):
+            if pl not in seen_pl:
+                seen_pl.add(pl)
+                all_playlists.append(pl)
+    pl_index = {pl: i for i, pl in enumerate(all_playlists)}
+    n_pl = max(len(all_playlists), 1)
+
+    n_cols = n_buckets + n_pl * 4
+    matrix = np.zeros((len(tracks), n_cols), dtype=float)
+    track_genres: list[str] = []
+
+    for ti, t in enumerate(tracks):
+        bucket = _primary_genre(t.get("genre_tags") or [])
+        track_genres.append(bucket)
+        if bucket in bucket_index:
+            matrix[ti, bucket_index[bucket]] = 1.0
+        for pl in t.get("playlists", []):
+            if pl in pl_index:
+                base = n_buckets + pl_index[pl] * 4
+                for offset in range(4):
+                    matrix[ti, base + offset] = 1.0
+
+    return matrix, track_genres
+
+
+def _fetch_apple_library(
+    dev_token: str,
+    music_user_token: str,
+    storefront: str = "us",
+    on_progress=None,
+) -> list[dict]:
+    """Fetch all tracks from an Apple Music library via the Apple Music API."""
+    headers = {
+        "Authorization": f"Bearer {dev_token}",
+        "Music-User-Token": music_user_token,
+    }
+    base_url = "https://api.music.apple.com"
+
+    def _get_all(path: str) -> list[dict]:
+        items: list[dict] = []
+        url = f"{base_url}{path}?limit=100"
+        while url:
+            r = requests.get(url, headers=headers, timeout=30)
+            if r.status_code != 200:
+                print(f"[apple] {path}: HTTP {r.status_code} — {r.text[:200]}")
+                break
+            data = r.json()
+            items.extend(data.get("data", []))
+            nxt = data.get("next")
+            url = f"{base_url}{nxt}" if nxt else None
+        return items
+
+    if on_progress:
+        on_progress(5, "Fetching Apple Music playlists…")
+
+    playlists = _get_all("/v1/me/library/playlists")
+    n_pl = max(len(playlists), 1)
+    track_to_pls: dict[str, list[str]] = {}
+    all_track_attrs: dict[str, dict] = {}
+
+    for i, pl in enumerate(playlists):
+        pl_name = (pl.get("attributes") or {}).get("name") or f"Playlist {i + 1}"
+        pl_id = pl["id"]
+        if on_progress:
+            on_progress(5 + int(i / n_pl * 40), f"Reading '{pl_name}'…")
+        for t in _get_all(f"/v1/me/library/playlists/{pl_id}/tracks"):
+            tid = t.get("id")
+            if not tid:
+                continue
+            attrs = t.get("attributes") or {}
+            if tid not in all_track_attrs:
+                all_track_attrs[tid] = attrs
+            track_to_pls.setdefault(tid, []).append(pl_name)
+
+    if on_progress:
+        on_progress(50, "Fetching library songs…")
+
+    for t in _get_all("/v1/me/library/songs"):
+        tid = t.get("id")
+        if tid and tid not in all_track_attrs:
+            all_track_attrs[tid] = t.get("attributes") or {}
+
+    if on_progress:
+        on_progress(55, f"Processing {len(all_track_attrs)} tracks…")
+
+    tracks_out: list[dict] = []
+    for tid, attrs in all_track_attrs.items():
+        genre_names: list[str] = attrs.get("genreNames") or []
+        artwork = attrs.get("artwork") or {}
+        art_url = artwork.get("url", "").replace("{w}", "60").replace("{h}", "60")
+        rd = attrs.get("releaseDate") or ""
+        release_year = int(rd[:4]) if len(rd) >= 4 and rd[:4].isdigit() else None
+
+        tracks_out.append({
+            "id": tid,
+            "name": attrs.get("name") or "",
+            "artist": attrs.get("artistName") or "",
+            "artists": [attrs.get("artistName")] if attrs.get("artistName") else [],
+            "artist_ids": [],
+            "album": attrs.get("albumName") or "",
+            "album_art": art_url,
+            "preview_url": None,
+            "external_url": "",
+            "duration_ms": attrs.get("durationInMillis") or 0,
+            "popularity": 50,
+            "release_year": release_year,
+            "isrc": None,
+            "playlists": track_to_pls.get(tid, []),
+            "genre_tags": [g.lower() for g in genre_names[:5]],
+            "play_score": 1,
+            "liked_at": "",
+            "is_top_track": False,
+        })
+
+    print(f"[apple] library: {len(tracks_out)} tracks across {len(playlists)} playlists")
+    return tracks_out
+
+
+def process_apple_user(
+    music_user_token: str,
+    user_id: str,
+    storefront: str = "us",
+    on_progress=None,
+    api_key: str = "",
+    provider: str = "",
+) -> dict:
+    """
+    Full pipeline for an Apple Music library.
+    Saves map as '{user_id}_apple' in storage.
+    """
+    from .apple_auth import get_developer_token
+
+    def progress(pct: int, msg: str) -> None:
+        if on_progress:
+            on_progress(pct, msg)
+        print(f"[apple-pipeline] {pct:3d}% — {msg}")
+
+    apple_id = f"{user_id}_apple"
+
+    if storage.map_exists(apple_id) and storage.map_age_hours(apple_id) < 24:
+        progress(100, "Loaded from cache.")
+        return storage.load_map(apple_id)
+
+    progress(3, "Connecting to Apple Music…")
+    dev_token = get_developer_token()
+
+    tracks = _fetch_apple_library(
+        dev_token, music_user_token, storefront,
+        on_progress=lambda p, m: progress(p, m),
+    )
+    if not tracks:
+        raise RuntimeError("No tracks found in your Apple Music library.")
+
+    progress(58, f"Analysing {len(tracks)} tracks…")
+    embeddings, track_genres = _apple_genre_embeddings(tracks)
+
+    if api_key:
+        progress(65, "Detecting genres with AI…")
+        try:
+            track_genres = _llm_genre_detect(tracks, api_key, provider or _default_provider())
+        except Exception as exc:
+            print(f"[apple-pipeline] LLM genre detection failed ({exc}) — keeping keyword genres")
+
+    progress(75, "Running UMAP…")
+    coords = _run_umap(embeddings)
+
+    progress(90, "Building map…")
+    playlist_track_ids = {t["id"] for t in tracks if t.get("playlists")}
+    remaining_slim = [
+        {"id": t["id"], "name": t["name"], "artist": t["artist"],
+         "album_art": t["album_art"], "liked_at": "", "release_year": t.get("release_year")}
+        for t in tracks if t["id"] not in playlist_track_ids
+    ]
+
+    playlist_names = sorted({pl for t in tracks for pl in t.get("playlists", [])})
+    map_data = _build_map_data(
+        tracks, coords, track_genres,
+        display_name="Apple Music Library",
+        playlist_meta=[{"id": pl, "name": pl} for pl in playlist_names],
+        remaining=remaining_slim,
+    )
+    map_data["source"] = "apple"
+
+    storage.save_map(apple_id, map_data)
+    progress(100, "Done!")
+    return map_data
+
+
 def _build_map_data(
     tracks: list[dict],
     coords: np.ndarray,

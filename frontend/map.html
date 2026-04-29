@@ -1335,6 +1335,12 @@ async function loadMap() {
     if (mapData.display_name) {
       document.getElementById('user-name').textContent = mapData.display_name;
     }
+    // Show Apple Music indicator if this is an Apple Music map
+    if (mapData.source === 'apple') {
+      const dot = document.querySelector('.user-badge .dot');
+      if (dot) { dot.style.background = '#fa3c44'; }
+      document.getElementById('btn-apple').style.background = 'rgba(250,60,60,.12)';
+    }
 
     // Normalise coords to canvas space
     const raw = mapData.points;
@@ -3530,7 +3536,7 @@ async function _openAppleModal() {
 
     const instance = MusicKit.getInstance();
     if (instance.isAuthorized) {
-      _showApplePlaylistSelect();
+      _showAppleChoice();
     } else {
       _showAppleAuth();
     }
@@ -3539,11 +3545,11 @@ async function _openAppleModal() {
   }
 }
 
-function _showAppleAuth() {
+function _showAppleAuth(thenFn) {
   const body = document.getElementById('apple-modal-body');
   body.innerHTML = `
     <p style="font-size:.82rem;color:var(--text-dim);margin-bottom:1.1rem;line-height:1.55">
-      Connect Apple Music to transfer your Spotify playlists. Each track is matched in the Apple Music catalogue.
+      Authorise SoundMap to access your Apple Music library.
     </p>
     <button id="apple-auth-btn" class="btn-primary" style="width:100%;background:#fa3c44;border-color:#fa3c44">
       Connect Apple Music
@@ -3558,13 +3564,61 @@ function _showAppleAuth() {
     errEl.style.display = 'none';
     try {
       await MusicKit.getInstance().authorize();
-      _showApplePlaylistSelect();
+      if (thenFn) thenFn(); else _showAppleChoice();
     } catch (err) {
       btn.disabled = false;
       btn.textContent = 'Connect Apple Music';
       errEl.textContent = err.message || 'Authorization cancelled';
       errEl.style.display = 'block';
     }
+  });
+}
+
+function _showAppleChoice() {
+  const body = document.getElementById('apple-modal-body');
+  body.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:.6rem">
+      <button id="apple-build-btn" class="btn-primary" style="background:#fa3c44;border-color:#fa3c44;text-align:left;padding:.85rem 1rem;height:auto;display:flex;flex-direction:column;gap:.2rem;border-radius:10px">
+        <span style="font-size:.88rem;font-weight:600">Build Apple Music Map</span>
+        <span style="font-size:.72rem;opacity:.75;font-weight:400">Create a separate map from your Apple Music library</span>
+      </button>
+      <button id="apple-transfer-choice-btn" class="btn-secondary" style="text-align:left;padding:.85rem 1rem;height:auto;display:flex;flex-direction:column;gap:.2rem;border-radius:10px">
+        <span style="font-size:.88rem;font-weight:600">Transfer to Apple Music</span>
+        <span style="font-size:.72rem;opacity:.65;font-weight:400">Copy your Spotify playlists into Apple Music</span>
+      </button>
+    </div>
+    <div id="apple-choice-err" style="color:#f87171;font-size:.78rem;margin-top:.6rem;display:none"></div>
+  `;
+
+  document.getElementById('apple-build-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('apple-build-btn');
+    const errEl = document.getElementById('apple-choice-err');
+    btn.disabled = true;
+    btn.querySelector('span').textContent = 'Starting…';
+    errEl.style.display = 'none';
+    try {
+      const mu = MusicKit.getInstance();
+      const musicUserToken = mu.musicUserToken;
+      const storefront = mu.storefrontCountryCode || 'us';
+      const { provider, key } = _getAiSettings();
+      const resp = await fetch('/apple/start-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ music_user_token: musicUserToken, storefront, api_key: key || undefined, provider }),
+      });
+      if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail || 'Failed to start'); }
+      const { job_id, user_id: appleUserId } = await resp.json();
+      location.href = `/loading.html?user=${encodeURIComponent(appleUserId)}&job=${encodeURIComponent(job_id)}`;
+    } catch (err) {
+      btn.disabled = false;
+      btn.querySelector('span').textContent = 'Build Apple Music Map';
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    }
+  });
+
+  document.getElementById('apple-transfer-choice-btn').addEventListener('click', () => {
+    _showApplePlaylistSelect();
   });
 }
 

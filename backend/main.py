@@ -805,6 +805,31 @@ async def apple_developer_token() -> JSONResponse:
         raise HTTPException(status_code=500, detail=f"Token generation failed: {exc}")
 
 
+@app.post("/apple/start-job")
+async def apple_start_job(request: Request) -> JSONResponse:
+    """Start an Apple Music pipeline job. Body: {music_user_token, storefront}."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in — connect Spotify first")
+
+    try:
+        body = await request.json()
+        music_user_token = (body.get("music_user_token") or "").strip()
+        storefront = (body.get("storefront") or "us").strip().lower()
+        api_key = (body.get("api_key") or "").strip()
+        provider = (body.get("provider") or "").strip().lower()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not music_user_token:
+        raise HTTPException(status_code=400, detail="music_user_token required")
+
+    from .jobs import submit_apple_job
+    apple_user_id = f"{user_id}_apple"
+    job_id = submit_apple_job(music_user_token, user_id, storefront, api_key=api_key, provider=provider)
+    return JSONResponse({"job_id": job_id, "user_id": apple_user_id})
+
+
 @app.get("/apple/configured")
 async def apple_configured() -> JSONResponse:
     """Check whether Apple Music credentials are configured."""

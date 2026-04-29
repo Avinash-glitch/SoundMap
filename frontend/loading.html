@@ -307,6 +307,7 @@
 <script>
   const params = new URLSearchParams(location.search);
   const userId = params.get('user');
+  const preJobId = params.get('job'); // set when job was already started (e.g. Apple Music flow)
 
   if (!userId) { location.href = '/'; }
 
@@ -403,6 +404,15 @@
 
   btnGenerate.addEventListener('click', () => startJob(apiKeyInput.value.trim()));
   skipLink.addEventListener('click', () => startJob(''));
+
+  // If a job was pre-started (Apple Music flow), skip the setup panel
+  if (preJobId) {
+    setupPanel.style.display = 'none';
+    progressPanel.style.display = 'block';
+    startTime = Date.now();
+    currentJobId = preJobId;
+    poll(preJobId);
+  }
 
   document.getElementById('btn-stop').addEventListener('click', async () => {
     if (!currentJobId) return;

@@ -56,6 +56,54 @@ def submit_job(access_token: str, user_id: str, display_name: str, api_key: str 
     return job_id
 
 
+def submit_apple_job(
+    music_user_token: str,
+    user_id: str,
+    storefront: str = "us",
+    api_key: str = "",
+    provider: str = "",
+) -> str:
+    """Queue an Apple Music pipeline job and return the job_id."""
+    from . import pipeline
+
+    apple_id = f"{user_id}_apple"
+    job_id = str(uuid.uuid4())
+
+    jobs[job_id] = {
+        "status": "queued",
+        "progress": 0,
+        "message": "Queued — waiting to start…",
+        "user_id": apple_id,
+        "display_name": "Apple Music Library",
+        "error": None,
+    }
+
+    def _on_progress(pct: int, message: str) -> None:
+        jobs[job_id]["progress"] = pct
+        jobs[job_id]["message"] = message
+
+    def _run() -> None:
+        jobs[job_id]["status"] = "processing"
+        try:
+            pipeline.process_apple_user(
+                music_user_token, user_id, storefront,
+                on_progress=_on_progress,
+                api_key=api_key,
+                provider=provider,
+            )
+            jobs[job_id]["status"] = "done"
+            jobs[job_id]["progress"] = 100
+            jobs[job_id]["message"] = "Done!"
+        except Exception as exc:
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["error"] = str(exc)
+            jobs[job_id]["message"] = f"Error: {exc}"
+            print(f"[jobs] Apple pipeline failed for {user_id}: {exc}")
+
+    _executor.submit(_run)
+    return job_id
+
+
 def stop_job(job_id: str) -> bool:
     """Signal the pipeline to stop fetching and build the map with what it has."""
     job = jobs.get(job_id)
