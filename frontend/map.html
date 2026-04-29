@@ -330,6 +330,95 @@
       color: var(--text-dim);
       line-height: 1;
       backdrop-filter: blur(8px);
+      max-height: calc(100vh - 100px);
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+
+    #top-tracks-panel {
+      position: fixed;
+      top: 58px;
+      right: 12px;
+      width: 210px;
+      z-index: 10;
+      background: rgba(17,17,24,0.92);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: .7rem .85rem;
+      font-size: .72rem;
+      color: var(--text-dim);
+      backdrop-filter: blur(8px);
+    }
+    #top-tracks-panel .tt-header {
+      font-size: .63rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: .55rem;
+    }
+    .tt-toggles {
+      display: flex;
+      gap: .3rem;
+      margin-bottom: .65rem;
+    }
+    .tt-toggle {
+      flex: 1;
+      padding: .22rem 0;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text-dim);
+      font-family: 'DM Mono', monospace;
+      font-size: .58rem;
+      cursor: pointer;
+      transition: background .12s, color .12s, border-color .12s;
+      text-align: center;
+    }
+    .tt-toggle.active {
+      background: rgba(29,185,84,.18);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .tt-track {
+      display: flex;
+      align-items: center;
+      gap: .45rem;
+      padding: .28rem 0;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+      text-decoration: none;
+    }
+    .tt-track:last-child { border-bottom: none; }
+    .tt-rank {
+      width: 14px;
+      text-align: right;
+      font-size: .6rem;
+      color: var(--text-dim);
+      flex-shrink: 0;
+    }
+    .tt-art {
+      width: 28px;
+      height: 28px;
+      border-radius: 3px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: var(--border);
+    }
+    .tt-info { min-width: 0; flex: 1; }
+    .tt-name {
+      font-size: .7rem;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tt-artist {
+      font-size: .6rem;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    @media (max-width: 640px) {
+      #top-tracks-panel { display: none; }
     }
 
     .legend-title {
@@ -840,7 +929,6 @@
     <div class="mode-toggle" id="map-mode-toggle">
       <button class="mode-btn" data-mode="moods">Mood Zones</button>
       <button class="mode-btn active" data-mode="playlists">Playlists</button>
-      <button class="mode-btn" data-mode="chart">Top Tracks</button>
     </div>
     <button class="btn-icon" id="btn-ai" title="AI Playlist Curator" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(29,185,84,.4)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
@@ -1102,8 +1190,19 @@
 
 <!-- Legend -->
 <div class="legend" id="map-legend">
-  <div class="legend-title"><span id="legend-count">0</span> tracks</div>
-  <div class="legend-items" id="legend-items"></div>
+  <button id="legend-remaining-btn" style="display:none;width:100%;padding:.32rem .55rem;background:transparent;border:1px solid rgba(29,185,84,.4);color:var(--accent);border-radius:6px;font-family:'DM Mono',monospace;font-size:.67rem;cursor:pointer;margin-bottom:.6rem;transition:background .15s">✦ Organise remaining tracks</button>
+  <div id="legend-body"></div>
+</div>
+
+<!-- Top Tracks panel -->
+<div id="top-tracks-panel">
+  <div class="tt-header">Top Tracks</div>
+  <div class="tt-toggles">
+    <button class="tt-toggle active" data-range="short_term">4 Weeks</button>
+    <button class="tt-toggle" data-range="medium_term">6 Months</button>
+    <button class="tt-toggle" data-range="long_term">All Time</button>
+  </div>
+  <div id="tt-list"><div style="font-size:.65rem;color:var(--text-dim)">Loading…</div></div>
 </div>
 
 <!-- Zoom controls -->
@@ -1151,7 +1250,7 @@ function buildPlaylistColors(playlists) {
 }
 
 function pointColor(p) {
-  if (mapMode === 'playlists' || mapMode === 'chart') {
+  if (mapMode === 'playlists') {
     const pl = (p.playlists || [])[0];
     return playlistColors[pl] || COLOR_UNTAGGED;
   }
@@ -1176,7 +1275,7 @@ let points = [];
 let transform = { x: 0, y: 0, scale: 1 };
 let selectedPoint = null;
 let hoveredPoint = null;
-let mapMode = 'playlists'; // 'moods' | 'playlists' | 'chart'
+let mapMode = 'playlists'; // 'moods' | 'playlists'
 let aiHighlightSet = null; // Set<string> | null — IDs returned by AI curator
 
 // Chart mode state — X = liked_at date, Y = release_year
@@ -1304,7 +1403,6 @@ const COMPARE_COLOR = '#818cf8';
 let activeGenreFilter = null;
 
 function render() {
-  if (mapMode === 'chart') { renderChart(); return; }
   if (comparePoints.length) { renderWithCompare(); return; }
   _renderDots();
 }
@@ -1421,7 +1519,12 @@ function _renderDots() {
 }
 
 function buildLegend() {
-  if (mapMode === 'playlists' || mapMode === 'chart') return buildPlaylistLegend();
+  // Show/hide the permanent remaining button
+  const remaining = (mapData && mapData.remaining) || [];
+  const remBtn = document.getElementById('legend-remaining-btn');
+  if (remBtn) remBtn.style.display = remaining.length ? 'block' : 'none';
+
+  if (mapMode === 'playlists') return buildPlaylistLegend();
   return buildMoodLegend();
 }
 
@@ -1436,14 +1539,14 @@ function buildMoodLegend() {
   const allUncharted = keys.length === 0 || (keys.length === 1 && keys[0] === 'Uncharted');
 
   if (allUncharted) {
-    const legend = document.getElementById('map-legend');
-    legend.innerHTML = `
+    const body = document.getElementById('legend-body');
+    body.innerHTML = `
       <div class="legend-title"><span>${points.length}</span> tracks · moods</div>
       <div class="legend-items">
         <div id="mood-gate">
           <div class="mg-title">Generate Mood Zones</div>
-          <div class="mg-sub">Add your Anthropic API key to let AI group your playlists into sonic territories.</div>
-          <input type="text" id="mg-key-input" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+          <div class="mg-sub">Add your NVIDIA API key to let AI group your playlists into sonic territories.</div>
+          <input type="text" id="mg-key-input" placeholder="nvapi-…" autocomplete="off" spellcheck="false" />
           <button class="mg-btn" id="mg-generate-btn">Generate Mood Zones</button>
           <span class="mg-skip" id="mg-skip-link">Skip — view my Sound Map →</span>
         </div>
@@ -1515,34 +1618,12 @@ function buildPlaylistLegend() {
       ? points.filter(p => !(p.playlists || []).length)
       : points.filter(p => (p.playlists || []).includes(k))
   );
-  _appendRemainingFooter();
-}
-
-function _appendRemainingFooter() {
-  const remaining = (mapData && mapData.remaining) || [];
-  if (!remaining.length) return;
-  const legend = document.getElementById('map-legend');
-  const footer = document.createElement('div');
-  footer.style.cssText = 'margin-top:.75rem;padding-top:.65rem;border-top:1px solid var(--border)';
-  footer.innerHTML = `
-    <div style="font-size:.68rem;color:var(--text-dim);margin-bottom:.45rem">
-      ${remaining.length} liked — not in any playlist
-    </div>
-    <button id="legend-remaining-btn" style="
-      width:100%;padding:.38rem .6rem;background:transparent;
-      border:1px solid rgba(29,185,84,.4);color:var(--accent);
-      border-radius:6px;font-family:'DM Mono',monospace;font-size:.68rem;
-      cursor:pointer;transition:background .15s,border-color .15s">
-      ✦ Organise remaining tracks
-    </button>`;
-  legend.appendChild(footer);
-  document.getElementById('legend-remaining-btn').addEventListener('click', _openRemainingModal);
 }
 
 function _renderLegendItems(counts, colorFor, ptsFor) {
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  const legend = document.getElementById('map-legend');
-  legend.innerHTML = `
+  const body = document.getElementById('legend-body');
+  body.innerHTML = `
     <div class="legend-title"><span>${points.length}</span> tracks · ${mapMode === 'moods' ? 'moods' : 'playlists'}</div>
     <div class="legend-items">
       ${sorted.map(([label, count]) => {
@@ -1717,7 +1798,6 @@ function hitTestOwn(cx, cy) {
 }
 
 function hitTest(cx, cy) {
-  if (mapMode === 'chart') return hitTestChart(cx, cy);
   return comparePoints.length ? hitTestAll(cx, cy) : hitTestOwn(cx, cy);
 }
 
@@ -1727,7 +1807,6 @@ function hitTest(cx, cy) {
 let isDragging = false, dragStart = null, transformStart = null;
 
 canvas.addEventListener('mousedown', e => {
-  if (mapMode === 'chart') return;
   isDragging = false;
   dragStart = { x: e.clientX, y: e.clientY };
   transformStart = { ...transform };
@@ -1785,7 +1864,6 @@ canvas.addEventListener('mouseleave', () => {
 
 // Wheel zoom
 canvas.addEventListener('wheel', e => {
-  if (mapMode === 'chart') return;
   e.preventDefault();
   const factor = e.deltaY > 0 ? 0.88 : 1.14;
   const cx = e.clientX, cy = e.clientY;
@@ -1864,6 +1942,48 @@ function zoomAround(factor) {
 
 document.getElementById('btn-zoom-in').addEventListener('click', () => zoomAround(1.25));
 document.getElementById('btn-zoom-out').addEventListener('click', () => zoomAround(0.8));
+
+// Remaining tracks button (permanent element, wired once)
+document.getElementById('legend-remaining-btn').addEventListener('click', () => _openRemainingModal());
+
+// ---------------------------------------------------------------------------
+// Top Tracks panel
+// ---------------------------------------------------------------------------
+let _ttRange = 'short_term';
+
+async function _loadTopTracks(range) {
+  const listEl = document.getElementById('tt-list');
+  listEl.innerHTML = '<div style="font-size:.65rem;color:var(--text-dim)">Loading…</div>';
+  try {
+    const resp = await fetch(`/top-tracks?time_range=${range}`);
+    if (!resp.ok) { listEl.innerHTML = '<div style="font-size:.65rem;color:#f87171">Not available</div>'; return; }
+    const tracks = await resp.json();
+    if (!tracks.length) { listEl.innerHTML = '<div style="font-size:.65rem;color:var(--text-dim)">No data yet</div>'; return; }
+    listEl.innerHTML = tracks.slice(0, 7).map((t, i) => `
+      <a class="tt-track" href="${esc(t.external_url)}" target="_blank" rel="noopener">
+        <span class="tt-rank">${i + 1}</span>
+        ${t.album_art ? `<img class="tt-art" src="${esc(t.album_art)}" loading="lazy" alt="" />` : '<div class="tt-art"></div>'}
+        <div class="tt-info">
+          <div class="tt-name">${esc(t.name)}</div>
+          <div class="tt-artist">${esc(t.artist)}</div>
+        </div>
+      </a>`).join('');
+  } catch (_) {
+    listEl.innerHTML = '<div style="font-size:.65rem;color:#f87171">Error loading</div>';
+  }
+}
+
+document.querySelectorAll('.tt-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tt-toggle').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _ttRange = btn.dataset.range;
+    _loadTopTracks(_ttRange);
+  });
+});
+
+// Load on page init (after data loads — deferred via setTimeout)
+setTimeout(() => _loadTopTracks(_ttRange), 500);
 
 // ---------------------------------------------------------------------------
 // Sidebar
@@ -2368,8 +2488,6 @@ document.getElementById('map-mode-toggle').addEventListener('click', e => {
   document.querySelectorAll('#map-mode-toggle .mode-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.mode === mapMode));
   activeGenreFilter = null;
-  // In chart mode hide zoom controls and legend (chart has its own axes)
-  document.querySelector('.zoom-controls').style.display = mapMode === 'chart' ? 'none' : '';
   buildLegend();
   render();
 });

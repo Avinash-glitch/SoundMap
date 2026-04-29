@@ -580,6 +580,31 @@ async def add_to_playlists(request: Request) -> JSONResponse:
     return JSONResponse({"results": results})
 
 
+@app.get("/top-tracks")
+async def top_tracks_endpoint(request: Request, time_range: str = "short_term") -> JSONResponse:
+    """Return the user's top 7 tracks for a given time range."""
+    if time_range not in ("short_term", "medium_term", "long_term"):
+        raise HTTPException(status_code=400, detail="time_range must be short_term, medium_term, or long_term")
+    token = await _get_valid_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    resp = _requests.get(
+        "https://api.spotify.com/v1/me/top/tracks",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"limit": 7, "time_range": time_range},
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Spotify error {resp.status_code}")
+    return JSONResponse([{
+        "id": t["id"],
+        "name": t["name"],
+        "artist": ", ".join(a["name"] for a in t.get("artists", [])),
+        "album_art": (t.get("album", {}).get("images", [{}])[0].get("url", "")),
+        "external_url": t.get("external_urls", {}).get("spotify", ""),
+    } for t in resp.json().get("items", [])])
+
+
 @app.get("/now-playing")
 async def now_playing(request: Request) -> JSONResponse:
     """Return the user's currently playing track from Spotify."""
