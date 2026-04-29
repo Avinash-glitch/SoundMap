@@ -782,6 +782,26 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
     })
 
 
+@app.get("/apple/token")
+async def apple_developer_token() -> JSONResponse:
+    """Return a short-lived Apple Music developer token for MusicKit JS."""
+    try:
+        from .apple_auth import get_developer_token
+        token = get_developer_token()
+        return JSONResponse({"developer_token": token})
+    except EnvironmentError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Token generation failed: {exc}")
+
+
+@app.get("/apple/configured")
+async def apple_configured() -> JSONResponse:
+    """Check whether Apple Music credentials are configured."""
+    from .apple_auth import is_configured
+    return JSONResponse({"configured": is_configured()})
+
+
 @app.get("/map/{user_id}")
 async def get_map(user_id: str) -> JSONResponse:
     data = storage.load_map(user_id)

@@ -14,3 +14,4 @@ anthropic>=0.25.0
 itsdangerous>=2.1.0
 supabase>=2.3.0
 openai>=1.12.0
+PyJWT[cryptography]>=2.8.0

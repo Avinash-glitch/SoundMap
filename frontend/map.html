@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+  <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js" async></script>
   <style>
     :root {
       --bg: #0a0a0f;
@@ -867,6 +868,7 @@
       /* Hide desktop-only topbar items on mobile */
       #btn-compare,
       #btn-merge,
+      #btn-apple,
       #map-mode-toggle,
       #btn-save-moods,
       .compare-badge { display: none !important; }
@@ -947,6 +949,12 @@
         <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
       </svg>
       Save to Spotify
+    </button>
+    <button class="btn-icon" id="btn-apple" title="Transfer to Apple Music" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(250,60,60,.35);color:#fa6060">
+      <svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;flex-shrink:0">
+        <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/>
+      </svg>
+      Apple Music
     </button>
     <button class="btn-icon" id="btn-compare" title="Compare with a friend">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1185,6 +1193,20 @@
         <button class="btn-secondary" id="remaining-cancel">Close</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Apple Music Transfer modal -->
+<div class="modal-backdrop" id="apple-modal">
+  <div class="modal" style="width:min(480px,92vw)">
+    <div class="modal-title" style="display:flex;align-items:center;gap:.6rem">
+      <svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px;color:#fa6060;flex-shrink:0">
+        <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/>
+      </svg>
+      Transfer to Apple Music
+    </div>
+    <button id="apple-modal-close" class="modal-close" style="position:absolute;top:.75rem;right:.75rem;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:1rem;line-height:1;padding:.25rem">✕</button>
+    <div id="apple-modal-body" style="margin-top:.75rem"></div>
   </div>
 </div>
 
@@ -3465,6 +3487,216 @@ document.getElementById('now-playing').addEventListener('click', () => {
 function startNowPlayingPolling() {
   pollNowPlaying();
   setInterval(pollNowPlaying, 5000);
+}
+
+// ---------------------------------------------------------------------------
+// Apple Music transfer
+// ---------------------------------------------------------------------------
+document.getElementById('apple-modal-close').addEventListener('click', () => {
+  document.getElementById('apple-modal').classList.remove('open');
+});
+document.getElementById('apple-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+document.getElementById('btn-apple').addEventListener('click', () => _openAppleModal());
+
+async function _openAppleModal() {
+  const modal = document.getElementById('apple-modal');
+  const body = document.getElementById('apple-modal-body');
+  modal.classList.add('open');
+  body.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:.5rem 0">Loading MusicKit…</div>';
+
+  try {
+    const resp = await fetch('/apple/token');
+    if (!resp.ok) {
+      const e = await resp.json();
+      throw new Error(e.detail || 'Apple Music not configured on this server');
+    }
+    const { developer_token } = await resp.json();
+
+    // Wait for MusicKit to be ready (it loads async)
+    if (typeof MusicKit === 'undefined') {
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('MusicKit JS failed to load')), 8000);
+        document.addEventListener('musickitloaded', () => { clearTimeout(t); resolve(); }, { once: true });
+      });
+    }
+
+    await MusicKit.configure({
+      developerToken: developer_token,
+      app: { name: 'SoundMap', build: '1.0.0' },
+    });
+
+    const instance = MusicKit.getInstance();
+    if (instance.isAuthorized) {
+      _showApplePlaylistSelect();
+    } else {
+      _showAppleAuth();
+    }
+  } catch (err) {
+    body.innerHTML = `<div style="color:#f87171;font-size:.82rem;padding:.5rem 0">${esc(err.message)}</div>`;
+  }
+}
+
+function _showAppleAuth() {
+  const body = document.getElementById('apple-modal-body');
+  body.innerHTML = `
+    <p style="font-size:.82rem;color:var(--text-dim);margin-bottom:1.1rem;line-height:1.55">
+      Connect Apple Music to transfer your Spotify playlists. Each track is matched in the Apple Music catalogue.
+    </p>
+    <button id="apple-auth-btn" class="btn-primary" style="width:100%;background:#fa3c44;border-color:#fa3c44">
+      Connect Apple Music
+    </button>
+    <div id="apple-auth-err" style="color:#f87171;font-size:.78rem;margin-top:.5rem;display:none"></div>
+  `;
+  document.getElementById('apple-auth-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('apple-auth-btn');
+    const errEl = document.getElementById('apple-auth-err');
+    btn.disabled = true;
+    btn.textContent = 'Authorizing…';
+    errEl.style.display = 'none';
+    try {
+      await MusicKit.getInstance().authorize();
+      _showApplePlaylistSelect();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Connect Apple Music';
+      errEl.textContent = err.message || 'Authorization cancelled';
+      errEl.style.display = 'block';
+    }
+  });
+}
+
+function _showApplePlaylistSelect() {
+  const body = document.getElementById('apple-modal-body');
+
+  // Build playlist list from map data
+  const playlists = [...new Set(points.flatMap(p => p.playlists || []))].sort();
+  if (!playlists.length) {
+    body.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem">No playlists found in your map.</div>';
+    return;
+  }
+
+  const plRows = playlists.map(pl => {
+    const count = points.filter(p => (p.playlists || []).includes(pl)).length;
+    return `<label style="display:flex;align-items:center;gap:.55rem;padding:.38rem .6rem;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s" onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background='transparent'">
+      <input type="checkbox" class="apple-pl-check" data-pl="${esc(pl)}" checked style="accent-color:#fa3c44;flex-shrink:0;cursor:pointer" />
+      <span style="flex:1;font-size:.78rem">${esc(pl)}</span>
+      <span style="font-size:.65rem;color:var(--text-dim)">${count} tracks</span>
+    </label>`;
+  }).join('');
+
+  body.innerHTML = `
+    <p style="font-size:.78rem;color:var(--text-dim);margin-bottom:.65rem">
+      Select playlists to transfer. Tracks are matched by name &amp; artist in the Apple Music catalogue.
+    </p>
+    <div style="max-height:230px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-bottom:.75rem;scrollbar-width:thin">${plRows}</div>
+    <div id="apple-transfer-status" style="font-size:.75rem;color:var(--text-dim);min-height:1.1em;margin-bottom:.5rem"></div>
+    <div style="display:flex;gap:.5rem">
+      <button id="apple-select-all" class="btn-secondary" style="font-size:.72rem;padding:.3rem .6rem">All</button>
+      <button id="apple-select-none" class="btn-secondary" style="font-size:.72rem;padding:.3rem .6rem">None</button>
+      <button id="apple-transfer-btn" class="btn-primary" style="flex:1;background:#fa3c44;border-color:#fa3c44">Transfer →</button>
+    </div>
+  `;
+
+  document.getElementById('apple-select-all').addEventListener('click', () => {
+    document.querySelectorAll('.apple-pl-check').forEach(c => c.checked = true);
+  });
+  document.getElementById('apple-select-none').addEventListener('click', () => {
+    document.querySelectorAll('.apple-pl-check').forEach(c => c.checked = false);
+  });
+  document.getElementById('apple-transfer-btn').addEventListener('click', () => {
+    const selected = [...document.querySelectorAll('.apple-pl-check:checked')].map(c => c.dataset.pl);
+    if (!selected.length) return;
+    _doAppleTransfer(selected);
+  });
+}
+
+async function _doAppleTransfer(selectedPlaylists) {
+  const body = document.getElementById('apple-modal-body');
+  const statusEl = document.getElementById('apple-transfer-status');
+  const btn = document.getElementById('apple-transfer-btn');
+  btn.disabled = true;
+
+  const mu = MusicKit.getInstance();
+  const storefront = mu.storefrontCountryCode || 'us';
+
+  const results = [];
+
+  for (let pi = 0; pi < selectedPlaylists.length; pi++) {
+    const plName = selectedPlaylists[pi];
+    const plTracks = points.filter(p => (p.playlists || []).includes(plName));
+    statusEl.textContent = `Searching "${plName}" (${pi + 1}/${selectedPlaylists.length})…`;
+
+    const catalogIds = [];
+    for (let i = 0; i < plTracks.length; i++) {
+      const t = plTracks[i];
+      try {
+        const res = await mu.api.music(`/v1/catalog/${storefront}/search`, {
+          term: `${t.name} ${t.artist}`,
+          types: 'songs',
+          limit: 1,
+        });
+        const song = res.data?.results?.songs?.data?.[0];
+        if (song) catalogIds.push(song.id);
+      } catch (_) {}
+      if (i % 10 === 9) {
+        statusEl.textContent = `Searching "${plName}" — ${catalogIds.length}/${i + 1} matched…`;
+        await new Promise(r => setTimeout(r, 50)); // breathe
+      }
+    }
+
+    if (!catalogIds.length) {
+      results.push({ name: plName, matched: 0, created: false });
+      continue;
+    }
+
+    statusEl.textContent = `Creating "${plName}" in Apple Music…`;
+    try {
+      await mu.api.music('/v1/me/library/playlists', {}, {
+        fetchOptions: {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            attributes: {
+              name: plName,
+              description: 'Transferred from SoundMap (Spotify)',
+            },
+            relationships: {
+              tracks: { data: catalogIds.map(id => ({ id, type: 'songs' })) },
+            },
+          }),
+        },
+      });
+      results.push({ name: plName, matched: catalogIds.length, total: plTracks.length, created: true });
+    } catch (err) {
+      results.push({ name: plName, matched: catalogIds.length, total: plTracks.length, created: false, error: err.message });
+    }
+  }
+
+  // Show results
+  const created = results.filter(r => r.created);
+  const rows = results.map(r => {
+    const icon = r.created ? '<span style="color:var(--accent)">✓</span>' : '<span style="color:#f87171">✗</span>';
+    const detail = r.created
+      ? `${r.matched}/${r.total} tracks`
+      : (r.error || 'no matches found');
+    return `<div style="display:flex;gap:.5rem;font-size:.75rem;padding:.2rem 0;border-bottom:1px solid var(--border)">
+      ${icon}
+      <span style="flex:1">${esc(r.name)}</span>
+      <span style="color:var(--text-dim)">${detail}</span>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <p style="font-size:.85rem;color:var(--accent);margin-bottom:.75rem">
+      ✓ Transferred ${created.length} of ${results.length} playlist${results.length !== 1 ? 's' : ''} to Apple Music
+    </p>
+    <div style="max-height:260px;overflow-y:auto;scrollbar-width:thin">${rows}</div>
+    <button id="apple-transfer-again" class="btn-secondary" style="width:100%;margin-top:.75rem">Transfer more</button>
+  `;
+  document.getElementById('apple-transfer-again').addEventListener('click', _showApplePlaylistSelect);
 }
 
 // ---------------------------------------------------------------------------
