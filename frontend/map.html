@@ -1658,11 +1658,15 @@ function _renderLegendItems(counts, colorFor, ptsFor) {
 
 function showFilterTracks(key, color, pts) {
   const sorted = [...pts].sort((a, b) => (b.play_score || 1) - (a.play_score || 1));
-  const legend = document.getElementById('map-legend');
+  const body = document.getElementById('legend-body');
   // Only show save button in mood mode — playlists already exist in Spotify
   const showSave = (mapMode === 'moods') && pts.length > 0 && key !== 'Uncharted';
 
-  legend.innerHTML = `
+  // Hide the remaining btn while showing the filter view
+  const remBtn = document.getElementById('legend-remaining-btn');
+  if (remBtn) remBtn.style.display = 'none';
+
+  body.innerHTML = `
     <div class="legend-back" id="legend-back">
       ← <span style="display:inline-flex;align-items:center;gap:.35rem">
            <span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></span>
@@ -1687,20 +1691,20 @@ function showFilterTracks(key, color, pts) {
         </div>`).join('')}
     </div>`;
 
-  legend.querySelector('#legend-back').addEventListener('click', () => {
+  body.querySelector('#legend-back').addEventListener('click', () => {
     activeGenreFilter = null;
     buildLegend();
     render();
   });
 
-  legend.querySelectorAll('.legend-track-item').forEach(el => {
+  body.querySelectorAll('.legend-track-item').forEach(el => {
     el.addEventListener('click', () => {
       const pt = points.find(p => p.id === el.dataset.id);
       if (pt) { panTo(pt); selectPoint(pt); }
     });
   });
 
-  const saveBtn = legend.querySelector('#legend-save-zone');
+  const saveBtn = body.querySelector('#legend-save-zone');
   if (saveBtn) {
     saveBtn.addEventListener('click', async () => {
       saveBtn.disabled = true;
@@ -2802,6 +2806,7 @@ function _renderCompareResults(d) {
 function _esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+const esc = _esc;
 
 
 // Compare modal controls
@@ -2987,11 +2992,9 @@ function _openRemainingModal() {
     listEl.innerHTML += `<div style="font-size:.7rem;color:var(--text-dim);padding:.4rem 0;text-align:center">… and ${remaining.length - 30} more</div>`;
   }
 
-  document.getElementById('remaining-gen-error').style.display = 'none';
+  document.getElementById('remaining-ai-error').style.display = 'none';
   document.getElementById('remaining-gen-result').style.display = 'none';
-  const btn = document.getElementById('remaining-generate');
-  btn.textContent = `✦ Generate Playlists (${remaining.length} tracks)`;
-  btn.disabled = false;
+  document.getElementById('remaining-generate-btn').disabled = false;
   document.getElementById('remaining-modal').classList.add('open');
 }
 
