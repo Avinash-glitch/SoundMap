@@ -1,7 +1,6 @@
 """
 Spotify library processing pipeline — adapted for per-user programmatic use.
-Fetches tracks, computes embeddings (CLAP or audio features), runs UMAP,
-saves result via storage.py.
+Fetches tracks, computes genre embeddings, runs UMAP, saves result via storage.py.
 """
 
 import time
@@ -12,15 +11,8 @@ import requests
 
 from . import storage
 
-try:
-    from msclap import CLAP
-    CLAP_AVAILABLE = True
-except ImportError:
-    CLAP_AVAILABLE = False
-
 MAX_TRACKS = 1000
 ARTIST_BATCH = 50
-PREVIEW_CONCURRENCY = 5
 
 _ENV_KEY_MAP = {"nvidia": "NVIDIA_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
 
@@ -75,14 +67,8 @@ def process_user(
     progress(30, f"Processing {len(tracks)} tracks across {len(playlist_meta)} playlists…")
 
     # ---- 3. Embeddings ----------------------------------------------------
-    track_genres: list[str] = ["other"] * len(tracks)
-
-    if CLAP_AVAILABLE:
-        progress(35, "Computing CLAP audio embeddings (this takes a while)…")
-        embeddings = _clap_embeddings(tracks, headers, on_progress=progress)
-    else:
-        progress(35, "Fetching audio features…")
-        embeddings, track_genres = _audio_feature_embeddings(tracks, headers, on_progress=progress)
+    progress(35, "Analysing your music…")
+    embeddings, track_genres = _genre_embeddings(tracks, headers, on_progress=progress)
 
     # ---- 3b. AI genre detection (enriches map labels) --------------------
     if api_key:
@@ -382,121 +368,7 @@ def _normalise_track(t: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Client credentials token (for public endpoints like audio-features)
-# ---------------------------------------------------------------------------
-
-def _get_app_token() -> str:
-    """Client credentials token — no user context needed, used for audio features."""
-    import base64
-    import os
-    client_id = os.environ["SPOTIFY_CLIENT_ID"]
-    client_secret = os.environ["SPOTIFY_CLIENT_SECRET"]
-    creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-    resp = requests.post(
-        "https://accounts.spotify.com/api/token",
-        data={"grant_type": "client_credentials"},
-        headers={"Authorization": f"Basic {creds}"},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json()["access_token"]
-
-
-# ---------------------------------------------------------------------------
-# Audio feature embeddings (primary path)
-# ---------------------------------------------------------------------------
-
-_AF_DIRECT = ["danceability", "energy", "speechiness", "acousticness",
-               "instrumentalness", "liveness", "valence"]
-_AF_NORM   = {"key": (0, 11), "loudness": (-60, 0), "tempo": (50, 220),
-               "mode": (0, 1), "time_signature": (3, 7)}
-_AF_KEYS   = _AF_DIRECT + list(_AF_NORM.keys())  # 12 features total
-
-
-def _audio_feature_embeddings(
-    tracks: list[dict],
-    user_headers: dict,
-    on_progress: Callable | None = None,
-) -> tuple[np.ndarray, list[str]]:
-    """
-    Fetch audio features in batches of 100.
-    Tries client-credentials token first, falls back to user token, then genre embeddings.
-    """
-    try:
-        app_token = _get_app_token()
-        af_headers = {"Authorization": f"Bearer {app_token}"}
-    except Exception as e:
-        print(f"[pipeline] could not get app token ({e}), using user token for audio features")
-        af_headers = user_headers
-
-    ids = [t["id"] for t in tracks]
-    feat_map: dict[str, dict] = {}
-    use_genre_fallback = False
-    n_batches = max(1, (len(ids) + 99) // 100)
-
-    for batch_i, i in enumerate(range(0, len(ids), 100)):
-        batch = ids[i: i + 100]
-        resp = requests.get(
-            "https://api.spotify.com/v1/audio-features",
-            params={"ids": ",".join(batch)},
-            headers=af_headers,
-            timeout=15,
-        )
-        if resp.status_code == 403 and af_headers is not user_headers:
-            print("[pipeline] audio features 403 with app token — retrying with user token")
-            af_headers = user_headers
-            resp = requests.get(
-                "https://api.spotify.com/v1/audio-features",
-                params={"ids": ",".join(batch)},
-                headers=af_headers,
-                timeout=15,
-            )
-        if resp.status_code == 403:
-            print("[pipeline] audio features 403 — falling back to genre embeddings")
-            use_genre_fallback = True
-            break
-        if resp.status_code == 200:
-            for af in resp.json().get("audio_features") or []:
-                if af and af.get("id"):
-                    feat_map[af["id"]] = af
-
-        pct = 35 + int(((batch_i + 1) / n_batches) * 35)
-        if on_progress:
-            on_progress(pct, f"Audio features: batch {batch_i + 1}/{n_batches}…")
-        time.sleep(0.05)
-
-    if use_genre_fallback:
-        if on_progress:
-            on_progress(40, "Using genre embeddings instead…")
-        return _genre_embeddings(tracks, user_headers, on_progress=on_progress)
-
-    # Build normalised feature matrix
-    n_cols = len(_AF_KEYS)
-    matrix = np.zeros((len(tracks), n_cols), dtype=float)
-
-    for ti, track in enumerate(tracks):
-        af = feat_map.get(track["id"])
-        if not af:
-            continue
-        for ci, key in enumerate(_AF_DIRECT):
-            matrix[ti, ci] = float(af.get(key) or 0)
-        for ci, (key, (lo, hi)) in enumerate(zip(_AF_NORM.keys(), _AF_NORM.values())):
-            val = float(af.get(key) or lo)
-            matrix[ti, len(_AF_DIRECT) + ci] = (val - lo) / (hi - lo)
-
-    # Fill missing rows with column means
-    col_means = matrix.mean(axis=0)
-    for ti, track in enumerate(tracks):
-        if track["id"] not in feat_map:
-            matrix[ti] = col_means
-
-    track_genres = ["other"] * len(tracks)
-    print(f"[pipeline] audio features fetched for {len(feat_map)}/{len(tracks)} tracks")
-    return matrix, track_genres
-
-
-# ---------------------------------------------------------------------------
-# Genre-based embeddings (fallback when audio features are unavailable)
+# Genre-based embeddings
 # ---------------------------------------------------------------------------
 
 def _genre_embeddings(
@@ -624,58 +496,6 @@ def _primary_genre(genres: list[str]) -> str:
     # Last resort: return the first raw genre tag shortened, so at least it's labelled
     first = genres[0].lower()
     return first if len(first) <= 20 else "other"
-
-
-# ---------------------------------------------------------------------------
-# CLAP embeddings (optional)
-# ---------------------------------------------------------------------------
-
-def _clap_embeddings(
-    tracks: list[dict],
-    headers: dict,
-    on_progress: Callable | None = None,
-) -> np.ndarray:
-    """
-    Stream preview audio into CLAP model.
-    Falls back to audio features for tracks without previews.
-    """
-    import io
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    clap_model = CLAP(version="2023", use_cuda=False)
-    embeddings: dict[str, np.ndarray] = {}
-
-    def _embed_one(track: dict) -> tuple[str, np.ndarray | None]:
-        url = track.get("preview_url")
-        if not url:
-            return track["id"], None
-        try:
-            resp = requests.get(url, timeout=15)
-            audio_bytes = io.BytesIO(resp.content)
-            emb = clap_model.get_audio_embeddings([audio_bytes])
-            return track["id"], np.array(emb[0])
-        except Exception:
-            return track["id"], None
-
-    with ThreadPoolExecutor(max_workers=PREVIEW_CONCURRENCY) as pool:
-        futures = {pool.submit(_embed_one, t): t for t in tracks}
-        done = 0
-        for fut in as_completed(futures):
-            tid, emb = fut.result()
-            embeddings[tid] = emb
-            done += 1
-            pct = 35 + int((done / len(tracks)) * 35)
-            if on_progress:
-                on_progress(pct, f"Embedded {done}/{len(tracks)} tracks with CLAP…")
-
-    # Tracks without CLAP embedding → fallback to audio features
-    missing = [t for t in tracks if embeddings.get(t["id"]) is None]
-    if missing:
-        feat_matrix = _audio_feature_embeddings(missing, headers)
-        for i, t in enumerate(missing):
-            embeddings[t["id"]] = feat_matrix[i]
-
-    return np.array([embeddings[t["id"]] for t in tracks])
 
 
 # ---------------------------------------------------------------------------
@@ -893,7 +713,7 @@ def _build_map_data(
         "points": points,
         "generated_at": int(time.time()),
         "track_count": len(points),
-        "embedding_method": "clap" if CLAP_AVAILABLE else "genres",
+        "embedding_method": "genres",
         "display_name": display_name,
         "playlists": playlist_meta or [],
         "moods": sorted(set(p["mood"] for p in points)),

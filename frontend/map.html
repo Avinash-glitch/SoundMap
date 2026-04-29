@@ -1357,6 +1357,7 @@ async function loadMap() {
     setTimeout(() => { overlay.style.display = 'none'; }, 500);
 
   } catch (err) {
+    console.error('[loadMap] error:', err);
     document.getElementById('loading-overlay').innerHTML =
       `<div style="color:#f87171;font-size:.85rem;text-align:center;padding:2rem">
         Failed to load map data.<br/><a href="/" style="color:var(--accent)">Try again</a>
@@ -1637,7 +1638,7 @@ function _renderLegendItems(counts, colorFor, ptsFor) {
       }).join('')}
     </div>`;
 
-  legend.querySelectorAll('.legend-item').forEach(el => {
+  body.querySelectorAll('.legend-item').forEach(el => {
     el.addEventListener('click', () => {
       const key = el.dataset.key;
       if (activeGenreFilter === key) {
