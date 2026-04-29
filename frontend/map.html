@@ -3703,7 +3703,12 @@ async function _doAppleTransfer(selectedPlaylists) {
 // Boot
 // ---------------------------------------------------------------------------
 resize();
-loadMap();
+loadMap().then(() => {
+  // Auto-open Apple Music modal if redirected from landing page Apple button
+  if (new URLSearchParams(location.search).get('connect_apple') === '1') {
+    _openAppleModal();
+  }
+});
 startNowPlayingPolling();
 </script>
 </body>

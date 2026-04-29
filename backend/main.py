@@ -782,6 +782,16 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
     })
 
 
+@app.get("/me")
+async def me(request: Request) -> JSONResponse:
+    """Return the current session's user identity, or 401 if not logged in."""
+    user_id = request.session.get("user_id")
+    display_name = request.session.get("display_name", user_id)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    return JSONResponse({"user_id": user_id, "display_name": display_name})
+
+
 @app.get("/apple/token")
 async def apple_developer_token() -> JSONResponse:
     """Return a short-lived Apple Music developer token for MusicKit JS."""
