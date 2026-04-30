@@ -1802,7 +1802,9 @@ function _brainInPolySVG(x, y) {
 function _computeSVGBrainDataFor(pts, md) {
   const plNames = (md.playlists||[])
     .map(p=>p.name)
-    .filter(name=>pts.some(p=>(p.playlists||[]).includes(name)));
+    .filter(name=>pts.some(p=>(p.playlists||[]).includes(name)))
+    .sort((a,b)=>pts.filter(p=>(p.playlists||[]).includes(b)).length - pts.filter(p=>(p.playlists||[]).includes(a)).length)
+    .slice(0, 14);
   if (!plNames.length) return null;
   const N = plNames.length;
 
