@@ -906,11 +906,16 @@ async def import_friend_playlist(request: Request) -> JSONResponse:
     print(f"[import-friend-playlist] user={user_id} | playlist='{new_name}' | tracks={len(track_ids)}")
 
     create_resp = _requests.post(
-        f"https://api.spotify.com/v1/users/{user_id}/playlists",
+        "https://api.spotify.com/v1/me/playlists",
         headers=h,
         json={"name": new_name, "public": False, "description": f"Imported from {friend_name}'s SoundMap"},
     )
     print(f"[import-friend-playlist] create status={create_resp.status_code} body={create_resp.text[:300]}")
+    if create_resp.status_code == 403:
+        raise HTTPException(
+            status_code=403,
+            detail="Spotify permissions missing — please reconnect your Spotify account to grant playlist access",
+        )
     if create_resp.status_code not in (200, 201):
         raise HTTPException(status_code=502, detail=f"Could not create playlist: {create_resp.text[:300]}")
 

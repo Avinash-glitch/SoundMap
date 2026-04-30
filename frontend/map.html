@@ -2275,6 +2275,13 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
         btn.textContent = 'Retry';
         return;
       }
+      if (resp.status === 403) {
+        status.style.color = '#f87171';
+        status.innerHTML = 'Spotify permissions missing — <a href="/auth/login" style="color:var(--accent)">reconnect Spotify</a> then try again';
+        btn.disabled = false;
+        btn.textContent = 'Retry';
+        return;
+      }
       if (!resp.ok) {
         let detail = '';
         try { detail = (await resp.json()).detail || ''; } catch {}
