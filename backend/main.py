@@ -1075,23 +1075,31 @@ async def import_to_apple(request: Request) -> JSONResponse:
     if not catalog_ids:
         raise HTTPException(status_code=422, detail="Could not match any tracks in Apple Music catalog")
 
-    # Add resolved tracks to the user's library
-    added = 0
-    for i in range(0, len(catalog_ids), 100):
-        batch = catalog_ids[i:i + 100]
-        params = "&".join(f"ids[songs]={cid}" for cid in batch)
-        r = _requests.post(
-            f"{base}/v1/me/library?{params}",
-            headers=h,
-            timeout=15,
-        )
-        if r.status_code in (200, 201, 202, 204):
-            added += len(batch)
-        else:
-            print(f"[import-to-apple] add batch failed: {r.status_code} {r.text[:200]}")
+    # Create a named playlist with the resolved tracks
+    new_name = f"{playlist_name} (from {friend_name})"
+    playlist_body = {
+        "attributes": {
+            "name": new_name,
+            "description": f"Imported from {friend_name}'s SoundMap",
+        },
+        "relationships": {
+            "tracks": {
+                "data": [{"id": cid, "type": "songs"} for cid in catalog_ids]
+            }
+        },
+    }
+    r = _requests.post(
+        f"{base}/v1/me/library/playlists",
+        headers={**h, "Content-Type": "application/json"},
+        json=playlist_body,
+        timeout=20,
+    )
+    print(f"[import-to-apple] create playlist status={r.status_code} body={r.text[:300]}")
+    if r.status_code not in (200, 201):
+        raise HTTPException(status_code=502, detail=f"Could not create Apple Music playlist: {r.text[:200]}")
 
-    print(f"[import-to-apple] added {added} tracks to Apple Music library")
-    return JSONResponse({"name": f"{playlist_name} (from {friend_name})", "track_count": added})
+    print(f"[import-to-apple] created '{new_name}' ({len(catalog_ids)} tracks)")
+    return JSONResponse({"name": new_name, "track_count": len(catalog_ids)})
 
 
 @app.post("/create-mood-playlists")
