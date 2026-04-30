@@ -1805,78 +1805,41 @@ function _computeSVGBrainDataFor(pts, md) {
     .map(p=>p.name)
     .filter(name=>pts.some(p=>(p.playlists||[]).includes(name)))
     .sort((a,b)=>pts.filter(p=>(p.playlists||[]).includes(b)).length - pts.filter(p=>(p.playlists||[]).includes(a)).length);
-  const otherNames = sortedNames.slice(11);
-  const plNames = otherNames.length ? [...sortedNames.slice(0, 11), 'Others'] : sortedNames.slice(0, 11);
+  const plNames = sortedNames.slice(0, 10);
+  const otherNames = sortedNames.slice(10);
   if (!plNames.length) return null;
   const N = plNames.length;
 
-  // Symmetric placement: relax seeds in the left hemisphere only (Voronoi clipped
-  // to x<500), then mirror to get right hemisphere. Keeps both halves well-spread
-  // without the collapse that happens when you enforce symmetry on a joint relaxation.
+  // Fixed seed positions from the design — 5 per hemisphere, anatomically placed.
+  // Indices 0–halfN-1 = left, halfN–2*halfN-1 = right, 2*halfN = center (odd N).
+  const BASE_LEFT  = [[295,148],[235,318],[142,428],[295,560],[418,348]];
+  const BASE_RIGHT = [[705,148],[765,318],[858,428],[705,560],[582,348]];
   const halfN = Math.floor(N / 2);
-  const extraN = N - 2 * halfN; // 1 if N is odd (shouldn't happen with cap of 12)
-
-  const leftSeeds = [];
-  let tries = 0;
-  while (leftSeeds.length < halfN && tries < halfN * 800) {
-    const x = 100 + Math.random() * 370; // left brain: ~100–470
-    const y = 60 + Math.random() * 560;
-    if (_brainInPolySVG(x, y)) leftSeeds.push([x, y]);
-    tries++;
-  }
-  if (leftSeeds.length < halfN) return null;
-
-  // Lloyd relaxation on left seeds only — Voronoi clipped to left half so
-  // centroids never drift across the fissure
-  for (let iter = 0; iter < 28; iter++) {
-    const del2 = d3.Delaunay.from(leftSeeds);
-    const vor2 = del2.voronoi([0, 0, 500, 680]);
-    leftSeeds.forEach((s, i) => {
-      const cell = vor2.cellPolygon(i);
-      if (!cell || cell.length < 3) return;
-      const inBrain = cell.filter(([px, py]) => _brainInPolySVG(px, py) && px < 500);
-      if (!inBrain.length) return;
-      const cx = inBrain.reduce((a, p) => a + p[0], 0) / inBrain.length;
-      const cy = inBrain.reduce((a, p) => a + p[1], 0) / inBrain.length;
-      if (_brainInPolySVG(cx, cy) && cx < 500) leftSeeds[i] = [cx, cy];
-    });
-  }
-
-  // Mirror left seeds to right (brain is symmetric around x=500)
-  let seeds = [
-    ...leftSeeds,
-    ...leftSeeds.map(([x, y]) => [1000 - x, y]),
+  const extraN = N % 2;
+  const seeds = [
+    ...BASE_LEFT.slice(0, halfN),
+    ...BASE_RIGHT.slice(0, halfN),
+    ...(extraN ? [[500, 344]] : []),
   ];
 
-  if (extraN) {
-    tries = 0;
-    while (seeds.length < N && tries < 800) {
-      const x = 440 + Math.random() * 120;
-      const y = 100 + Math.random() * 480;
-      if (_brainInPolySVG(x, y)) seeds.push([x, y]);
-      tries++;
-    }
-    if (seeds.length < N) return null;
+  // Fixed connection topology: pentagon ring + spokes on each side + 3 bridges.
+  // Generalises cleanly for halfN 2–5.
+  const conns = [];
+  // Left ring
+  for (let i = 0; i < halfN; i++) conns.push([i, (i + 1) % halfN]);
+  if (halfN >= 4) conns.push([1, halfN - 1], [2, halfN - 1]); // spokes to central
+  // Right ring
+  for (let i = halfN; i < 2 * halfN; i++) conns.push([i, halfN + (i - halfN + 1) % halfN]);
+  if (halfN >= 4) conns.push([halfN + 1, 2 * halfN - 1], [halfN + 2, 2 * halfN - 1]);
+  // Cross-hemisphere bridges
+  if (halfN >= 1) {
+    conns.push([halfN - 1, 2 * halfN - 1]); // corpus callosum (central–central)
+    conns.push([0, halfN]);                   // frontal bridge (top–top)
   }
+  if (halfN >= 4) conns.push([halfN - 2, 2 * halfN - 2]); // occipital bridge
 
   const del = d3.Delaunay.from(seeds);
   const vor = del.voronoi([-500,-500,1500,1200]);
-
-  const conns = [];
-  const nc = Math.max(2, Math.ceil(N/4));
-  for (let i=0; i<N; i++) {
-    const dists = [];
-    for (let j=0; j<N; j++) {
-      if (j===i) continue;
-      dists.push([j,Math.hypot(seeds[i][0]-seeds[j][0],seeds[i][1]-seeds[j][1])]);
-    }
-    dists.sort((a,b)=>a[1]-b[1]);
-    for (let k=0; k<Math.min(nc,dists.length); k++) {
-      const j=dists[k][0];
-      if (!conns.some(([a,b])=>(a===i&&b===j)||(a===j&&b===i))) conns.push([i,j]);
-    }
-  }
-
   const brainPath = _crPath(BRAIN_PTS_SVG, true);
   const fissuePath = _crPath([[500,52],[499,175],[500,344],[501,515],[500,637]],false);
   return { seeds, conns, plNames, del, vor, brainPath, fissuePath, N, otherNames };
@@ -2012,7 +1975,6 @@ function _showBrainOverlay() {
     svgEl.innerHTML = _buildBrainSVGMarkup();
     svgEl.dataset.built = dataKey;
     _wireBrainSVGEvents();
-    _buildBrainLegendStrip();
   }
 }
 
@@ -2030,50 +1992,7 @@ function _wireBrainSVGEvents() {
 
 function _showBrainInfoPanel(idx, name) {
   const panel = document.getElementById('brain-info-panel');
-  const { conns, plNames, N, otherNames = [] } = _svgBrainCache;
-
-  if (name === 'Others') {
-    const col = COLOR_OTHERS;
-    const side = idx < Math.ceil(N/2) ? 'LEFT' : 'RIGHT';
-    const trackCount = points.filter(p=>(p.playlists||[]).some(pl=>otherNames.includes(pl))).length;
-    panel.innerHTML = `<div class="bpi-inner">
-      <div>
-        <div style="font-size:9px;color:var(--text-dim);letter-spacing:.14em;text-transform:uppercase;margin-bottom:5px">${side} HEMISPHERE · ${otherNames.length} PLAYLISTS</div>
-        <div style="font-family:Syne,sans-serif;font-weight:700;font-size:20px;line-height:1.2;color:${col};text-shadow:0 0 28px ${col}40">Others</div>
-      </div>
-      <div style="width:44px;height:3px;border-radius:2px;background:${col};opacity:.5"></div>
-      <div style="padding:12px 8px;background:var(--surface);border-radius:8px;text-align:center">
-        <div style="font-family:Syne,sans-serif;font-weight:700;font-size:24px;color:${col}">${trackCount}</div>
-        <div style="font-size:9px;color:var(--text-dim);margin-top:3px;letter-spacing:.1em">TRACKS</div>
-      </div>
-      <div>
-        <div style="font-size:9px;color:var(--text-dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">${otherNames.length} Playlists</div>
-        <div style="max-height:160px;overflow-y:auto;scrollbar-width:thin;display:flex;flex-direction:column;gap:4px">
-          ${otherNames.map(n=>{
-            const ct=points.filter(p=>(p.playlists||[]).includes(n)).length;
-            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;background:var(--surface);border-radius:4px">
-              <span style="font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${_esc(n)}</span>
-              <span style="font-size:9px;color:var(--text-dim);flex-shrink:0;margin-left:6px">${ct}</span>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-      <button id="bpi-desel" style="padding:8px;background:transparent;border:none;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;width:100%;text-align:center">
-        Deselect lobe
-      </button>
-    </div>`;
-    panel.classList.add('open');
-    panel.querySelector('#bpi-desel').addEventListener('click',()=>{
-      _svgBrainSelected=null;
-      panel.classList.remove('open');
-      const svgEl=document.getElementById('brain-svg');
-      svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.44');
-      svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.10');
-      svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','7');
-    });
-    return;
-  }
-
+  const { conns, plNames, N } = _svgBrainCache;
   const col = playlistColors[name]||COLOR_UNTAGGED;
   const trackCount = points.filter(p=>(p.playlists||[]).includes(name)).length;
   const connIdxs = conns.filter(([a,b])=>a===idx||b===idx).map(([a,b])=>a===idx?b:a);
@@ -2128,8 +2047,10 @@ function _showBrainInfoPanel(idx, name) {
     _svgBrainSelected=null;
     panel.classList.remove('open');
     const svgEl=document.getElementById('brain-svg');
-    svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.44');
-    svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.10');
+    for (let ci=0;ci<plNames.length;ci++){
+      svgEl.querySelector(`#rg${ci}a`)?.setAttribute('stop-opacity','0.44');
+      svgEl.querySelector(`#rg${ci}b`)?.setAttribute('stop-opacity','0.10');
+    }
     svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','7');
   });
   panel.querySelectorAll('.bpi-conn-item').forEach(el=>{
@@ -2153,24 +2074,35 @@ function _buildPlaylistColorsFor(playlists) {
 function _wireBrainSVGEventsOn(svgEl, cache, pColors, pfx, isFriend) {
   const labelLayer = svgEl.querySelector(`#${pfx}bv-labels`);
   const hintEl = svgEl.querySelector('#bv-hint');
-  const { seeds, conns, plNames, otherNames = [] } = cache;
+  const { seeds, conns, plNames } = cache;
   const selectedTracker = isFriend ? { v: null } : null;
+
+  // Helper: get indices connected to i
+  const getConnected = (i) => conns.filter(([a,b])=>a===i||b===i).flatMap(([a,b])=>[a,b]).filter(j=>j!==i);
+
+  // Apply dim/highlight state for a given active index (-1 = restore all)
+  const applyDim = (activeIdx) => {
+    const connected = activeIdx >= 0 ? getConnected(activeIdx) : [];
+    for (let ci = 0; ci < plNames.length; ci++) {
+      const dimmed = activeIdx >= 0 && ci !== activeIdx && !connected.includes(ci);
+      const boosted = ci === activeIdx;
+      svgEl.querySelector(`#${pfx}rg${ci}a`)?.setAttribute('stop-opacity', boosted ? '0.78' : dimmed ? '0.12' : '0.44');
+      svgEl.querySelector(`#${pfx}rg${ci}b`)?.setAttribute('stop-opacity', boosted ? '0.22' : dimmed ? '0.03' : '0.10');
+    }
+  };
 
   svgEl.querySelectorAll('.bv-cell').forEach(cell => {
     const idx = parseInt(cell.dataset.idx);
     const name = cell.dataset.name;
-    const col = name==='Others' ? COLOR_OTHERS : (pColors[name]||COLOR_UNTAGGED);
+    const col = pColors[name]||COLOR_UNTAGGED;
 
     cell.addEventListener('mouseenter', () => {
-      svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.68');
-      svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.18');
       svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','15');
+      applyDim(idx);
       const [sx,sy]=seeds[idx];
       const label = name.length>20 ? name.slice(0,18)+'…' : name;
       const srcPts = isFriend ? comparePoints : points;
-      const trackCount = name==='Others'
-        ? srcPts.filter(p=>(p.playlists||[]).some(pl=>otherNames.includes(pl))).length
-        : srcPts.filter(p=>(p.playlists||[]).includes(name)).length;
+      const trackCount = srcPts.filter(p=>(p.playlists||[]).includes(name)).length;
       if (labelLayer) labelLayer.innerHTML = `
         <rect x="${sx-68}" y="${sy-38}" width="136" height="22" rx="4" fill="rgba(5,5,12,0.85)"/>
         <text x="${sx}" y="${sy-22}" text-anchor="middle" fill="${col}"
@@ -2190,13 +2122,12 @@ function _wireBrainSVGEventsOn(svgEl, cache, pColors, pfx, isFriend) {
 
     cell.addEventListener('mouseleave', () => {
       const isSel = isFriend ? (selectedTracker && selectedTracker.v === idx) : (_svgBrainSelected === idx);
-      if (!isSel) {
-        svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.44');
-        svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.10');
-        svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','7');
-      }
+      svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','7');
       if (labelLayer) labelLayer.innerHTML = '';
       if (hintEl) hintEl.style.display = '';
+      // Restore to selected state if something is pinned, otherwise clear all dims
+      const selIdx = isFriend ? selectedTracker?.v : _svgBrainSelected;
+      if (selIdx != null) applyDim(selIdx); else applyDim(-1);
       svgEl.querySelectorAll('.bv-conn').forEach(ln => {
         if (parseInt(ln.dataset.a)===idx||parseInt(ln.dataset.b)===idx) {
           ln.setAttribute('stroke','rgba(255,255,255,0.055)');
@@ -2210,41 +2141,27 @@ function _wireBrainSVGEventsOn(svgEl, cache, pColors, pfx, isFriend) {
       if (isFriend) {
         if (selectedTracker.v === idx) {
           selectedTracker.v = null;
-          svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.44');
-          svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.10');
           svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','7');
+          applyDim(-1);
           document.getElementById('brain-info-panel').classList.remove('open');
         } else {
-          if (selectedTracker.v !== null) {
-            const prev = selectedTracker.v;
-            svgEl.querySelector(`#${pfx}rg${prev}a`)?.setAttribute('stop-opacity','0.44');
-            svgEl.querySelector(`#${pfx}rg${prev}b`)?.setAttribute('stop-opacity','0.10');
-            svgEl.querySelector(`#${pfx}gl${prev}gb`)?.setAttribute('stdDeviation','7');
-          }
+          if (selectedTracker.v !== null) svgEl.querySelector(`#${pfx}gl${selectedTracker.v}gb`)?.setAttribute('stdDeviation','7');
           selectedTracker.v = idx;
-          svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.78');
-          svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.22');
           svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','20');
+          applyDim(idx);
           _showFriendLobePanel(idx, name, cache, pColors);
         }
       } else {
         if (_svgBrainSelected === idx) {
           _svgBrainSelected = null;
           document.getElementById('brain-info-panel').classList.remove('open');
-          svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.44');
-          svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.10');
           svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','7');
+          applyDim(-1);
         } else {
-          if (_svgBrainSelected !== null) {
-            const prev = _svgBrainSelected;
-            svgEl.querySelector(`#${pfx}rg${prev}a`)?.setAttribute('stop-opacity','0.44');
-            svgEl.querySelector(`#${pfx}rg${prev}b`)?.setAttribute('stop-opacity','0.10');
-            svgEl.querySelector(`#${pfx}gl${prev}gb`)?.setAttribute('stdDeviation','7');
-          }
+          if (_svgBrainSelected !== null) svgEl.querySelector(`#${pfx}gl${_svgBrainSelected}gb`)?.setAttribute('stdDeviation','7');
           _svgBrainSelected = idx;
-          svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.78');
-          svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.22');
           svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','20');
+          applyDim(idx);
           _showBrainInfoPanel(idx, name);
         }
       }
