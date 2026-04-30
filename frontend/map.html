@@ -2265,14 +2265,25 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playlist_name: name, track_ids: trackIds, friend_display_name: compareDisplayName }),
       });
-      if (!resp.ok) throw new Error();
+      if (resp.status === 401) {
+        status.style.color = '#f87171';
+        status.textContent = 'Not logged in — open your map via Spotify login first';
+        btn.disabled = false;
+        btn.textContent = 'Retry';
+        return;
+      }
+      if (!resp.ok) {
+        let detail = '';
+        try { detail = (await resp.json()).detail || ''; } catch {}
+        throw new Error(detail || `Server error (${resp.status})`);
+      }
       const d = await resp.json();
       status.style.color = 'var(--accent)';
       status.textContent = `Added ${d.track_count} tracks to "${d.name}"`;
       btn.textContent = 'Done!';
-    } catch {
+    } catch (e) {
       status.style.color = '#f87171';
-      status.textContent = 'Failed — are you logged in to Spotify?';
+      status.textContent = e.message || 'Failed — try again';
       btn.disabled = false;
       btn.textContent = 'Retry';
     }

@@ -880,10 +880,12 @@ async def import_friend_playlist(request: Request) -> JSONResponse:
       "friend_display_name": str     # used to label the new playlist
     }
     """
-    token = request.session.get("access_token")
     user_id = request.session.get("user_id")
-    if not token or not user_id:
+    if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
+    token = await _get_valid_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
 
     try:
         body = await request.json()
