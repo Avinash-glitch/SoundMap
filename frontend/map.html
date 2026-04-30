@@ -2042,6 +2042,37 @@ function _showBrainInfoPanel(idx, name) {
   });
 }
 
+function _selectBrainLobeByName(name) {
+  if (!_svgBrainCache) return;
+  const { plNames } = _svgBrainCache;
+  const idx = plNames.indexOf(name);
+  if (idx < 0) return;
+  const svgEl = document.getElementById('brain-svg');
+  // clear previous selection visuals
+  if (_svgBrainSelected !== null && _svgBrainSelected !== idx) {
+    const prev = _svgBrainSelected;
+    svgEl.querySelector(`#rg${prev}a`)?.setAttribute('stop-opacity','0.44');
+    svgEl.querySelector(`#rg${prev}b`)?.setAttribute('stop-opacity','0.10');
+    svgEl.querySelector(`#gl${prev}gb`)?.setAttribute('stdDeviation','7');
+  }
+  _svgBrainSelected = idx;
+  svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.78');
+  svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.22');
+  svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','20');
+  _showBrainInfoPanel(idx, name);
+}
+
+function _clearBrainLobeHighlight() {
+  if (!_svgBrainCache || _svgBrainSelected === null) return;
+  const idx = _svgBrainSelected;
+  const svgEl = document.getElementById('brain-svg');
+  svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.44');
+  svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.10');
+  svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','7');
+  _svgBrainSelected = null;
+  document.getElementById('brain-info-panel').classList.remove('open');
+}
+
 function _buildBrainLegendStrip() {
   if (!_svgBrainCache) return;
   const { plNames } = _svgBrainCache;
@@ -2512,6 +2543,7 @@ function _renderLegendItems(counts, colorFor, ptsFor) {
       const key = el.dataset.key;
       if (activeGenreFilter === key) {
         activeGenreFilter = null;
+        _clearBrainLobeHighlight();
         buildLegend();
         render();
         return;
@@ -2519,7 +2551,11 @@ function _renderLegendItems(counts, colorFor, ptsFor) {
       activeGenreFilter = key;
       const filteredPts = ptsFor(key);
       showFilterTracks(key, colorFor(key), filteredPts);
-      panToCluster(filteredPts);
+      if (brainMode) {
+        _selectBrainLobeByName(key);
+      } else {
+        panToCluster(filteredPts);
+      }
       render();
     });
   });
