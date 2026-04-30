@@ -2243,7 +2243,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       <div style="font-size:9px;color:var(--text-dim);margin-top:3px;letter-spacing:.1em">TRACKS</div>
     </div>
     ${userId.endsWith('_apple')
-      ? `<div style="padding:10px;background:var(--surface);border-radius:8px;font-size:10px;color:var(--text-dim);text-align:center;line-height:1.6">Apple Music import coming soon</div>`
+      ? `<button id="bpi-copy-spotify" style="padding:10px;background:#fc3c44;border:none;border-radius:8px;color:#fff;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">Add to my Apple Music</button>`
       : `<button id="bpi-copy-spotify" style="padding:10px;background:var(--accent);border:none;border-radius:8px;color:#000;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">Add to my Spotify</button>`
     }
     <div id="bpi-copy-status" style="font-size:10px;color:var(--text-dim);text-align:center;display:none;line-height:1.5"></div>
@@ -2261,10 +2261,12 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
     btn.textContent = 'Copying…';
     status.style.display = 'block';
     status.textContent = `Adding ${trackMeta.length} tracks…`;
-    console.log('[import] playlist:', name, '| tracks:', trackMeta.length, '| friend:', compareDisplayName);
+    const isAppleUser = userId.endsWith('_apple');
+    const endpoint = isAppleUser ? '/import-to-apple' : '/import-friend-playlist';
+    console.log('[import] playlist:', name, '| tracks:', trackMeta.length, '| friend:', compareDisplayName, '| endpoint:', endpoint);
     try {
       if (!trackMeta.length) throw new Error('No tracks found for this playlist');
-      const resp = await fetch('/import-friend-playlist', {
+      const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playlist_name: name, tracks: trackMeta, friend_display_name: compareDisplayName }),
@@ -2272,7 +2274,9 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       console.log('[import] response status:', resp.status);
       if (resp.status === 401) {
         status.style.color = '#f87171';
-        status.textContent = 'Not logged in — open your map via Spotify login first';
+        status.textContent = isAppleUser
+          ? 'Apple Music session expired — reconnect Apple Music'
+          : 'Not logged in — open your map via Spotify login first';
         btn.disabled = false;
         btn.textContent = 'Retry';
         return;

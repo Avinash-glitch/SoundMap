@@ -824,6 +824,9 @@ async def apple_start_job(request: Request) -> JSONResponse:
     if not music_user_token:
         raise HTTPException(status_code=400, detail="music_user_token required")
 
+    request.session["music_user_token"] = music_user_token
+    request.session["storefront"] = storefront
+
     from .jobs import submit_apple_job
     apple_user_id = f"{user_id}_apple"
     job_id = submit_apple_job(music_user_token, user_id, storefront, api_key=api_key, provider=provider)
@@ -988,6 +991,107 @@ async def import_friend_playlist(request: Request) -> JSONResponse:
 
     print(f"[import-friend-playlist] created '{new_name}' ({added}/{len(uris)} tracks) for {user_id}")
     return JSONResponse({"name": new_name, "track_count": added, "url": pl_url})
+
+
+@app.post("/import-to-apple")
+async def import_to_apple(request: Request) -> JSONResponse:
+    """
+    Copy a friend's playlist into the Apple Music user's library.
+
+    Body: {
+      "playlist_name": str,
+      "tracks": [{id, name, artist, isrc}, ...],
+      "friend_display_name": str
+    }
+    Uses ISRC to match tracks in the Apple Music catalog, falls back to name+artist search.
+    """
+    music_user_token = request.session.get("music_user_token")
+    storefront = request.session.get("storefront") or "us"
+    if not music_user_token:
+        raise HTTPException(status_code=401, detail="Apple Music session not found — reconnect Apple Music")
+
+    try:
+        body = await request.json()
+        playlist_name: str = (body.get("playlist_name") or "").strip()
+        tracks: list[dict] = body.get("tracks") or []
+        friend_name: str = (body.get("friend_display_name") or "Friend").strip()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not playlist_name:
+        raise HTTPException(status_code=400, detail="playlist_name required")
+    if not tracks:
+        raise HTTPException(status_code=400, detail="tracks required")
+
+    from .apple_auth import get_developer_token
+    try:
+        dev_token = get_developer_token()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Apple Music not configured: {e}")
+
+    h = {
+        "Authorization": f"Bearer {dev_token}",
+        "Music-User-Token": music_user_token,
+    }
+    base = "https://api.music.apple.com"
+
+    print(f"[import-to-apple] storefront={storefront} playlist='{playlist_name}' tracks={len(tracks)}")
+
+    # Resolve each track to an Apple Music catalog ID
+    catalog_ids: list[str] = []
+    for t in tracks:
+        isrc = t.get("isrc")
+        apple_id = None
+        if isrc:
+            r = _requests.get(
+                f"{base}/v1/catalog/{storefront}/songs",
+                headers=h,
+                params={"filter[isrc]": isrc},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                data = (r.json().get("data") or [])
+                if data:
+                    apple_id = data[0]["id"]
+        if not apple_id:
+            name = t.get("name") or ""
+            artist = t.get("artist") or ""
+            if name:
+                r = _requests.get(
+                    f"{base}/v1/catalog/{storefront}/search",
+                    headers=h,
+                    params={"term": f"{name} {artist}".strip(), "types": "songs", "limit": 1},
+                    timeout=10,
+                )
+                if r.status_code == 200:
+                    results = ((r.json().get("results") or {}).get("songs") or {}).get("data") or []
+                    if results:
+                        apple_id = results[0]["id"]
+        if apple_id:
+            catalog_ids.append(apple_id)
+
+    print(f"[import-to-apple] resolved {len(catalog_ids)}/{len(tracks)} tracks")
+
+    if not catalog_ids:
+        raise HTTPException(status_code=422, detail="Could not match any tracks in Apple Music catalog")
+
+    # Add resolved tracks to the user's library
+    added = 0
+    for i in range(0, len(catalog_ids), 100):
+        batch = catalog_ids[i:i + 100]
+        params = "&".join(f"ids[songs]={cid}" for cid in batch)
+        r = _requests.post(
+            f"{base}/v1/me/library?{params}",
+            headers=h,
+            timeout=15,
+        )
+        if r.status_code in (200, 201, 202, 204):
+            added += len(batch)
+        else:
+            print(f"[import-to-apple] add batch failed: {r.status_code} {r.text[:200]}")
+
+    print(f"[import-to-apple] added {added} tracks to Apple Music library")
+    return JSONResponse({"name": f"{playlist_name} (from {friend_name})", "track_count": added})
 
 
 @app.post("/create-mood-playlists")
