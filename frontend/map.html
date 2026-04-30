@@ -2259,12 +2259,15 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
     btn.textContent = 'Copying…';
     status.style.display = 'block';
     status.textContent = `Adding ${trackCount} tracks…`;
+    console.log('[import] playlist:', name, '| tracks:', trackIds.length, '| friend:', compareDisplayName);
     try {
+      if (!trackIds.length) throw new Error('No tracks found for this playlist');
       const resp = await fetch('/import-friend-playlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playlist_name: name, track_ids: trackIds, friend_display_name: compareDisplayName }),
       });
+      console.log('[import] response status:', resp.status);
       if (resp.status === 401) {
         status.style.color = '#f87171';
         status.textContent = 'Not logged in — open your map via Spotify login first';
@@ -2275,6 +2278,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       if (!resp.ok) {
         let detail = '';
         try { detail = (await resp.json()).detail || ''; } catch {}
+        console.error('[import] server error:', detail);
         throw new Error(detail || `Server error (${resp.status})`);
       }
       const d = await resp.json();
@@ -2282,6 +2286,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       status.textContent = `Added ${d.track_count} tracks to "${d.name}"`;
       btn.textContent = 'Done!';
     } catch (e) {
+      console.error('[import] failed:', e.message);
       status.style.color = '#f87171';
       status.textContent = e.message || 'Failed — try again';
       btn.disabled = false;
