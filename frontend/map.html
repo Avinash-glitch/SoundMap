@@ -730,28 +730,70 @@
     }
     .ai-chip:hover { border-color: var(--accent); color: var(--text); }
 
-    /* ---- Map mode toggle ---- */
-    .mode-toggle {
+    /* ---- Brain overlay ---- */
+    #brain-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      background: var(--bg);
+    }
+    #brain-svg {
+      position: absolute;
+      left: 0; right: 0;
+      top: 52px; /* below topbar */
+      bottom: 60px; /* above legend strip */
+      width: 100%;
+      height: calc(100% - 112px);
+    }
+    #brain-legend-strip {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 60px;
       display: flex;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 100px;
-      padding: 3px;
-      gap: 2px;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: center;
+      align-items: center;
+      padding: 8px 16px;
+      background: rgba(10,10,15,0.92);
+      border-top: 1px solid var(--border);
     }
-    .mode-btn {
-      padding: .28rem .75rem;
-      border: none;
-      border-radius: 100px;
-      background: transparent;
-      color: var(--text-dim);
-      font-family: 'DM Mono', monospace;
-      font-size: .7rem;
-      cursor: pointer;
-      transition: background .15s, color .15s;
-      white-space: nowrap;
+    .brain-legend-chip {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10px; color: var(--text-dim);
+      padding: 4px 10px;
+      background: rgba(255,255,255,0.035);
+      border: 1px solid transparent;
+      border-radius: 20px; cursor: pointer;
+      transition: all 0.15s; letter-spacing: 0.02em;
     }
-    .mode-btn.active { background: var(--accent); color: #000; font-weight: 600; }
+    .brain-legend-chip:hover { background: rgba(255,255,255,0.07); }
+    .brain-legend-chip.active { border-color: currentColor; opacity: 1; }
+
+    /* ---- Brain info panel ---- */
+    #brain-info-panel {
+      position: fixed;
+      top: 0; right: 0; bottom: 0;
+      width: 292px;
+      z-index: 25;
+      background: var(--bg2);
+      border-left: 1px solid var(--border);
+      transform: translateX(100%);
+      transition: transform 0.22s ease;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    #brain-info-panel.open { transform: translateX(0); }
+    .bpi-inner { padding: 28px 22px; display: flex; flex-direction: column; gap: 18px; flex: 1; }
+    .bpi-conn-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; margin-bottom: 5px;
+      background: var(--surface); border-radius: 6px;
+      cursor: pointer; transition: background 0.12s;
+    }
+    .bpi-conn-item:hover { background: rgba(255,255,255,0.06); }
 
     /* ---- Mood playlist selection modal ---- */
     .mood-check-item {
@@ -870,7 +912,6 @@
       #btn-compare,
       #btn-merge,
       #btn-apple,
-      #map-mode-toggle,
       #btn-save-moods,
       .compare-badge { display: none !important; }
 
@@ -908,6 +949,16 @@
 
 <canvas id="map-canvas"></canvas>
 
+<!-- Brain SVG Overlay (default view) -->
+<div id="brain-overlay">
+  <svg id="brain-svg" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet"
+       xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="brain-legend-strip"></div>
+</div>
+
+<!-- Brain Info Panel (right-side panel, opens on lobe click) -->
+<div id="brain-info-panel"></div>
+
 <div id="track-tooltip">
   <div id="tt-name"></div>
   <div class="tt-artist" id="tt-artist"></div>
@@ -929,15 +980,13 @@
       <span id="compare-name">Comparing</span>
       <span style="opacity:0.5;margin-left:2px">✕</span>
     </div>
-    <div class="mode-toggle" id="map-mode-toggle">
-      <button class="mode-btn" data-mode="moods">Mood Zones</button>
-      <button class="mode-btn active" data-mode="playlists">Playlists</button>
-    </div>
-    <button class="btn-icon" id="btn-brain" title="Brain Map — playlists as regions" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
-        <path d="M9.5 2a2.5 2.5 0 0 1 5 0v1a5 5 0 0 1 5 5v1a3 3 0 0 1 0 6v1a5 5 0 0 1-5 5h-5a5 5 0 0 1-5-5v-1a3 3 0 0 1 0-6V8a5 5 0 0 1 5-5V2z"/>
+    <button class="btn-icon" id="btn-brain" title="Switch to scatter view" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(124,106,247,.5);color:#a78bfa">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
+        <circle cx="5" cy="12" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>
+        <line x1="7" y1="12" x2="10" y2="12"/><line x1="14" y1="12" x2="17" y2="12"/>
+        <line x1="12" y1="7" x2="12" y2="10"/><line x1="12" y1="14" x2="12" y2="17"/>
       </svg>
-      Brain Map
+      Scatter
     </button>
     <button class="btn-icon" id="btn-ai" title="AI Playlist Curator" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(29,185,84,.4)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
@@ -1324,9 +1373,11 @@ let mapMode = 'playlists'; // 'moods' | 'playlists'
 let aiHighlightSet = null; // Set<string> | null — IDs returned by AI curator
 
 // Brain map state
-let brainMode = false;
+let brainMode = true;          // brain SVG is the default view
 let brainHovered = null;
-let _brainCache = null;        // built once on first render, cleared on resize/toggle
+let _brainCache = null;        // canvas brain cache (unused in SVG mode)
+let _svgBrainCache = null;     // SVG brain data cache
+let _svgBrainSelected = null;  // selected playlist index
 
 // Drill-down state
 let drilldownTracks = null;
@@ -1354,6 +1405,7 @@ function resize() {
 }
 window.addEventListener('resize', () => {
   _brainCache = null;
+  _svgBrainCache = null;
   resize();
   if (drilldownTracks) {
     const dc = document.getElementById('drilldown-canvas');
@@ -1473,8 +1525,9 @@ const COMPARE_COLOR = '#818cf8';
 let activeGenreFilter = null;
 
 function render() {
-  if (comparePoints.length) { renderWithCompare(); return; }
-  if (brainMode) { _renderBrain(); return; }
+  if (comparePoints.length) { _hideBrainOverlay(); renderWithCompare(); return; }
+  if (brainMode) { _showBrainOverlay(); return; }
+  _hideBrainOverlay();
   _renderDots();
 }
 
@@ -1590,11 +1643,428 @@ function _renderDots() {
 }
 
 // ---------------------------------------------------------------------------
-// Brain Map
+// Brain SVG View — integrates Brain View.html design with real playlist data
 // ---------------------------------------------------------------------------
 
+// Brain outline points (from Brain View.html, in 1000×680 space)
+const BRAIN_PTS_SVG = [
+  [500,52],[598,68],[700,108],[798,165],[872,248],
+  [908,344],[890,442],[825,522],[714,588],[604,628],
+  [500,637],[396,628],[286,588],[175,522],[110,442],
+  [92,344],[128,248],[202,165],[300,108],[402,68],
+];
+
+// Gyri fold lines (from Brain View.html)
+const GYRI_SVG = [
+  "M 128,278 C 178,252 240,242 302,258 C 362,274 412,294 430,316",
+  "M 118,378 C 168,354 230,344 292,357 C 352,370 400,392 418,414",
+  "M 150,480 C 196,460 252,452 304,465 C 356,478 392,498 406,520",
+  "M 872,278 C 822,252 760,242 698,258 C 638,274 588,294 570,316",
+  "M 882,378 C 832,354 770,344 708,357 C 648,370 600,392 582,414",
+  "M 850,480 C 804,460 748,452 696,465 C 644,478 608,498 594,520",
+  "M 360,88 C 400,78 450,73 500,73 C 550,73 600,78 640,88",
+  "M 348,138 C 392,126 447,120 500,120 C 553,120 608,126 652,138",
+  "M 200,196 C 240,178 292,168 350,172 C 408,176 450,186 472,200",
+  "M 800,196 C 760,178 708,168 650,172 C 592,176 550,186 528,200",
+];
+
+// Centripetal Catmull-Rom → SVG cubic bezier path
+function _crPath(pts, closed) {
+  const n = pts.length;
+  if (n < 2) return '';
+  const get = i => closed ? pts[((i%n)+n)%n] : pts[Math.max(0,Math.min(i,n-1))];
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  const cnt = closed ? n : n-1;
+  for (let i=0; i<cnt; i++) {
+    const [p0,p1,p2,p3] = [get(i-1),get(i),get(i+1),get(i+2)];
+    const d1 = Math.pow(Math.hypot(p1[0]-p0[0],p1[1]-p0[1]),0.5)||1e-9;
+    const d2 = Math.pow(Math.hypot(p2[0]-p1[0],p2[1]-p1[1]),0.5)||1e-9;
+    const d3 = Math.pow(Math.hypot(p3[0]-p2[0],p3[1]-p2[1]),0.5)||1e-9;
+    const c1x=p1[0]+(p2[0]-p0[0])*d2/(6*(d1+d2));
+    const c1y=p1[1]+(p2[1]-p0[1])*d2/(6*(d1+d2));
+    const c2x=p2[0]-(p3[0]-p1[0])*d2/(6*(d2+d3));
+    const c2y=p2[1]-(p3[1]-p1[1])*d2/(6*(d2+d3));
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0]},${p2[1]}`;
+  }
+  return d + (closed ? 'Z' : '');
+}
+
+function _brainInPolySVG(x, y) {
+  let inside = false;
+  for (let i=0, j=BRAIN_PTS_SVG.length-1; i<BRAIN_PTS_SVG.length; j=i++) {
+    const [xi,yi]=BRAIN_PTS_SVG[i],[xj,yj]=BRAIN_PTS_SVG[j];
+    if (((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+
+function _computeSVGBrainData() {
+  const plNames = (mapData.playlists||[])
+    .map(p=>p.name)
+    .filter(name=>points.some(p=>(p.playlists||[]).includes(name)));
+  if (!plNames.length) return null;
+  const N = plNames.length;
+
+  // Generate seeds inside brain (1000×680 space) via Lloyd's relaxation
+  let seeds = [];
+  let tries = 0;
+  while (seeds.length < N && tries < N*800) {
+    const x = 92+Math.random()*820, y = 52+Math.random()*590;
+    if (_brainInPolySVG(x,y)) seeds.push([x,y]);
+    tries++;
+  }
+  if (seeds.length < N) return null;
+
+  for (let iter=0; iter<20; iter++) {
+    const del2 = d3.Delaunay.from(seeds);
+    const vor2 = del2.voronoi([0,0,1000,680]);
+    seeds = seeds.map((s,i) => {
+      const cell = vor2.cellPolygon(i);
+      if (!cell||cell.length<3) return s;
+      const int2 = cell.filter(([px,py])=>_brainInPolySVG(px,py));
+      if (!int2.length) return s;
+      const cx=int2.reduce((a,p)=>a+p[0],0)/int2.length;
+      const cy=int2.reduce((a,p)=>a+p[1],0)/int2.length;
+      return _brainInPolySVG(cx,cy)?[cx,cy]:s;
+    });
+  }
+
+  const del = d3.Delaunay.from(seeds);
+  const vor = del.voronoi([-500,-500,1500,1200]);
+
+  // Nearest-neighbour connections
+  const conns = [];
+  const nc = Math.max(2, Math.ceil(N/4));
+  for (let i=0; i<N; i++) {
+    const dists = [];
+    for (let j=0; j<N; j++) {
+      if (j===i) continue;
+      dists.push([j,Math.hypot(seeds[i][0]-seeds[j][0],seeds[i][1]-seeds[j][1])]);
+    }
+    dists.sort((a,b)=>a[1]-b[1]);
+    for (let k=0; k<Math.min(nc,dists.length); k++) {
+      const j=dists[k][0];
+      if (!conns.some(([a,b])=>(a===i&&b===j)||(a===j&&b===i))) conns.push([i,j]);
+    }
+  }
+
+  const brainPath = _crPath(BRAIN_PTS_SVG, true);
+  const fissuePath = _crPath([[500,52],[499,175],[500,344],[501,515],[500,637]],false);
+  return { seeds, conns, plNames, del, vor, brainPath, fissuePath, N };
+}
+
+function _buildBrainSVGMarkup() {
+  if (!mapData||!points.length) return '';
+  _svgBrainCache = _computeSVGBrainData();
+  if (!_svgBrainCache) return '<text x="500" y="340" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="14" font-family="\'DM Mono\',monospace">No playlists to display</text>';
+
+  const {seeds,conns,plNames,vor,brainPath,fissuePath,N} = _svgBrainCache;
+
+  let defs = `<defs>
+    <clipPath id="bcp"><path d="${brainPath}"/></clipPath>
+    <filter id="og" x="-8%" y="-8%" width="116%" height="116%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="dg" x="-200%" y="-200%" width="500%" height="500%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>`;
+  for (let i=0;i<N;i++) {
+    const col = playlistColors[plNames[i]]||COLOR_UNTAGGED;
+    const [sx,sy]=seeds[i];
+    defs += `
+    <radialGradient id="rg${i}" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="${col}" stop-opacity="0.44" id="rg${i}a"/>
+      <stop offset="100%" stop-color="${col}" stop-opacity="0.10" id="rg${i}b"/>
+    </radialGradient>
+    <filter id="gl${i}" x="-55%" y="-55%" width="210%" height="210%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur" id="gl${i}gb"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>`;
+  }
+  defs += '</defs>';
+
+  // Voronoi cells clipped to brain
+  let cells = '<g clip-path="url(#bcp)">';
+  for (let i=0;i<N;i++) {
+    const cell = vor.cellPolygon(i);
+    if (!cell) continue;
+    const dp = 'M'+cell.map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('L')+'Z';
+    cells += `<path d="${dp}" fill="url(#rg${i})" filter="url(#gl${i})"
+      stroke="rgba(0,0,0,0.5)" stroke-width="2.5"
+      class="bv-cell" data-idx="${i}" data-name="${_esc(plNames[i])}"
+      style="cursor:pointer"/>`;
+  }
+  cells += '</g>';
+
+  // Gyri fold lines
+  let gyri = '<g clip-path="url(#bcp)" style="pointer-events:none">';
+  for (const gp of GYRI_SVG) {
+    gyri += `<path d="${gp}" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" stroke-linecap="round"/>`;
+  }
+  gyri += '</g>';
+
+  // Connection lines + animated pulses
+  let connLines = '<g clip-path="url(#bcp)" style="pointer-events:none">';
+  for (let ci=0;ci<conns.length;ci++) {
+    const [a,b2]=conns[ci];
+    const [ax,ay]=seeds[a],[bx2,by]=seeds[b2];
+    const colA=playlistColors[plNames[a]]||'#fff';
+    const colB=playlistColors[plNames[b2]]||'#fff';
+    const dur1=`${(3.2+ci*0.38).toFixed(2)}s`;
+    const dur2=`${(3.8+ci*0.32).toFixed(2)}s`;
+    const beg2=`${((3.2+ci*0.38)/2).toFixed(2)}s`;
+    connLines += `
+    <line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx2.toFixed(1)}" y2="${by.toFixed(1)}"
+      stroke="rgba(255,255,255,0.055)" stroke-width="0.8"
+      class="bv-conn" data-a="${a}" data-b="${b2}"/>
+    <circle r="2.8" fill="${colA}" opacity="0.38">
+      <animateMotion dur="${dur1}" repeatCount="indefinite"
+        path="M ${ax.toFixed(1)},${ay.toFixed(1)} L ${bx2.toFixed(1)},${by.toFixed(1)}"/>
+    </circle>
+    <circle r="1.8" fill="${colB}" opacity="0.22">
+      <animateMotion dur="${dur2}" repeatCount="indefinite" begin="${beg2}"
+        path="M ${bx2.toFixed(1)},${by.toFixed(1)} L ${ax.toFixed(1)},${ay.toFixed(1)}"/>
+    </circle>`;
+  }
+  connLines += '</g>';
+
+  const outline = `
+  <path d="${brainPath}" fill="none" stroke="rgba(255,255,255,0.52)" stroke-width="2" filter="url(#og)" style="pointer-events:none"/>
+  <path d="${brainPath}" fill="none" stroke="rgba(255,255,255,0.09)" stroke-width="10" clip-path="url(#bcp)" style="pointer-events:none"/>`;
+
+  const fissure = `
+  <g clip-path="url(#bcp)" style="pointer-events:none">
+    <path d="${fissuePath}" fill="none" stroke="rgba(0,0,0,0.75)" stroke-width="5"/>
+    <path d="${fissuePath}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
+  </g>`;
+
+  const hemLabels = `
+  <text x="248" y="40" text-anchor="middle" fill="rgba(255,255,255,0.18)"
+    font-size="9" font-family="'DM Mono',monospace" letter-spacing="0.16em" style="pointer-events:none">LEFT HEMISPHERE</text>
+  <text x="752" y="40" text-anchor="middle" fill="rgba(255,255,255,0.18)"
+    font-size="9" font-family="'DM Mono',monospace" letter-spacing="0.16em" style="pointer-events:none">RIGHT HEMISPHERE</text>`;
+
+  // Seed dots + animated pulse rings
+  let seedDots = '<g style="pointer-events:none">';
+  for (let i=0;i<N;i++) {
+    const [sx,sy]=seeds[i];
+    const col=playlistColors[plNames[i]]||COLOR_UNTAGGED;
+    const dur=`${(2.4+i*0.28).toFixed(2)}s`;
+    seedDots += `
+    <circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="4.5"
+      fill="${col}" filter="url(#dg)" opacity="0.7" class="bv-seed" data-idx="${i}">
+      <animate attributeName="r" values="4.5;6;4.5" dur="${dur}" repeatCount="indefinite"/>
+    </circle>`;
+  }
+  seedDots += '</g>';
+
+  // Hover/select label layer (updated dynamically by JS)
+  const labelLayer = '<g id="bv-labels"></g>';
+  const hint = `<text x="500" y="660" id="bv-hint" text-anchor="middle"
+    fill="rgba(255,255,255,0.18)" font-size="10" font-family="'DM Mono',monospace"
+    style="pointer-events:none">hover or click a lobe to explore · double-click to drill down</text>`;
+
+  return defs+cells+gyri+connLines+outline+fissure+hemLabels+seedDots+labelLayer+hint;
+}
+
+function _showBrainOverlay() {
+  const overlay = document.getElementById('brain-overlay');
+  const svgEl = document.getElementById('brain-svg');
+  overlay.style.display = 'block';
+  canvas.style.opacity = '0';
+
+  const dataKey = (mapData?.points?.length||0)+'';
+  if (!svgEl.dataset.built || svgEl.dataset.built !== dataKey) {
+    svgEl.innerHTML = _buildBrainSVGMarkup();
+    svgEl.dataset.built = dataKey;
+    _wireBrainSVGEvents();
+    _buildBrainLegendStrip();
+  }
+}
+
+function _hideBrainOverlay() {
+  document.getElementById('brain-overlay').style.display = 'none';
+  document.getElementById('brain-info-panel').classList.remove('open');
+  canvas.style.opacity = '1';
+}
+
+function _wireBrainSVGEvents() {
+  if (!_svgBrainCache) return;
+  const svgEl = document.getElementById('brain-svg');
+  const labelLayer = svgEl.querySelector('#bv-labels');
+  const hintEl = svgEl.querySelector('#bv-hint');
+  const { seeds, conns, plNames } = _svgBrainCache;
+
+  svgEl.querySelectorAll('.bv-cell').forEach(cell => {
+    const idx = parseInt(cell.dataset.idx);
+    const name = cell.dataset.name;
+    const col = playlistColors[name]||COLOR_UNTAGGED;
+
+    cell.addEventListener('mouseenter', () => {
+      // Boost gradient opacity
+      svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.68');
+      svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.18');
+      svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','15');
+      // Show label over seed
+      const [sx,sy]=seeds[idx];
+      const label = name.length>20 ? name.slice(0,18)+'…' : name;
+      const trackCount = points.filter(p=>(p.playlists||[]).includes(name)).length;
+      labelLayer.innerHTML = `
+        <rect x="${sx-68}" y="${sy-38}" width="136" height="22" rx="4" fill="rgba(5,5,12,0.85)"/>
+        <text x="${sx}" y="${sy-22}" text-anchor="middle" fill="${col}"
+          font-size="10.5" font-family="'DM Mono',monospace" font-weight="500">${_esc(label)}</text>
+        <rect x="${sx-52}" y="${sy-16}" width="104" height="14" rx="3" fill="rgba(5,5,12,0.7)"/>
+        <text x="${sx}" y="${sy-6}" text-anchor="middle" fill="rgba(255,255,255,0.45)"
+          font-size="8" font-family="'DM Mono',monospace">${trackCount} tracks · click to explore</text>`;
+      if (hintEl) hintEl.style.display = 'none';
+      // Highlight connected edges
+      svgEl.querySelectorAll('.bv-conn').forEach(ln => {
+        if (parseInt(ln.dataset.a)===idx||parseInt(ln.dataset.b)===idx) {
+          ln.setAttribute('stroke',col);
+          ln.setAttribute('stroke-width','1.8');
+          ln.setAttribute('opacity','0.55');
+        }
+      });
+    });
+
+    cell.addEventListener('mouseleave', () => {
+      if (_svgBrainSelected !== idx) {
+        svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.44');
+        svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.10');
+        svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','7');
+      }
+      labelLayer.innerHTML = '';
+      if (hintEl) hintEl.style.display = '';
+      svgEl.querySelectorAll('.bv-conn').forEach(ln => {
+        if (parseInt(ln.dataset.a)===idx||parseInt(ln.dataset.b)===idx) {
+          ln.setAttribute('stroke','rgba(255,255,255,0.055)');
+          ln.setAttribute('stroke-width','0.8');
+          ln.setAttribute('opacity','1');
+        }
+      });
+    });
+
+    cell.addEventListener('click', () => {
+      if (_svgBrainSelected === idx) {
+        _svgBrainSelected = null;
+        document.getElementById('brain-info-panel').classList.remove('open');
+        svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.44');
+        svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.10');
+        svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','7');
+      } else {
+        if (_svgBrainSelected !== null) {
+          const prev = _svgBrainSelected;
+          svgEl.querySelector(`#rg${prev}a`)?.setAttribute('stop-opacity','0.44');
+          svgEl.querySelector(`#rg${prev}b`)?.setAttribute('stop-opacity','0.10');
+          svgEl.querySelector(`#gl${prev}gb`)?.setAttribute('stdDeviation','7');
+        }
+        _svgBrainSelected = idx;
+        svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.78');
+        svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.22');
+        svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','20');
+        _showBrainInfoPanel(idx, name);
+      }
+    });
+
+    cell.addEventListener('dblclick', () => _openDrillDown(name));
+  });
+}
+
+function _showBrainInfoPanel(idx, name) {
+  const panel = document.getElementById('brain-info-panel');
+  const { conns, plNames, N } = _svgBrainCache;
+  const col = playlistColors[name]||COLOR_UNTAGGED;
+  const trackCount = points.filter(p=>(p.playlists||[]).includes(name)).length;
+  const connIdxs = conns.filter(([a,b])=>a===idx||b===idx).map(([a,b])=>a===idx?b:a);
+  const pl = (mapData.playlists||[]).find(p=>p.name===name);
+  const desc = pl?.description||'';
+  const side = idx < Math.ceil(N/2) ? 'LEFT' : 'RIGHT';
+
+  panel.innerHTML = `<div class="bpi-inner">
+    <div>
+      <div style="font-size:9px;color:var(--text-dim);letter-spacing:.14em;text-transform:uppercase;margin-bottom:5px">${side} HEMISPHERE</div>
+      <div style="font-family:Syne,sans-serif;font-weight:700;font-size:20px;line-height:1.2;color:${col};text-shadow:0 0 28px ${col}40">${_esc(name)}</div>
+    </div>
+    <div style="width:44px;height:3px;border-radius:2px;background:${col};opacity:.5"></div>
+    ${desc?`<div style="font-size:11.5px;color:var(--text-dim);line-height:1.75">${_esc(desc)}</div>`:''}
+    <div style="display:flex;gap:8px">
+      <div style="flex:1;padding:12px 8px;background:var(--surface);border-radius:8px;text-align:center">
+        <div style="font-family:Syne,sans-serif;font-weight:700;font-size:24px;color:${col}">${trackCount}</div>
+        <div style="font-size:9px;color:var(--text-dim);margin-top:3px;letter-spacing:.1em">TRACKS</div>
+      </div>
+      <div style="flex:1;padding:12px 8px;background:var(--surface);border-radius:8px;text-align:center">
+        <div style="font-family:Syne,sans-serif;font-weight:700;font-size:14px;padding-top:5px;color:${col}">${side}</div>
+        <div style="font-size:9px;color:var(--text-dim);margin-top:3px;letter-spacing:.1em">SIDE</div>
+      </div>
+    </div>
+    ${connIdxs.length?`
+      <div>
+        <div style="font-size:9px;color:var(--text-dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Connected Lobes</div>
+        ${connIdxs.map(j=>{
+          const cn=plNames[j],cc=playlistColors[cn]||COLOR_UNTAGGED;
+          const ct=points.filter(p=>(p.playlists||[]).includes(cn)).length;
+          return `<div class="bpi-conn-item" data-idx="${j}" style="border-left:3px solid ${cc}55">
+            <div style="width:7px;height:7px;border-radius:50%;background:${cc};box-shadow:0 0 6px ${cc};flex-shrink:0"></div>
+            <div>
+              <div style="font-size:11px;color:var(--text)">${_esc(cn)}</div>
+              <div style="font-size:9px;color:var(--text-dim);margin-top:1px">${ct} tracks</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
+    <button id="bpi-explore" style="padding:10px;background:transparent;border:1px solid ${col}30;border-radius:8px;color:${col};font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;width:100%;text-align:center;transition:opacity .15s">
+      Explore lobe →
+    </button>
+    <button id="bpi-desel" style="padding:8px;background:transparent;border:none;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;width:100%;text-align:center;transition:opacity .15s">
+      Deselect lobe
+    </button>
+  </div>`;
+
+  panel.classList.add('open');
+
+  panel.querySelector('#bpi-explore').addEventListener('click',()=>_openDrillDown(name));
+  panel.querySelector('#bpi-desel').addEventListener('click',()=>{
+    _svgBrainSelected=null;
+    panel.classList.remove('open');
+    const svgEl=document.getElementById('brain-svg');
+    svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.44');
+    svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.10');
+    svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','7');
+  });
+  panel.querySelectorAll('.bpi-conn-item').forEach(el=>{
+    el.addEventListener('click',()=>{
+      const j=parseInt(el.dataset.idx);
+      _svgBrainSelected=j;
+      _showBrainInfoPanel(j,plNames[j]);
+    });
+  });
+}
+
+function _buildBrainLegendStrip() {
+  if (!_svgBrainCache) return;
+  const { plNames } = _svgBrainCache;
+  const strip = document.getElementById('brain-legend-strip');
+  strip.innerHTML = plNames.map(name=>{
+    const col=playlistColors[name]||COLOR_UNTAGGED;
+    return `<div class="brain-legend-chip" data-name="${_esc(name)}"
+      style="color:var(--text-dim)">
+      <div style="width:7px;height:7px;border-radius:50%;background:${col};box-shadow:0 0 7px ${col}90;flex-shrink:0"></div>
+      ${_esc(name)}
+    </div>`;
+  }).join('');
+  strip.querySelectorAll('.brain-legend-chip').forEach(chip=>{
+    chip.addEventListener('click',()=>{
+      const name=chip.dataset.name;
+      const idx=_svgBrainCache.plNames.indexOf(name);
+      if (idx>=0) { _svgBrainSelected=idx; _showBrainInfoPanel(idx,name); }
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Brain Map — Voronoi inside brain silhouette (ignores UMAP positions)
+// Legacy canvas brain (kept for compare mode fallback)
 // ---------------------------------------------------------------------------
 
 function _brainBounds() {
@@ -1927,8 +2397,7 @@ function buildLegend() {
   const remBtn = document.getElementById('legend-remaining-btn');
   if (remBtn) remBtn.style.display = remaining.length ? 'block' : 'none';
 
-  if (mapMode === 'playlists') return buildPlaylistLegend();
-  return buildMoodLegend();
+  return buildPlaylistLegend();
 }
 
 function buildMoodLegend() {
@@ -1992,8 +2461,6 @@ function buildMoodLegend() {
     });
 
     document.getElementById('mg-skip-link').addEventListener('click', () => {
-      document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'playlists'));
-      mapMode = 'playlists';
       buildLegend();
       render();
     });
@@ -2027,7 +2494,7 @@ function _renderLegendItems(counts, colorFor, ptsFor) {
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   const body = document.getElementById('legend-body');
   body.innerHTML = `
-    <div class="legend-title"><span>${points.length}</span> tracks · ${mapMode === 'moods' ? 'moods' : 'playlists'}</div>
+    <div class="legend-title"><span>${points.length}</span> tracks · playlists</div>
     <div class="legend-items">
       ${sorted.map(([label, count]) => {
         const color = colorFor(label);
@@ -2233,15 +2700,7 @@ canvas.addEventListener('mousemove', e => {
     return;
   }
 
-  if (brainMode) {
-    const hit = _brainHitTest(e.clientX, e.clientY);
-    if (hit !== brainHovered) {
-      brainHovered = hit;
-      canvas.style.cursor = hit ? 'pointer' : 'grab';
-      render();
-    }
-    return;
-  }
+  if (brainMode) return; // SVG overlay handles brain interactions
 
   const hit = hitTest(e.clientX, e.clientY);
   if (hit !== hoveredPoint) {
@@ -2264,14 +2723,9 @@ canvas.addEventListener('mousemove', e => {
 
 canvas.addEventListener('mouseup', e => {
   canvas.classList.remove('panning');
-  if (!isDragging) {
-    if (brainMode) {
-      const hit = _brainHitTest(e.clientX, e.clientY);
-      if (hit) _openDrillDown(hit);
-    } else {
-      const hit = hitTest(e.clientX, e.clientY);
-      if (hit) selectPoint(hit);
-    }
+  if (!isDragging && !brainMode) {
+    const hit = hitTest(e.clientX, e.clientY);
+    if (hit) selectPoint(hit);
   }
   dragStart = null;
   transformStart = null;
@@ -2949,25 +3403,14 @@ function _showAiBadge(name, count) {
     badge.remove();
     render();
   });
-  // Insert before the mode toggle
-  const modeToggle = document.getElementById('map-mode-toggle');
-  modeToggle.parentNode.insertBefore(badge, modeToggle);
+  // Insert before the brain button
+  const brainBtn = document.getElementById('btn-brain');
+  brainBtn.parentNode.insertBefore(badge, brainBtn);
 }
 
 _bindAiModalBtns();
 
-// Map mode toggle (Mood Zones | Playlists | Chart)
-// ---------------------------------------------------------------------------
-document.getElementById('map-mode-toggle').addEventListener('click', e => {
-  const btn = e.target.closest('.mode-btn');
-  if (!btn || btn.dataset.mode === mapMode) return;
-  mapMode = btn.dataset.mode;
-  document.querySelectorAll('#map-mode-toggle .mode-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.mode === mapMode));
-  activeGenreFilter = null;
-  buildLegend();
-  render();
-});
+// (Mode toggle removed — brain map is the primary view)
 
 // ---------------------------------------------------------------------------
 // Merge playlists modal
@@ -3094,14 +3537,25 @@ document.getElementById('btn-refresh').addEventListener('click', () => {
 document.getElementById('btn-brain').addEventListener('click', () => {
   brainMode = !brainMode;
   brainHovered = null;
-  _brainCache = null;
+  _svgBrainSelected = null;
   const btn = document.getElementById('btn-brain');
-  btn.style.borderColor = brainMode ? 'var(--accent2)' : '';
-  btn.style.color = brainMode ? 'var(--accent2)' : '';
-  canvas.style.cursor = 'grab';
   if (brainMode) {
+    // Switched to brain view
+    btn.title = 'Switch to scatter view';
+    btn.style.borderColor = 'rgba(124,106,247,.5)';
+    btn.style.color = '#a78bfa';
+    btn.querySelector('svg').innerHTML = `<circle cx="5" cy="12" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="12" cy="19" r="2"/><line x1="7" y1="12" x2="10" y2="12"/><line x1="14" y1="12" x2="17" y2="12"/><line x1="12" y1="7" x2="12" y2="10"/><line x1="12" y1="14" x2="12" y2="17"/>`;
+    btn.lastChild.textContent = ' Scatter';
     document.getElementById('track-tooltip').classList.remove('visible');
     hoveredPoint = null;
+  } else {
+    // Switched to scatter view
+    btn.title = 'Switch to brain view';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+    btn.querySelector('svg').innerHTML = `<path d="M9.5 2a2.5 2.5 0 0 1 5 0v1a5 5 0 0 1 5 5v1a3 3 0 0 1 0 6v1a5 5 0 0 1-5 5h-5a5 5 0 0 1-5-5v-1a3 3 0 0 1 0-6V8a5 5 0 0 1 5-5V2z"/>`;
+    btn.lastChild.textContent = ' Brain';
+    canvas.style.cursor = 'grab';
   }
   render();
 });
