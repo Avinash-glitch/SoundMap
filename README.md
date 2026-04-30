@@ -96,16 +96,12 @@
   ---             
   Roadmap                                                                                                               
                   
-  - Spotify OAuth + library ingestion
-  - UMAP audio feature mapping                                                                                          
+  - Spotify OAuth + library ingestion                                                                                  
   - Interactive canvas explorer
   - Claude AI mood zones                                                                                                
   - Natural language playlist curation
   - Playlist transfer: Spotify ↔ Apple Music                                                                            
-  - Friend playlist import (public Spotify → your Apple Music)
-  - Last.fm scrobble history overlay                                                                                    
-  - Share your map as a public link                                                                                     
-                                                                                                                        
+  - Friend playlist import (public Spotify → your Apple Music)                                                            - Share your map as a public link                                                                
   ---                                                                                                                   
   License                                                                                                               
                   
