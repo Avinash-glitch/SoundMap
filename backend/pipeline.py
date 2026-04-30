@@ -111,27 +111,33 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
 
     # Step 2: gather from each source separately so we can score per-source
     scored: dict[str, int] = {}
+    recency_scored: dict[str, int] = {}   # short-term top tracks + recently played
+    depth_scored: dict[str, int] = {}     # long-term/medium top tracks + liked songs
     all_sources: list[list[dict]] = []
 
-    def _score(tracks_list: list[dict], weight: int, cap: int | None = None) -> None:
+    def _score(tracks_list: list[dict], weight: int, cap: int | None = None,
+               bucket: dict | None = None) -> None:
+        target = bucket if bucket is not None else scored
         for t in tracks_list:
             tid = t.get("id")
             if not tid:
                 continue
-            current = scored.get(tid, 0)
+            current = target.get(tid, 0)
             add = weight if cap is None else min(weight, cap - current)
-            scored[tid] = current + max(add, 0)
+            target[tid] = current + max(add, 0)
+            if bucket is not None:
+                scored[tid] = scored.get(tid, 0) + max(add, 0)
 
     _score(pl_trks, 1)
     all_sources.append(pl_trks)
 
     saved = _fetch_saved_tracks(headers)
-    _score(saved, 2)
+    _score(saved, 2, bucket=depth_scored)
     all_sources.append(saved)
 
     if not _stopped():
         top_s = _fetch_top_tracks_range(headers, "short_term")
-        _score(top_s, 3)
+        _score(top_s, 3, bucket=recency_scored)
         all_sources.append(top_s)
     else:
         top_s = []
@@ -139,17 +145,17 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
 
     if not _stopped():
         top_m = _fetch_top_tracks_range(headers, "medium_term")
-        _score(top_m, 2)
+        _score(top_m, 2, bucket=depth_scored)
         all_sources.append(top_m)
 
     if not _stopped():
         top_l = _fetch_top_tracks_range(headers, "long_term")
-        _score(top_l, 1)
+        _score(top_l, 1, bucket=depth_scored)
         all_sources.append(top_l)
 
     if not _stopped():
         recent = _fetch_recent_tracks(headers)
-        _score(recent, 1, cap=3)
+        _score(recent, 1, cap=3, bucket=recency_scored)
         all_sources.append(recent)
     elif stop_event and stop_event.is_set():
         progress(20, "Stopped early — building map with tracks collected so far…")
@@ -161,11 +167,13 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
         if tid and tid not in seen:
             seen[tid] = t
 
-    # Step 4: assign play_score — no hard cap, include everything
+    # Step 4: assign play_score + per-dimension scores — no hard cap, include everything
     all_candidates = list(seen.values())
     for t in all_candidates:
         t["playlists"] = pl_lookup.get(t["id"], [])
         t["play_score"] = max(scored.get(t["id"], 1), 1)
+        t["recency_score"] = recency_scored.get(t["id"], 0)
+        t["depth_score"] = depth_scored.get(t["id"], 0)
         t["is_top_track"] = t["id"] in top_track_ids
 
     tracks = sorted(all_candidates, key=lambda t: t["play_score"], reverse=True)
