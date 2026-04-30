@@ -932,6 +932,12 @@
       <button class="mode-btn" data-mode="moods">Mood Zones</button>
       <button class="mode-btn active" data-mode="playlists">Playlists</button>
     </div>
+    <button class="btn-icon" id="btn-brain" title="Brain Map — playlists as regions" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
+        <path d="M9.5 2a2.5 2.5 0 0 1 5 0v1a5 5 0 0 1 5 5v1a3 3 0 0 1 0 6v1a5 5 0 0 1-5 5h-5a5 5 0 0 1-5-5v-1a3 3 0 0 1 0-6V8a5 5 0 0 1 5-5V2z"/>
+      </svg>
+      Brain Map
+    </button>
     <button class="btn-icon" id="btn-ai" title="AI Playlist Curator" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(29,185,84,.4)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
@@ -1196,6 +1202,22 @@
   </div>
 </div>
 
+<!-- Playlist drill-down overlay -->
+<div id="drilldown-overlay" style="display:none;position:fixed;inset:0;background:rgba(10,10,15,0.97);z-index:200;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.5rem;border-bottom:1px solid var(--border);flex-shrink:0">
+    <div>
+      <div id="drilldown-title" style="font-size:1rem;font-weight:700;color:#fff;margin-bottom:.2rem"></div>
+      <div style="font-size:.68rem;color:var(--text-dim)">
+        X axis = how much you're playing it <strong style="color:var(--accent)">right now</strong>
+        &nbsp;·&nbsp;
+        Y axis = how deep it is in your <strong style="color:var(--accent2)">all-time taste</strong>
+      </div>
+    </div>
+    <button id="drilldown-close" style="background:none;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:.35rem .9rem;cursor:pointer;font-size:.75rem;white-space:nowrap">← Back to map</button>
+  </div>
+  <canvas id="drilldown-canvas" style="flex:1;display:block;width:100%"></canvas>
+</div>
+
 <!-- Apple Music Transfer modal -->
 <div class="modal-backdrop" id="apple-modal">
   <div class="modal" style="width:min(480px,92vw)">
@@ -1300,6 +1322,15 @@ let hoveredPoint = null;
 let mapMode = 'playlists'; // 'moods' | 'playlists'
 let aiHighlightSet = null; // Set<string> | null — IDs returned by AI curator
 
+// Brain map state
+let brainMode = false;
+let brainHovered = null;       // playlist name currently hovered
+let _cachedBrainData = null;   // rebuilt each render, used for hit-testing
+
+// Drill-down state
+let drilldownTracks = null;
+let drilldownHovered = null;
+
 // Chart mode state — X = liked_at date, Y = release_year
 let chartLikedAtRange = [Date.now() - 5 * 365 * 86400e3, Date.now()]; // fallback: last 5 years
 let chartYearRange    = [1960, 2025];                                    // fallback release year range
@@ -1320,7 +1351,15 @@ function resize() {
   H = canvas.height = window.innerHeight;
   if (mapData) { fitToView(); render(); }
 }
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => {
+  resize();
+  if (drilldownTracks) {
+    const dc = document.getElementById('drilldown-canvas');
+    dc.width = window.innerWidth;
+    dc.height = window.innerHeight - document.getElementById('drilldown-overlay').firstElementChild.offsetHeight;
+    _renderDrillDown();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Load data
@@ -1433,6 +1472,8 @@ let activeGenreFilter = null;
 
 function render() {
   if (comparePoints.length) { renderWithCompare(); return; }
+  if (brainMode) { _cachedBrainData = _buildBrainData(); _renderBrain(); return; }
+  _cachedBrainData = null;
   _renderDots();
 }
 
@@ -1544,6 +1585,262 @@ function _renderDots() {
       ctx.fillStyle = isSel ? COLOR_SEL : COLOR_HOVER;
       ctx.fillText(label, lx + 1, ly);
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Brain Map
+// ---------------------------------------------------------------------------
+
+function _buildBrainData() {
+  const plMap = {};
+  for (const p of points) {
+    const pl = (p.playlists || [])[0];
+    if (!pl) continue;
+    if (!plMap[pl]) plMap[pl] = [];
+    plMap[pl].push(p);
+  }
+  return Object.entries(plMap)
+    .filter(([, pts]) => pts.length > 0)
+    .map(([name, pts]) => {
+      const cpts = pts.map(p => toCanvas(p.nx, p.ny));
+      const cx = cpts.reduce((s, p) => s + p.cx, 0) / cpts.length;
+      const cy = cpts.reduce((s, p) => s + p.cy, 0) / cpts.length;
+      return { name, tracks: pts, cpts, cx, cy };
+    });
+}
+
+function _convexHull(pts) {
+  if (pts.length < 2) return pts;
+  if (pts.length === 2) return pts;
+  const n = pts.length;
+  let lo = 0;
+  for (let i = 1; i < n; i++) if (pts[i][0] < pts[lo][0]) lo = i;
+  const hull = [];
+  let p = lo;
+  do {
+    hull.push(pts[p]);
+    let q = (p + 1) % n;
+    for (let i = 0; i < n; i++) {
+      const cross = (pts[q][0]-pts[p][0])*(pts[i][1]-pts[p][1]) - (pts[q][1]-pts[p][1])*(pts[i][0]-pts[p][0]);
+      if (cross < 0) q = i;
+    }
+    p = q;
+  } while (p !== lo && hull.length <= n);
+  return hull;
+}
+
+function _traceBlobPath(hull, cx, cy, pad) {
+  const expanded = hull.map(([x, y]) => {
+    const dx = x - cx, dy = y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    return [x + dx / len * pad, y + dy / len * pad];
+  });
+  const n = expanded.length;
+  ctx.beginPath();
+  if (n < 2) {
+    ctx.arc(cx, cy, pad, 0, Math.PI * 2);
+    return;
+  }
+  if (n === 2) {
+    ctx.arc((expanded[0][0]+expanded[1][0])/2, (expanded[0][1]+expanded[1][1])/2, pad, 0, Math.PI*2);
+    return;
+  }
+  ctx.moveTo((expanded[n-1][0]+expanded[0][0])/2, (expanded[n-1][1]+expanded[0][1])/2);
+  for (let i = 0; i < n; i++) {
+    const p1 = expanded[i], p2 = expanded[(i+1)%n];
+    ctx.quadraticCurveTo(p1[0], p1[1], (p1[0]+p2[0])/2, (p1[1]+p2[1])/2);
+  }
+  ctx.closePath();
+}
+
+function _renderBrain() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  for (const pl of (_cachedBrainData || [])) {
+    const isHov = brainHovered === pl.name;
+    const color = playlistColors[pl.name] || COLOR_UNTAGGED;
+    const pad = Math.max(24, 16 + Math.sqrt(pl.tracks.length) * 4);
+    const hull = _convexHull(pl.cpts.map(p => [p.cx, p.cy]));
+
+    const toHsla = (c, a) => c.startsWith('hsl(')
+      ? c.replace('hsl(', 'hsla(').replace(')', `, ${a})`)
+      : `rgba(255,255,255,${a})`;
+
+    _traceBlobPath(hull, pl.cx, pl.cy, pad);
+    ctx.fillStyle = toHsla(color, isHov ? 0.32 : 0.16);
+    ctx.fill();
+    ctx.strokeStyle = toHsla(color, isHov ? 0.9 : 0.45);
+    ctx.lineWidth = isHov ? 2.5 : 1;
+    ctx.stroke();
+
+    const nameLabel = pl.name.length > 22 ? pl.name.slice(0, 20) + '…' : pl.name;
+    const fs = isHov ? 13 : Math.max(9, Math.min(12, 7 + Math.sqrt(pl.tracks.length)));
+    ctx.font = `${isHov ? '700' : '500'} ${fs}px Syne, sans-serif`;
+    ctx.fillStyle = isHov ? '#fff' : 'rgba(255,255,255,0.82)';
+    ctx.fillText(nameLabel, pl.cx, pl.cy - (isHov ? 8 : 0));
+    if (isHov) {
+      ctx.font = '10px DM Mono, monospace';
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.fillText(`${pl.tracks.length} tracks — click to explore`, pl.cx, pl.cy + fs + 2);
+    }
+  }
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+
+function _brainHitTest(mx, my) {
+  if (!_cachedBrainData) return null;
+  for (const pl of _cachedBrainData) {
+    const pad = Math.max(24, 16 + Math.sqrt(pl.tracks.length) * 4);
+    const hull = _convexHull(pl.cpts.map(p => [p.cx, p.cy]));
+    _traceBlobPath(hull, pl.cx, pl.cy, pad);
+    if (ctx.isPointInPath(mx, my)) return pl.name;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Drill-down scatter
+// ---------------------------------------------------------------------------
+
+function _openDrillDown(playlistName) {
+  const pl = (_cachedBrainData || []).find(p => p.name === playlistName);
+  if (!pl) return;
+  drilldownTracks = pl.tracks;
+  drilldownHovered = null;
+  const overlay = document.getElementById('drilldown-overlay');
+  const dc = document.getElementById('drilldown-canvas');
+  document.getElementById('drilldown-title').textContent = playlistName;
+  overlay.style.display = 'flex';
+  dc.width = window.innerWidth;
+  dc.height = window.innerHeight - overlay.firstElementChild.offsetHeight;
+  _renderDrillDown();
+
+  dc.onmousemove = e => {
+    const rect = dc.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const prev = drilldownHovered;
+    drilldownHovered = _drillHitTest(mx, my);
+    if (drilldownHovered !== prev) _renderDrillDown();
+  };
+  dc.onmouseleave = () => { drilldownHovered = null; _renderDrillDown(); };
+}
+
+function _drillHitTest(mx, my) {
+  if (!drilldownTracks) return null;
+  const dc = document.getElementById('drilldown-canvas');
+  const W = dc.width, H = dc.height;
+  const ML = 60, MR = 30, MT = 40, MB = 60;
+  const PW = W - ML - MR, PH = H - MT - MB;
+  const maxR = Math.max(...drilldownTracks.map(t => t.recency_score || 0), 1);
+  const maxD = Math.max(...drilldownTracks.map(t => t.depth_score || 0), 1);
+  let best = null, bestDist = 14;
+  for (const t of drilldownTracks) {
+    const x = ML + ((t.recency_score || 0) / maxR) * PW;
+    const y = MT + PH - ((t.depth_score || 0) / maxD) * PH;
+    const d = Math.hypot(mx - x, my - y);
+    if (d < bestDist) { bestDist = d; best = t; }
+  }
+  return best;
+}
+
+function _renderDrillDown() {
+  const dc = document.getElementById('drilldown-canvas');
+  const dctx = dc.getContext('2d');
+  const W = dc.width, H = dc.height;
+  const ML = 60, MR = 30, MT = 40, MB = 60;
+  const PW = W - ML - MR, PH = H - MT - MB;
+
+  dctx.clearRect(0, 0, W, H);
+  if (!drilldownTracks || !drilldownTracks.length) return;
+
+  const maxR = Math.max(...drilldownTracks.map(t => t.recency_score || 0), 1);
+  const maxD = Math.max(...drilldownTracks.map(t => t.depth_score || 0), 1);
+
+  // Grid lines
+  dctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  dctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const gx = ML + (i / 4) * PW, gy = MT + (i / 4) * PH;
+    dctx.beginPath(); dctx.moveTo(gx, MT); dctx.lineTo(gx, MT + PH); dctx.stroke();
+    dctx.beginPath(); dctx.moveTo(ML, gy); dctx.lineTo(ML + PW, gy); dctx.stroke();
+  }
+
+  // Midline dividers
+  dctx.setLineDash([5, 5]);
+  dctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  dctx.beginPath(); dctx.moveTo(ML + PW/2, MT); dctx.lineTo(ML + PW/2, MT+PH); dctx.stroke();
+  dctx.beginPath(); dctx.moveTo(ML, MT+PH/2); dctx.lineTo(ML+PW, MT+PH/2); dctx.stroke();
+  dctx.setLineDash([]);
+
+  // Quadrant labels
+  dctx.font = '10px DM Mono, monospace';
+  dctx.textAlign = 'center';
+  dctx.fillStyle = 'rgba(255,255,255,0.1)';
+  dctx.fillText('deep cuts', ML + PW*0.25, MT + PH*0.22);
+  dctx.fillText('current obsessions', ML + PW*0.75, MT + PH*0.22);
+  dctx.fillText('filler', ML + PW*0.25, MT + PH*0.78);
+  dctx.fillText('old favourites', ML + PW*0.75, MT + PH*0.78);
+
+  // Axes
+  dctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  dctx.lineWidth = 1;
+  dctx.beginPath(); dctx.moveTo(ML, MT); dctx.lineTo(ML, MT+PH); dctx.lineTo(ML+PW, MT+PH); dctx.stroke();
+
+  // Axis labels
+  dctx.font = '11px DM Mono, monospace';
+  dctx.fillStyle = 'rgba(255,255,255,0.4)';
+  dctx.textAlign = 'center';
+  dctx.fillText('Right Now →', ML + PW/2, H - 14);
+  dctx.save();
+  dctx.translate(16, MT + PH/2);
+  dctx.rotate(-Math.PI/2);
+  dctx.fillText('All Time ↑', 0, 0);
+  dctx.restore();
+
+  // Dots
+  for (const t of drilldownTracks) {
+    const x = ML + ((t.recency_score || 0) / maxR) * PW;
+    const y = MT + PH - ((t.depth_score || 0) / maxD) * PH;
+    const r = Math.max(4, 3 + Math.log((t.play_score || 1) + 1));
+    const isHov = drilldownHovered && drilldownHovered.id === t.id;
+    const color = playlistColors[(t.playlists||[])[0]] || 'hsl(245,65%,62%)';
+
+    if (isHov) {
+      dctx.beginPath();
+      dctx.arc(x, y, r + 6, 0, Math.PI*2);
+      const glow = dctx.createRadialGradient(x, y, 0, x, y, r + 6);
+      glow.addColorStop(0, 'rgba(255,255,255,0.25)');
+      glow.addColorStop(1, 'transparent');
+      dctx.fillStyle = glow;
+      dctx.fill();
+    }
+
+    dctx.beginPath();
+    dctx.arc(x, y, isHov ? r + 2 : r, 0, Math.PI*2);
+    dctx.fillStyle = isHov ? '#fff' : (color.startsWith('hsl(') ? color.replace('hsl(','hsla(').replace(')',',0.85)') : color);
+    dctx.fill();
+  }
+
+  // Hover label (drawn last so it's always on top)
+  if (drilldownHovered) {
+    const t = drilldownHovered;
+    const x = ML + ((t.recency_score || 0) / maxR) * PW;
+    const y = MT + PH - ((t.depth_score || 0) / maxD) * PH;
+    const label = `${t.name}  —  ${t.artist}`;
+    dctx.font = '600 11px DM Mono, monospace';
+    dctx.textAlign = 'left';
+    const tw = dctx.measureText(label).width;
+    const lx = Math.min(x + 10, W - tw - 10);
+    const ly = Math.max(y - 8, 18);
+    dctx.fillStyle = 'rgba(10,10,15,0.88)';
+    dctx.fillRect(lx - 4, ly - 13, tw + 8, 18);
+    dctx.fillStyle = '#fff';
+    dctx.fillText(label, lx, ly);
   }
 }
 
@@ -1859,6 +2156,16 @@ canvas.addEventListener('mousemove', e => {
     return;
   }
 
+  if (brainMode) {
+    const hit = _brainHitTest(e.clientX, e.clientY);
+    if (hit !== brainHovered) {
+      brainHovered = hit;
+      canvas.style.cursor = hit ? 'pointer' : 'grab';
+      render();
+    }
+    return;
+  }
+
   const hit = hitTest(e.clientX, e.clientY);
   if (hit !== hoveredPoint) {
     hoveredPoint = hit;
@@ -1881,8 +2188,13 @@ canvas.addEventListener('mousemove', e => {
 canvas.addEventListener('mouseup', e => {
   canvas.classList.remove('panning');
   if (!isDragging) {
-    const hit = hitTest(e.clientX, e.clientY);
-    if (hit) selectPoint(hit);
+    if (brainMode) {
+      const hit = _brainHitTest(e.clientX, e.clientY);
+      if (hit) _openDrillDown(hit);
+    } else {
+      const hit = hitTest(e.clientX, e.clientY);
+      if (hit) selectPoint(hit);
+    }
   }
   dragStart = null;
   transformStart = null;
@@ -2700,6 +3012,26 @@ document.getElementById('btn-refresh').addEventListener('click', () => {
   if (confirm('Rebuild your map with your latest Spotify library? This takes ~2 minutes.')) {
     location.href = '/auth/login';
   }
+});
+
+document.getElementById('btn-brain').addEventListener('click', () => {
+  brainMode = !brainMode;
+  brainHovered = null;
+  const btn = document.getElementById('btn-brain');
+  btn.style.borderColor = brainMode ? 'var(--accent2)' : '';
+  btn.style.color = brainMode ? 'var(--accent2)' : '';
+  canvas.style.cursor = 'grab';
+  if (brainMode) {
+    document.getElementById('track-tooltip').classList.remove('visible');
+    hoveredPoint = null;
+  }
+  render();
+});
+
+document.getElementById('drilldown-close').addEventListener('click', () => {
+  document.getElementById('drilldown-overlay').style.display = 'none';
+  drilldownTracks = null;
+  drilldownHovered = null;
 });
 
 // ---------------------------------------------------------------------------
