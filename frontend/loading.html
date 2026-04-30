@@ -308,6 +308,7 @@
   const params = new URLSearchParams(location.search);
   const userId = params.get('user');
   const preJobId = params.get('job'); // set when job was already started (e.g. Apple Music flow)
+  const connectApple = params.get('connect_apple') === '1';
 
   if (!userId) { location.href = '/'; }
 
@@ -357,7 +358,7 @@
         fillEl.style.width = '100%';
         pctEl.textContent = '100%';
         etaEl.textContent = '';
-        setTimeout(() => { location.href = `/map.html?user=${userId}`; }, 800);
+        setTimeout(() => { location.href = `/map.html?user=${userId}${connectApple ? '&connect_apple=1' : ''}`; }, 800);
         return;
       }
 

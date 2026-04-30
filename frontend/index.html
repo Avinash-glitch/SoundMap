@@ -212,6 +212,9 @@
       </svg>
       Transfer to Apple Music
     </button>
+    <div id="apple-login-note" style="display:none;font-size:.78rem;color:#a78bfa;margin-top:.5rem;text-align:center">
+      Connecting Spotify first to build your map — redirecting…
+    </div>
     <a href="/soundmap-demo.html" class="demo-link" target="_blank">See a demo first →</a>
   </div>
 </div>
@@ -234,7 +237,7 @@
     banner.style.display = 'block';
   }
 
-  // Apple Music button — go to map if already logged in, else start Spotify login
+  // Apple Music button — go to map if already logged in, else explain and start Spotify login
   document.getElementById('btn-apple-index').addEventListener('click', async () => {
     try {
       const resp = await fetch('/me');
@@ -242,10 +245,13 @@
         const { user_id } = await resp.json();
         location.href = `/map.html?user=${encodeURIComponent(user_id)}&connect_apple=1`;
       } else {
-        location.href = '/auth/login';
+        // Show explanation before redirecting to Spotify
+        const note = document.getElementById('apple-login-note');
+        note.style.display = 'block';
+        setTimeout(() => { location.href = '/auth/login?next=apple'; }, 2000);
       }
     } catch (_) {
-      location.href = '/auth/login';
+      location.href = '/auth/login?next=apple';
     }
   });
 

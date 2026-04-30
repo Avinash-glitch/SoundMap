@@ -41,13 +41,15 @@ def _generate_pkce_pair() -> tuple[str, str]:
 
 
 @router.get("/login")
-async def login(request: Request) -> RedirectResponse:
-    """Redirect user to Spotify OAuth consent screen."""
+async def login(request: Request, next: str | None = None) -> RedirectResponse:
+    """Redirect user to Spotify OAuth consent screen. Optional ?next=apple carries intent."""
     client_id = os.environ["SPOTIFY_CLIENT_ID"]
     redirect_uri = os.environ["SPOTIFY_REDIRECT_URI"]
 
     code_verifier, code_challenge = _generate_pkce_pair()
     request.session["code_verifier"] = code_verifier
+    if next:
+        request.session["login_next"] = next
 
     params = {
         "client_id": client_id,
@@ -118,12 +120,15 @@ async def callback(request: Request, code: str | None = None, error: str | None 
     request.session["user_id"] = user_id
     request.session["display_name"] = display_name
 
+    login_next = request.session.pop("login_next", None)
+    extra = "&connect_apple=1" if login_next == "apple" else ""
+
     # Skip processing if a fresh map already exists
     if storage.map_exists(user_id) and storage.map_age_hours(user_id) < 24:
         print(f"[auth] Fresh map found for {user_id} — skipping pipeline")
-        return RedirectResponse(f"{app_url}/map.html?user={user_id}")
+        return RedirectResponse(f"{app_url}/map.html?user={user_id}{extra}")
 
-    return RedirectResponse(f"{app_url}/loading.html?user={user_id}")
+    return RedirectResponse(f"{app_url}/loading.html?user={user_id}{extra}")
 
 
 async def refresh_access_token(request: Request) -> str | None:
