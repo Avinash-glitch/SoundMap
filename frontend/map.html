@@ -2242,9 +2242,10 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       <div style="font-family:Syne,sans-serif;font-weight:700;font-size:24px;color:${col}">${trackCount}</div>
       <div style="font-size:9px;color:var(--text-dim);margin-top:3px;letter-spacing:.1em">TRACKS</div>
     </div>
-    <button id="bpi-copy-spotify" style="padding:10px;background:var(--accent);border:none;border-radius:8px;color:#000;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">
-      Add to my Spotify
-    </button>
+    ${userId.endsWith('_apple')
+      ? `<div style="padding:10px;background:var(--surface);border-radius:8px;font-size:10px;color:var(--text-dim);text-align:center;line-height:1.6">Apple Music import coming soon</div>`
+      : `<button id="bpi-copy-spotify" style="padding:10px;background:var(--accent);border:none;border-radius:8px;color:#000;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">Add to my Spotify</button>`
+    }
     <div id="bpi-copy-status" style="font-size:10px;color:var(--text-dim);text-align:center;display:none;line-height:1.5"></div>
     <button id="bpi-copy-desel" style="padding:8px;background:transparent;border:none;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;width:100%;text-align:center">
       Close
@@ -2253,7 +2254,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
 
   panel.classList.add('open');
 
-  panel.querySelector('#bpi-copy-spotify').addEventListener('click', async () => {
+  panel.querySelector('#bpi-copy-spotify')?.addEventListener('click', async () => {
     const btn = panel.querySelector('#bpi-copy-spotify');
     const status = panel.querySelector('#bpi-copy-status');
     btn.disabled = true;
