@@ -1810,21 +1810,39 @@ function _computeSVGBrainDataFor(pts, md) {
   if (!plNames.length) return null;
   const N = plNames.length;
 
-  // Symmetric seed placement: generate left-hemisphere seeds and mirror to right.
-  // BRAIN_PTS_SVG is symmetric around x=500, so [1000-x, y] is always inside too.
+  // Symmetric placement: relax seeds in the left hemisphere only (Voronoi clipped
+  // to x<500), then mirror to get right hemisphere. Keeps both halves well-spread
+  // without the collapse that happens when you enforce symmetry on a joint relaxation.
   const halfN = Math.floor(N / 2);
-  const extraN = N - 2 * halfN; // 1 if N is odd
+  const extraN = N - 2 * halfN; // 1 if N is odd (shouldn't happen with cap of 12)
 
   const leftSeeds = [];
   let tries = 0;
   while (leftSeeds.length < halfN && tries < halfN * 800) {
-    const x = 100 + Math.random() * 380; // left hemisphere: ~100–480
+    const x = 100 + Math.random() * 370; // left brain: ~100–470
     const y = 60 + Math.random() * 560;
     if (_brainInPolySVG(x, y)) leftSeeds.push([x, y]);
     tries++;
   }
   if (leftSeeds.length < halfN) return null;
 
+  // Lloyd relaxation on left seeds only — Voronoi clipped to left half so
+  // centroids never drift across the fissure
+  for (let iter = 0; iter < 28; iter++) {
+    const del2 = d3.Delaunay.from(leftSeeds);
+    const vor2 = del2.voronoi([0, 0, 500, 680]);
+    leftSeeds.forEach((s, i) => {
+      const cell = vor2.cellPolygon(i);
+      if (!cell || cell.length < 3) return;
+      const inBrain = cell.filter(([px, py]) => _brainInPolySVG(px, py) && px < 500);
+      if (!inBrain.length) return;
+      const cx = inBrain.reduce((a, p) => a + p[0], 0) / inBrain.length;
+      const cy = inBrain.reduce((a, p) => a + p[1], 0) / inBrain.length;
+      if (_brainInPolySVG(cx, cy) && cx < 500) leftSeeds[i] = [cx, cy];
+    });
+  }
+
+  // Mirror left seeds to right (brain is symmetric around x=500)
   let seeds = [
     ...leftSeeds,
     ...leftSeeds.map(([x, y]) => [1000 - x, y]),
@@ -1833,34 +1851,12 @@ function _computeSVGBrainDataFor(pts, md) {
   if (extraN) {
     tries = 0;
     while (seeds.length < N && tries < 800) {
-      const x = 450 + Math.random() * 100;
+      const x = 440 + Math.random() * 120;
       const y = 100 + Math.random() * 480;
       if (_brainInPolySVG(x, y)) seeds.push([x, y]);
       tries++;
     }
     if (seeds.length < N) return null;
-  }
-
-  for (let iter=0; iter<20; iter++) {
-    const del2 = d3.Delaunay.from(seeds);
-    const vor2 = del2.voronoi([0,0,1000,680]);
-    const next = seeds.map((s,i) => {
-      const cell = vor2.cellPolygon(i);
-      if (!cell||cell.length<3) return s;
-      const int2 = cell.filter(([px,py])=>_brainInPolySVG(px,py));
-      if (!int2.length) return s;
-      const cx=int2.reduce((a,p)=>a+p[0],0)/int2.length;
-      const cy=int2.reduce((a,p)=>a+p[1],0)/int2.length;
-      return _brainInPolySVG(cx,cy)?[cx,cy]:s;
-    });
-    // Re-enforce mirror symmetry for paired seeds after each relaxation step
-    for (let i=0; i<halfN; i++) {
-      const [lx,ly]=next[i], [rx,ry]=next[i+halfN];
-      const avgY=(ly+ry)/2, halfX=((500-lx)+(rx-500))/2;
-      next[i]=[500-halfX,avgY];
-      next[i+halfN]=[500+halfX,avgY];
-    }
-    seeds = next;
   }
 
   const del = d3.Delaunay.from(seeds);
