@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
   <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js" async></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6/dist/d3-delaunay.min.js"></script>
   <style>
     :root {
       --bg: #0a0a0f;
@@ -1324,8 +1325,8 @@ let aiHighlightSet = null; // Set<string> | null — IDs returned by AI curator
 
 // Brain map state
 let brainMode = false;
-let brainHovered = null;       // playlist name currently hovered
-let _cachedBrainData = null;   // rebuilt each render, used for hit-testing
+let brainHovered = null;
+let _brainCache = null;        // built once on first render, cleared on resize/toggle
 
 // Drill-down state
 let drilldownTracks = null;
@@ -1352,6 +1353,7 @@ function resize() {
   if (mapData) { fitToView(); render(); }
 }
 window.addEventListener('resize', () => {
+  _brainCache = null;
   resize();
   if (drilldownTracks) {
     const dc = document.getElementById('drilldown-canvas');
@@ -1472,8 +1474,7 @@ let activeGenreFilter = null;
 
 function render() {
   if (comparePoints.length) { renderWithCompare(); return; }
-  if (brainMode) { _cachedBrainData = _buildBrainData(); _renderBrain(); return; }
-  _cachedBrainData = null;
+  if (brainMode) { _renderBrain(); return; }
   _renderDots();
 }
 
@@ -1592,115 +1593,191 @@ function _renderDots() {
 // Brain Map
 // ---------------------------------------------------------------------------
 
-function _buildBrainData() {
-  const plMap = {};
-  for (const p of points) {
-    const pl = (p.playlists || [])[0];
-    if (!pl) continue;
-    if (!plMap[pl]) plMap[pl] = [];
-    plMap[pl].push(p);
-  }
-  return Object.entries(plMap)
-    .filter(([, pts]) => pts.length > 0)
-    .map(([name, pts]) => {
-      const cpts = pts.map(p => toCanvas(p.nx, p.ny));
-      const cx = cpts.reduce((s, p) => s + p.cx, 0) / cpts.length;
-      const cy = cpts.reduce((s, p) => s + p.cy, 0) / cpts.length;
-      return { name, tracks: pts, cpts, cx, cy };
-    });
+// ---------------------------------------------------------------------------
+// Brain Map — Voronoi inside brain silhouette (ignores UMAP positions)
+// ---------------------------------------------------------------------------
+
+function _brainBounds() {
+  const m = Math.min(W, H) * 0.07;
+  return { x: m, y: m, w: W - m * 2, h: H - m * 2 };
 }
 
-function _convexHull(pts) {
-  if (pts.length < 2) return pts;
-  if (pts.length === 2) return pts;
+function _brainNormPoly() {
+  // Top-down brain silhouette as a polygon (normalized 0–1)
+  // Two hemispheres with notches at top-center and bottom-center
+  return [
+    [0.50, 0.04], [0.41, 0.03], [0.30, 0.06], [0.20, 0.11],
+    [0.11, 0.19], [0.06, 0.30], [0.04, 0.43], [0.06, 0.56],
+    [0.11, 0.67], [0.19, 0.77], [0.29, 0.85], [0.39, 0.91],
+    [0.46, 0.95], [0.50, 0.97],
+    [0.54, 0.95], [0.61, 0.91], [0.71, 0.85], [0.81, 0.77],
+    [0.89, 0.67], [0.94, 0.56], [0.96, 0.43], [0.94, 0.30],
+    [0.89, 0.19], [0.80, 0.11], [0.70, 0.06], [0.59, 0.03],
+  ];
+}
+
+function _scaledBrainPoly() {
+  const b = _brainBounds();
+  return _brainNormPoly().map(([nx, ny]) => [b.x + nx * b.w, b.y + ny * b.h]);
+}
+
+function _brainPath() {
+  const pts = _scaledBrainPoly();
   const n = pts.length;
-  let lo = 0;
-  for (let i = 1; i < n; i++) if (pts[i][0] < pts[lo][0]) lo = i;
-  const hull = [];
-  let p = lo;
-  do {
-    hull.push(pts[p]);
-    let q = (p + 1) % n;
-    for (let i = 0; i < n; i++) {
-      const cross = (pts[q][0]-pts[p][0])*(pts[i][1]-pts[p][1]) - (pts[q][1]-pts[p][1])*(pts[i][0]-pts[p][0]);
-      if (cross < 0) q = i;
-    }
-    p = q;
-  } while (p !== lo && hull.length <= n);
-  return hull;
-}
-
-function _traceBlobPath(hull, cx, cy, pad) {
-  const expanded = hull.map(([x, y]) => {
-    const dx = x - cx, dy = y - cy;
-    const len = Math.hypot(dx, dy) || 1;
-    return [x + dx / len * pad, y + dy / len * pad];
-  });
-  const n = expanded.length;
   ctx.beginPath();
-  if (n < 2) {
-    ctx.arc(cx, cy, pad, 0, Math.PI * 2);
-    return;
-  }
-  if (n === 2) {
-    ctx.arc((expanded[0][0]+expanded[1][0])/2, (expanded[0][1]+expanded[1][1])/2, pad, 0, Math.PI*2);
-    return;
-  }
-  ctx.moveTo((expanded[n-1][0]+expanded[0][0])/2, (expanded[n-1][1]+expanded[0][1])/2);
+  ctx.moveTo((pts[n-1][0] + pts[0][0]) / 2, (pts[n-1][1] + pts[0][1]) / 2);
   for (let i = 0; i < n; i++) {
-    const p1 = expanded[i], p2 = expanded[(i+1)%n];
+    const p1 = pts[i], p2 = pts[(i+1) % n];
     ctx.quadraticCurveTo(p1[0], p1[1], (p1[0]+p2[0])/2, (p1[1]+p2[1])/2);
   }
   ctx.closePath();
 }
 
-function _renderBrain() {
-  ctx.clearRect(0, 0, W, H);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+function _inBrain(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (((yi > y) !== (yj > y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) inside = !inside;
+  }
+  return inside;
+}
 
-  for (const pl of (_cachedBrainData || [])) {
-    const isHov = brainHovered === pl.name;
-    const color = playlistColors[pl.name] || COLOR_UNTAGGED;
-    const pad = Math.max(24, 16 + Math.sqrt(pl.tracks.length) * 4);
-    const hull = _convexHull(pl.cpts.map(p => [p.cx, p.cy]));
+function _buildBrainVoronoi() {
+  if (typeof d3 === 'undefined' || !d3.Delaunay) return null;
+  const b = _brainBounds();
+  const poly = _scaledBrainPoly();
 
-    const toHsla = (c, a) => c.startsWith('hsl(')
-      ? c.replace('hsl(', 'hsla(').replace(')', `, ${a})`)
-      : `rgba(255,255,255,${a})`;
+  // Collect playlist names that actually have tracks
+  const names = (mapData.playlists || [])
+    .map(p => p.name)
+    .filter(name => points.some(p => (p.playlists || []).includes(name)));
+  if (!names.length) return null;
 
-    _traceBlobPath(hull, pl.cx, pl.cy, pad);
-    ctx.fillStyle = toHsla(color, isHov ? 0.32 : 0.16);
-    ctx.fill();
-    ctx.strokeStyle = toHsla(color, isHov ? 0.9 : 0.45);
-    ctx.lineWidth = isHov ? 2.5 : 1;
-    ctx.stroke();
+  // Seed points — rejection-sample inside brain polygon
+  const seeds = [];
+  let tries = 0;
+  while (seeds.length < names.length && tries < names.length * 800) {
+    const x = b.x + Math.random() * b.w;
+    const y = b.y + Math.random() * b.h;
+    if (_inBrain(x, y, poly)) seeds.push([x, y]);
+    tries++;
+  }
+  if (seeds.length < names.length) return null;
 
-    const nameLabel = pl.name.length > 22 ? pl.name.slice(0, 20) + '…' : pl.name;
-    const fs = isHov ? 13 : Math.max(9, Math.min(12, 7 + Math.sqrt(pl.tracks.length)));
-    ctx.font = `${isHov ? '700' : '500'} ${fs}px Syne, sans-serif`;
-    ctx.fillStyle = isHov ? '#fff' : 'rgba(255,255,255,0.82)';
-    ctx.fillText(nameLabel, pl.cx, pl.cy - (isHov ? 8 : 0));
-    if (isHov) {
-      ctx.font = '10px DM Mono, monospace';
-      ctx.fillStyle = 'rgba(255,255,255,0.45)';
-      ctx.fillText(`${pl.tracks.length} tracks — click to explore`, pl.cx, pl.cy + fs + 2);
-    }
+  // Lloyd's relaxation — spread seeds evenly inside brain
+  let current = seeds;
+  for (let iter = 0; iter < 20; iter++) {
+    const del = d3.Delaunay.from(current);
+    const vor = del.voronoi([b.x, b.y, b.x + b.w, b.y + b.h]);
+    current = current.map((s, i) => {
+      const cell = vor.cellPolygon(i);
+      if (!cell || cell.length < 3) return s;
+      const interior = cell.filter(([px, py]) => _inBrain(px, py, poly));
+      if (!interior.length) return s;
+      const cx = interior.reduce((sum, p) => sum + p[0], 0) / interior.length;
+      const cy = interior.reduce((sum, p) => sum + p[1], 0) / interior.length;
+      return _inBrain(cx, cy, poly) ? [cx, cy] : s;
+    });
   }
 
+  const delaunay = d3.Delaunay.from(current);
+  const voronoi = delaunay.voronoi([b.x, b.y, b.x + b.w, b.y + b.h]);
+  return { names, seeds: current, delaunay, voronoi, poly, bounds: b };
+}
+
+function _toHsla(c, a) {
+  return c.startsWith('hsl(')
+    ? c.replace('hsl(', 'hsla(').replace(')', `, ${a})`)
+    : `rgba(255,255,255,${a})`;
+}
+
+function _renderBrain() {
+  ctx.clearRect(0, 0, W, H);
+  if (!_brainCache) _brainCache = _buildBrainVoronoi();
+  if (!_brainCache) {
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.textAlign = 'center';
+    ctx.fillText('Loading brain map…', W/2, H/2);
+    ctx.textAlign = 'left';
+    return;
+  }
+
+  const { names, seeds, voronoi, poly, bounds: b } = _brainCache;
+
+  // Fill Voronoi cells clipped to brain outline
+  ctx.save();
+  _brainPath();
+  ctx.clip();
+
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    const cell = voronoi.cellPolygon(i);
+    if (!cell) continue;
+    const isHov = brainHovered === name;
+    const color = playlistColors[name] || COLOR_UNTAGGED;
+
+    ctx.beginPath();
+    ctx.moveTo(cell[0][0], cell[0][1]);
+    for (let j = 1; j < cell.length; j++) ctx.lineTo(cell[j][0], cell[j][1]);
+    ctx.closePath();
+    ctx.fillStyle = _toHsla(color, isHov ? 0.5 : 0.22);
+    ctx.fill();
+    ctx.strokeStyle = _toHsla(color, isHov ? 1.0 : 0.5);
+    ctx.lineWidth = isHov ? 2.5 : 0.8;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Brain outline + hemisphere divider on top of cells
+  _brainPath();
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const b2 = _brainBounds();
+  ctx.save();
+  _brainPath();
+  ctx.clip();
+  ctx.beginPath();
+  ctx.moveTo(b2.x + b2.w * 0.50, b2.y + b2.h * 0.04);
+  ctx.lineTo(b2.x + b2.w * 0.50, b2.y + b2.h * 0.96);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 8]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Labels drawn after clipping is removed (so they're always visible)
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    const [sx, sy] = seeds[i];
+    const isHov = brainHovered === name;
+    const trackCount = points.filter(p => (p.playlists||[]).includes(name)).length;
+    const fs = Math.max(9, Math.min(13, 8 + Math.sqrt(trackCount) * 0.6));
+    const label = name.length > 18 ? name.slice(0, 16) + '…' : name;
+
+    ctx.font = `${isHov ? '700' : '500'} ${fs}px Syne, sans-serif`;
+    ctx.fillStyle = isHov ? '#fff' : 'rgba(255,255,255,0.85)';
+    ctx.fillText(label, sx, sy - (isHov ? 7 : 0));
+    if (isHov) {
+      ctx.font = '9px DM Mono, monospace';
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillText(`${trackCount} tracks · click to explore`, sx, sy + fs + 1);
+    }
+  }
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
 }
 
 function _brainHitTest(mx, my) {
-  if (!_cachedBrainData) return null;
-  for (const pl of _cachedBrainData) {
-    const pad = Math.max(24, 16 + Math.sqrt(pl.tracks.length) * 4);
-    const hull = _convexHull(pl.cpts.map(p => [p.cx, p.cy]));
-    _traceBlobPath(hull, pl.cx, pl.cy, pad);
-    if (ctx.isPointInPath(mx, my)) return pl.name;
-  }
-  return null;
+  if (!_brainCache) return null;
+  const { delaunay, names, poly } = _brainCache;
+  if (!_inBrain(mx, my, poly)) return null;
+  const idx = delaunay.find(mx, my);
+  return (idx >= 0 && idx < names.length) ? names[idx] : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1708,9 +1785,9 @@ function _brainHitTest(mx, my) {
 // ---------------------------------------------------------------------------
 
 function _openDrillDown(playlistName) {
-  const pl = (_cachedBrainData || []).find(p => p.name === playlistName);
-  if (!pl) return;
-  drilldownTracks = pl.tracks;
+  const tracks = points.filter(p => (p.playlists || []).includes(playlistName));
+  if (!tracks.length) return;
+  drilldownTracks = tracks;
   drilldownHovered = null;
   const overlay = document.getElementById('drilldown-overlay');
   const dc = document.getElementById('drilldown-canvas');
@@ -3017,6 +3094,7 @@ document.getElementById('btn-refresh').addEventListener('click', () => {
 document.getElementById('btn-brain').addEventListener('click', () => {
   brainMode = !brainMode;
   brainHovered = null;
+  _brainCache = null;
   const btn = document.getElementById('btn-brain');
   btn.style.borderColor = brainMode ? 'var(--accent2)' : '';
   btn.style.color = brainMode ? 'var(--accent2)' : '';
