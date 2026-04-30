@@ -8,7 +8,7 @@
 
 ## What it does
 
-- **Visualise your library** — up to 1000 tracks plotted based on artist genre tags and playlist membership, so playlists that share similar music end up close together on the map
+- **Visualise your library** — your full library plotted based on artist genre tags and playlist membership, so playlists that share similar music end up close together on the map
 - **Explore interactively** — pan, zoom, and click through your musical landscape on a canvas-based map
 - **AI mood zones** *(free, no key needed)* — NVIDIA's free AI models group your library into mood-based territories automatically
 - **Natural language curation** — describe a vibe, get a playlist: *"something for a late-night drive"*
@@ -120,7 +120,7 @@ SUPABASE_KEY=optional
 
 ## Roadmap
 
-- [x] Spotify OAuth + library ingestion (up to 1000 tracks)
+- [x] Spotify OAuth + full library ingestion
 - [x] Genre + playlist-based UMAP mapping
 - [x] Interactive canvas explorer
 - [x] NVIDIA free AI mood zones

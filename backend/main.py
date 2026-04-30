@@ -869,6 +869,66 @@ async def get_map(user_id: str) -> JSONResponse:
     return JSONResponse(data)
 
 
+@app.post("/import-friend-playlist")
+async def import_friend_playlist(request: Request) -> JSONResponse:
+    """
+    Copy a friend's playlist into the logged-in user's Spotify library.
+
+    Body: {
+      "playlist_name": str,          # original playlist name
+      "track_ids": [str, ...],       # Spotify track IDs from friend's map
+      "friend_display_name": str     # used to label the new playlist
+    }
+    """
+    token = request.session.get("access_token")
+    user_id = request.session.get("user_id")
+    if not token or not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    try:
+        body = await request.json()
+        playlist_name: str = (body.get("playlist_name") or "").strip()
+        track_ids: list[str] = body.get("track_ids") or []
+        friend_name: str = (body.get("friend_display_name") or "Friend").strip()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not playlist_name:
+        raise HTTPException(status_code=400, detail="playlist_name required")
+    if not track_ids:
+        raise HTTPException(status_code=400, detail="track_ids required")
+
+    h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    new_name = f"{playlist_name} (from {friend_name})"
+
+    create_resp = _requests.post(
+        f"https://api.spotify.com/v1/users/{user_id}/playlists",
+        headers=h,
+        json={"name": new_name, "public": False, "description": f"Imported from {friend_name}'s SoundMap"},
+    )
+    if create_resp.status_code not in (200, 201):
+        raise HTTPException(status_code=502, detail=f"Could not create playlist: {create_resp.text[:200]}")
+
+    pl_data = create_resp.json()
+    pl_id = pl_data["id"]
+    pl_url = pl_data["external_urls"]["spotify"]
+
+    uris = [f"spotify:track:{tid}" for tid in track_ids if tid]
+    added = 0
+    for i in range(0, len(uris), 100):
+        r = _requests.post(
+            f"https://api.spotify.com/v1/playlists/{pl_id}/items",
+            headers=h,
+            json={"uris": uris[i:i + 100]},
+        )
+        if r.status_code in (200, 201):
+            added += min(100, len(uris) - i)
+
+    print(f"[import-friend-playlist] created '{new_name}' ({added}/{len(uris)} tracks) for {user_id}")
+    return JSONResponse({"name": new_name, "track_count": added, "url": pl_url})
+
+
 @app.post("/create-mood-playlists")
 async def create_mood_playlists(request: Request) -> JSONResponse:
     """

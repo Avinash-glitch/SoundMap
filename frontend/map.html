@@ -2707,6 +2707,7 @@ document.getElementById('btn-refresh').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 let comparePoints = [];
 let compareDisplayName = '';
+let friendMapPlaylists = [];
 
 function renderWithCompare() {
   ctx.clearRect(0, 0, W, H);
@@ -2821,6 +2822,7 @@ async function loadCompare(friendId) {
 
     comparePoints = normaliseComparePoints(data.points);
     compareDisplayName = data.display_name || friendId;
+    friendMapPlaylists = data.playlists || [];
 
     document.getElementById('compare-badge').classList.add('visible');
     document.getElementById('compare-name').textContent = compareDisplayName;
@@ -2832,6 +2834,8 @@ async function loadCompare(friendId) {
       const cData = await cResp.json();
       _renderCompareResults(cData);
     }
+
+    _renderFriendPlaylists();
   } catch (e) {
     errEl.textContent = e.message;
     errEl.style.display = 'block';
@@ -2886,6 +2890,109 @@ function _renderCompareResults(d) {
   document.getElementById('compare-modal').classList.add('open');
 }
 
+function _renderFriendPlaylists() {
+  if (!comparePoints.length) return;
+
+  // Group comparePoints by playlist name → unique track IDs
+  const playlistMap = {};
+  for (const p of comparePoints) {
+    for (const plName of (p.playlists || [])) {
+      if (!playlistMap[plName]) playlistMap[plName] = [];
+      if (!playlistMap[plName].includes(p.id)) playlistMap[plName].push(p.id);
+    }
+  }
+
+  const playlists = Object.entries(playlistMap).sort((a, b) => b[1].length - a[1].length);
+  if (!playlists.length) return;
+
+  let html = `
+    <div id="friend-playlist-panel" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">
+        ${_esc(compareDisplayName)}'s Playlists
+      </div>
+      <div style="max-height:180px;overflow-y:auto;scrollbar-width:thin;margin-bottom:.6rem">`;
+
+  for (const [name, trackIds] of playlists) {
+    const idsJson = _esc(JSON.stringify(trackIds));
+    html += `
+      <label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;cursor:pointer;font-size:.72rem;border-bottom:1px solid rgba(255,255,255,.04)">
+        <input type="checkbox" class="friend-pl-check" data-name="${_esc(name)}" data-ids="${idsJson}"
+          style="accent-color:var(--accent2);cursor:pointer;flex-shrink:0">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" title="${_esc(name)}">${_esc(name)}</span>
+        <span style="color:var(--text-dim);flex-shrink:0;font-size:.68rem">${trackIds.length} tracks</span>
+      </label>`;
+  }
+
+  html += `
+      </div>
+      <div id="friend-pl-status" style="font-size:.7rem;margin-bottom:.5rem;display:none;line-height:1.5"></div>
+      <button id="btn-import-playlists"
+        style="width:100%;padding:.45rem;background:var(--accent2);color:#fff;border:none;border-radius:6px;font-size:.75rem;cursor:pointer;font-weight:600">
+        Add selected to my Spotify
+      </button>
+    </div>`;
+
+  let resultsEl = document.getElementById('compare-results');
+  if (!resultsEl) {
+    resultsEl = document.createElement('div');
+    resultsEl.id = 'compare-results';
+    document.querySelector('#compare-modal .modal').appendChild(resultsEl);
+  }
+  resultsEl.insertAdjacentHTML('beforeend', html);
+  document.getElementById('compare-modal').classList.add('open');
+
+  document.getElementById('btn-import-playlists').addEventListener('click', _importSelectedPlaylists);
+}
+
+async function _importSelectedPlaylists() {
+  const checks = [...document.querySelectorAll('.friend-pl-check:checked')];
+  if (!checks.length) return;
+
+  const btn = document.getElementById('btn-import-playlists');
+  const statusEl = document.getElementById('friend-pl-status');
+  btn.disabled = true;
+  statusEl.style.display = 'block';
+  statusEl.style.color = 'var(--text-dim)';
+
+  const results = [];
+  for (let i = 0; i < checks.length; i++) {
+    const check = checks[i];
+    const name = check.dataset.name;
+    const trackIds = JSON.parse(check.dataset.ids);
+    statusEl.textContent = `Importing ${i + 1}/${checks.length}: ${name}…`;
+
+    try {
+      const resp = await fetch('/import-friend-playlist', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          playlist_name: name,
+          track_ids: trackIds,
+          friend_display_name: compareDisplayName,
+        }),
+      });
+      if (resp.ok) {
+        const d = await resp.json();
+        results.push({name: d.name, count: d.track_count, url: d.url, ok: true});
+      } else {
+        results.push({name, ok: false});
+      }
+    } catch {
+      results.push({name, ok: false});
+    }
+  }
+
+  const succeeded = results.filter(r => r.ok);
+  const failed = results.filter(r => !r.ok);
+  let msg = succeeded.map(r =>
+    `<a href="${_esc(r.url)}" target="_blank" style="color:var(--accent2)">${_esc(r.name)}</a> — ${r.count} tracks added`
+  ).join('<br>');
+  if (failed.length) msg += (msg ? '<br>' : '') + `<span style="color:#f87171">Failed: ${failed.map(r => _esc(r.name)).join(', ')}</span>`;
+  statusEl.innerHTML = msg || 'Done';
+  btn.disabled = false;
+  btn.textContent = 'Add more';
+}
+
 function _esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -2921,6 +3028,7 @@ document.getElementById('compare-input').addEventListener('keydown', e => {
 document.getElementById('compare-badge').addEventListener('click', () => {
   comparePoints = [];
   compareDisplayName = '';
+  friendMapPlaylists = [];
   document.getElementById('compare-badge').classList.remove('visible');
   render();
 });
