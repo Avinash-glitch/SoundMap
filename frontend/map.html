@@ -795,6 +795,73 @@
     }
     .bpi-conn-item:hover { background: rgba(255,255,255,0.06); }
 
+    #cmp-brain-view {
+      display: none;
+      position: fixed;
+      top: 52px; left: 0; right: 0; bottom: 0;
+      z-index: 6;
+      background: var(--bg);
+      flex-direction: column;
+    }
+    .cmp-names-row {
+      height: 32px; display: flex; align-items: center;
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .cmp-name-col {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      gap: 6px; font-size: 10px; font-family: 'Syne', sans-serif; font-weight: 600;
+      letter-spacing: .05em; color: var(--text-dim); text-transform: uppercase;
+      overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 12px;
+    }
+    .cmp-name-col .dot { width:7px;height:7px;border-radius:50%;background:var(--accent);flex-shrink:0; }
+    .cmp-name-sep {
+      width: 230px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 8px; letter-spacing: .1em; color: rgba(255,255,255,.2); text-transform: uppercase;
+      border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+    }
+    .cmp-main { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+    .cmp-half { flex: 1; position: relative; overflow: hidden; min-width: 0; }
+    .cmp-half svg {
+      position: absolute; left: 0; right: 0; top: 0; bottom: 44px;
+      width: 100%; height: calc(100% - 44px);
+    }
+    .cmp-half-legend {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 44px;
+      display: flex; align-items: center; padding: 0 10px; gap: 8px;
+      overflow-x: auto; scrollbar-width: none; border-top: 1px solid var(--border);
+    }
+    .cmp-half-legend::-webkit-scrollbar { display: none; }
+    .cmp-center {
+      width: 230px; flex-shrink: 0; display: flex; flex-direction: column;
+      align-items: center; padding: 20px 14px; gap: 12px;
+      border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+      background: var(--bg2); overflow-y: auto; scrollbar-width: thin;
+    }
+    .cmp-ring-wrap { position: relative; width: 96px; height: 96px; flex-shrink: 0; }
+    .cmp-ring-wrap svg { transform: rotate(-90deg); }
+    .cmp-ring-label {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1px;
+    }
+    .cmp-ring-pct { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.3rem; line-height: 1; }
+    .cmp-ring-sub { font-size: 7px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
+    .cmp-pl-pair {
+      display: grid; grid-template-columns: 1fr auto 1fr; gap: 4px;
+      align-items: center; padding: 4px 0;
+      border-bottom: 1px solid rgba(255,255,255,.05); cursor: pointer; width: 100%;
+    }
+    .cmp-pl-pair:last-child { border-bottom: none; }
+    .cmp-pl-name { font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+    .cmp-pl-name.r { text-align: right; }
+    .cmp-pl-score {
+      font-size: 8px; color: var(--accent2); background: rgba(124,106,247,.15);
+      border-radius: 3px; padding: 1px 4px; white-space: nowrap; text-align: center;
+    }
+    .cmp-section-title {
+      font-size: 8px; text-transform: uppercase; letter-spacing: .1em;
+      color: rgba(255,255,255,.3); width: 100%; text-align: center; flex-shrink: 0;
+    }
+
     /* ---- Mood playlist selection modal ---- */
     .mood-check-item {
       display: flex;
@@ -959,6 +1026,25 @@
 <!-- Brain Info Panel (right-side panel, opens on lobe click) -->
 <div id="brain-info-panel"></div>
 
+<div id="cmp-brain-view">
+  <div class="cmp-names-row">
+    <div class="cmp-name-col" id="cmp-name-me"><div class="dot"></div><span></span></div>
+    <div class="cmp-name-sep">vs</div>
+    <div class="cmp-name-col" id="cmp-name-friend"><div class="dot" style="background:#a78bfa"></div><span></span></div>
+  </div>
+  <div class="cmp-main">
+    <div class="cmp-half" id="cmp-half-me">
+      <svg id="cmp-svg-me" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="cmp-half-legend" id="cmp-legend-me"></div>
+    </div>
+    <div class="cmp-center" id="cmp-center"></div>
+    <div class="cmp-half" id="cmp-half-friend">
+      <svg id="cmp-svg-friend" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="cmp-half-legend" id="cmp-legend-friend"></div>
+    </div>
+  </div>
+</div>
+
 <div id="track-tooltip">
   <div id="tt-name"></div>
   <div class="tt-artist" id="tt-artist"></div>
@@ -974,6 +1060,12 @@
         <span id="user-name">Your Library</span>
       </div>
       <span id="user-badge-persona" style="display:none;font-size:.65rem;color:var(--text-dim);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:1.1rem"></span>
+      <div style="display:flex;align-items:center;gap:.35rem;padding-left:1.1rem;margin-top:1px">
+        <span id="uid-display" style="font-size:.6rem;color:var(--text-dim);cursor:pointer;user-select:all;letter-spacing:.01em" title="Your SoundMap ID — share this with friends"></span>
+        <button id="btn-copy-uid" title="Copy ID" style="background:none;border:none;padding:2px;cursor:pointer;color:var(--text-dim);display:flex;align-items:center;opacity:.5;transition:opacity .15s,color .15s">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+      </div>
     </div>
     <div class="compare-badge" id="compare-badge">
       <div class="dot"></div>
@@ -1378,6 +1470,11 @@ let brainHovered = null;
 let _brainCache = null;        // canvas brain cache (unused in SVG mode)
 let _svgBrainCache = null;     // SVG brain data cache
 let _svgBrainSelected = null;  // selected playlist index
+let _svgFriendBrainCache = null;
+let _svgFriendBrainSelected = null;
+let _friendColorsMap = {};
+let _cmpData = null;
+let _friendMapData = null;
 
 // Drill-down state
 let drilldownTracks = null;
@@ -1427,6 +1524,8 @@ async function loadMap() {
     // Set user name badge
     if (mapData.display_name) {
       document.getElementById('user-name').textContent = mapData.display_name;
+      const uidEl = document.getElementById('uid-display');
+      if (uidEl) uidEl.textContent = userId;
     }
     // Show Apple Music indicator if this is an Apple Music map
     if (mapData.source === 'apple') {
@@ -1525,7 +1624,9 @@ const COMPARE_COLOR = '#818cf8';
 let activeGenreFilter = null;
 
 function render() {
-  if (comparePoints.length) { _hideBrainOverlay(); renderWithCompare(); return; }
+  if (comparePoints.length && brainMode) { _hideBrainOverlay(); _showCompareBrainView(); return; }
+  if (comparePoints.length) { _hideBrainOverlay(); _hideCompareBrainView(); renderWithCompare(); return; }
+  _hideCompareBrainView();
   if (brainMode) { _showBrainOverlay(); return; }
   _hideBrainOverlay();
   _renderDots();
@@ -1698,14 +1799,13 @@ function _brainInPolySVG(x, y) {
   return inside;
 }
 
-function _computeSVGBrainData() {
-  const plNames = (mapData.playlists||[])
+function _computeSVGBrainDataFor(pts, md) {
+  const plNames = (md.playlists||[])
     .map(p=>p.name)
-    .filter(name=>points.some(p=>(p.playlists||[]).includes(name)));
+    .filter(name=>pts.some(p=>(p.playlists||[]).includes(name)));
   if (!plNames.length) return null;
   const N = plNames.length;
 
-  // Generate seeds inside brain (1000×680 space) via Lloyd's relaxation
   let seeds = [];
   let tries = 0;
   while (seeds.length < N && tries < N*800) {
@@ -1732,7 +1832,6 @@ function _computeSVGBrainData() {
   const del = d3.Delaunay.from(seeds);
   const vor = del.voronoi([-500,-500,1500,1200]);
 
-  // Nearest-neighbour connections
   const conns = [];
   const nc = Math.max(2, Math.ceil(N/4));
   for (let i=0; i<N; i++) {
@@ -1753,65 +1852,62 @@ function _computeSVGBrainData() {
   return { seeds, conns, plNames, del, vor, brainPath, fissuePath, N };
 }
 
-function _buildBrainSVGMarkup() {
-  if (!mapData||!points.length) return '';
-  _svgBrainCache = _computeSVGBrainData();
-  if (!_svgBrainCache) return '<text x="500" y="340" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="14" font-family="\'DM Mono\',monospace">No playlists to display</text>';
+function _computeSVGBrainData() {
+  return _computeSVGBrainDataFor(points, mapData);
+}
 
-  const {seeds,conns,plNames,vor,brainPath,fissuePath,N} = _svgBrainCache;
+function _buildBrainSVGMarkupFor(cache, pColors, pfx) {
+  const {seeds,conns,plNames,vor,brainPath,fissuePath,N} = cache;
 
   let defs = `<defs>
-    <clipPath id="bcp"><path d="${brainPath}"/></clipPath>
-    <filter id="og" x="-8%" y="-8%" width="116%" height="116%">
+    <clipPath id="${pfx}bcp"><path d="${brainPath}"/></clipPath>
+    <filter id="${pfx}og" x="-8%" y="-8%" width="116%" height="116%">
       <feGaussianBlur stdDeviation="5" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
-    <filter id="dg" x="-200%" y="-200%" width="500%" height="500%">
+    <filter id="${pfx}dg" x="-200%" y="-200%" width="500%" height="500%">
       <feGaussianBlur stdDeviation="6" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>`;
   for (let i=0;i<N;i++) {
-    const col = playlistColors[plNames[i]]||COLOR_UNTAGGED;
+    const col = pColors[plNames[i]]||COLOR_UNTAGGED;
     const [sx,sy]=seeds[i];
     defs += `
-    <radialGradient id="rg${i}" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="260" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="${col}" stop-opacity="0.44" id="rg${i}a"/>
-      <stop offset="100%" stop-color="${col}" stop-opacity="0.10" id="rg${i}b"/>
+    <radialGradient id="${pfx}rg${i}" cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="${col}" stop-opacity="0.44" id="${pfx}rg${i}a"/>
+      <stop offset="100%" stop-color="${col}" stop-opacity="0.10" id="${pfx}rg${i}b"/>
     </radialGradient>
-    <filter id="gl${i}" x="-55%" y="-55%" width="210%" height="210%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur" id="gl${i}gb"/>
+    <filter id="${pfx}gl${i}" x="-55%" y="-55%" width="210%" height="210%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur" id="${pfx}gl${i}gb"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>`;
   }
   defs += '</defs>';
 
-  // Voronoi cells clipped to brain
-  let cells = '<g clip-path="url(#bcp)">';
+  let cells = `<g clip-path="url(#${pfx}bcp)">`;
   for (let i=0;i<N;i++) {
     const cell = vor.cellPolygon(i);
     if (!cell) continue;
     const dp = 'M'+cell.map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('L')+'Z';
-    cells += `<path d="${dp}" fill="url(#rg${i})" filter="url(#gl${i})"
+    cells += `<path d="${dp}" fill="url(#${pfx}rg${i})" filter="url(#${pfx}gl${i})"
       stroke="rgba(0,0,0,0.5)" stroke-width="2.5"
       class="bv-cell" data-idx="${i}" data-name="${_esc(plNames[i])}"
       style="cursor:pointer"/>`;
   }
   cells += '</g>';
 
-  // Gyri fold lines
-  let gyri = '<g clip-path="url(#bcp)" style="pointer-events:none">';
+  let gyri = `<g clip-path="url(#${pfx}bcp)" style="pointer-events:none">`;
   for (const gp of GYRI_SVG) {
     gyri += `<path d="${gp}" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" stroke-linecap="round"/>`;
   }
   gyri += '</g>';
 
-  // Connection lines + animated pulses
-  let connLines = '<g clip-path="url(#bcp)" style="pointer-events:none">';
+  let connLines = `<g clip-path="url(#${pfx}bcp)" style="pointer-events:none">`;
   for (let ci=0;ci<conns.length;ci++) {
     const [a,b2]=conns[ci];
     const [ax,ay]=seeds[a],[bx2,by]=seeds[b2];
-    const colA=playlistColors[plNames[a]]||'#fff';
-    const colB=playlistColors[plNames[b2]]||'#fff';
+    const colA=pColors[plNames[a]]||'#fff';
+    const colB=pColors[plNames[b2]]||'#fff';
     const dur1=`${(3.2+ci*0.38).toFixed(2)}s`;
     const dur2=`${(3.8+ci*0.32).toFixed(2)}s`;
     const beg2=`${((3.2+ci*0.38)/2).toFixed(2)}s`;
@@ -1831,11 +1927,11 @@ function _buildBrainSVGMarkup() {
   connLines += '</g>';
 
   const outline = `
-  <path d="${brainPath}" fill="none" stroke="rgba(255,255,255,0.52)" stroke-width="2" filter="url(#og)" style="pointer-events:none"/>
-  <path d="${brainPath}" fill="none" stroke="rgba(255,255,255,0.09)" stroke-width="10" clip-path="url(#bcp)" style="pointer-events:none"/>`;
+  <path d="${brainPath}" fill="none" stroke="rgba(255,255,255,0.52)" stroke-width="2" filter="url(#${pfx}og)" style="pointer-events:none"/>
+  <path d="${brainPath}" fill="none" stroke="rgba(255,255,255,0.09)" stroke-width="10" clip-path="url(#${pfx}bcp)" style="pointer-events:none"/>`;
 
   const fissure = `
-  <g clip-path="url(#bcp)" style="pointer-events:none">
+  <g clip-path="url(#${pfx}bcp)" style="pointer-events:none">
     <path d="${fissuePath}" fill="none" stroke="rgba(0,0,0,0.75)" stroke-width="5"/>
     <path d="${fissuePath}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
   </g>`;
@@ -1846,27 +1942,33 @@ function _buildBrainSVGMarkup() {
   <text x="752" y="40" text-anchor="middle" fill="rgba(255,255,255,0.18)"
     font-size="9" font-family="'DM Mono',monospace" letter-spacing="0.16em" style="pointer-events:none">RIGHT HEMISPHERE</text>`;
 
-  // Seed dots + animated pulse rings
   let seedDots = '<g style="pointer-events:none">';
   for (let i=0;i<N;i++) {
     const [sx,sy]=seeds[i];
-    const col=playlistColors[plNames[i]]||COLOR_UNTAGGED;
+    const col=pColors[plNames[i]]||COLOR_UNTAGGED;
     const dur=`${(2.4+i*0.28).toFixed(2)}s`;
     seedDots += `
     <circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="4.5"
-      fill="${col}" filter="url(#dg)" opacity="0.7" class="bv-seed" data-idx="${i}">
+      fill="${col}" filter="url(#${pfx}dg)" opacity="0.7" class="bv-seed" data-idx="${i}">
       <animate attributeName="r" values="4.5;6;4.5" dur="${dur}" repeatCount="indefinite"/>
     </circle>`;
   }
   seedDots += '</g>';
 
-  // Hover/select label layer (updated dynamically by JS)
-  const labelLayer = '<g id="bv-labels"></g>';
+  const labelLayer = `<g id="${pfx}bv-labels"></g>`;
+
+  return defs+cells+gyri+connLines+outline+fissure+hemLabels+seedDots+labelLayer;
+}
+
+function _buildBrainSVGMarkup() {
+  if (!mapData||!points.length) return '';
+  _svgBrainCache = _computeSVGBrainData();
+  if (!_svgBrainCache) return '<text x="500" y="340" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="14" font-family="\'DM Mono\',monospace">No playlists to display</text>';
+  const markup = _buildBrainSVGMarkupFor(_svgBrainCache, playlistColors, '');
   const hint = `<text x="500" y="660" id="bv-hint" text-anchor="middle"
     fill="rgba(255,255,255,0.18)" font-size="10" font-family="'DM Mono',monospace"
     style="pointer-events:none">hover or click a lobe to explore · double-click to drill down</text>`;
-
-  return defs+cells+gyri+connLines+outline+fissure+hemLabels+seedDots+labelLayer+hint;
+  return markup + hint;
 }
 
 function _showBrainOverlay() {
@@ -1893,83 +1995,7 @@ function _hideBrainOverlay() {
 function _wireBrainSVGEvents() {
   if (!_svgBrainCache) return;
   const svgEl = document.getElementById('brain-svg');
-  const labelLayer = svgEl.querySelector('#bv-labels');
-  const hintEl = svgEl.querySelector('#bv-hint');
-  const { seeds, conns, plNames } = _svgBrainCache;
-
-  svgEl.querySelectorAll('.bv-cell').forEach(cell => {
-    const idx = parseInt(cell.dataset.idx);
-    const name = cell.dataset.name;
-    const col = playlistColors[name]||COLOR_UNTAGGED;
-
-    cell.addEventListener('mouseenter', () => {
-      // Boost gradient opacity
-      svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.68');
-      svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.18');
-      svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','15');
-      // Show label over seed
-      const [sx,sy]=seeds[idx];
-      const label = name.length>20 ? name.slice(0,18)+'…' : name;
-      const trackCount = points.filter(p=>(p.playlists||[]).includes(name)).length;
-      labelLayer.innerHTML = `
-        <rect x="${sx-68}" y="${sy-38}" width="136" height="22" rx="4" fill="rgba(5,5,12,0.85)"/>
-        <text x="${sx}" y="${sy-22}" text-anchor="middle" fill="${col}"
-          font-size="10.5" font-family="'DM Mono',monospace" font-weight="500">${_esc(label)}</text>
-        <rect x="${sx-52}" y="${sy-16}" width="104" height="14" rx="3" fill="rgba(5,5,12,0.7)"/>
-        <text x="${sx}" y="${sy-6}" text-anchor="middle" fill="rgba(255,255,255,0.45)"
-          font-size="8" font-family="'DM Mono',monospace">${trackCount} tracks · click to explore</text>`;
-      if (hintEl) hintEl.style.display = 'none';
-      // Highlight connected edges
-      svgEl.querySelectorAll('.bv-conn').forEach(ln => {
-        if (parseInt(ln.dataset.a)===idx||parseInt(ln.dataset.b)===idx) {
-          ln.setAttribute('stroke',col);
-          ln.setAttribute('stroke-width','1.8');
-          ln.setAttribute('opacity','0.55');
-        }
-      });
-    });
-
-    cell.addEventListener('mouseleave', () => {
-      if (_svgBrainSelected !== idx) {
-        svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.44');
-        svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.10');
-        svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','7');
-      }
-      labelLayer.innerHTML = '';
-      if (hintEl) hintEl.style.display = '';
-      svgEl.querySelectorAll('.bv-conn').forEach(ln => {
-        if (parseInt(ln.dataset.a)===idx||parseInt(ln.dataset.b)===idx) {
-          ln.setAttribute('stroke','rgba(255,255,255,0.055)');
-          ln.setAttribute('stroke-width','0.8');
-          ln.setAttribute('opacity','1');
-        }
-      });
-    });
-
-    cell.addEventListener('click', () => {
-      if (_svgBrainSelected === idx) {
-        _svgBrainSelected = null;
-        document.getElementById('brain-info-panel').classList.remove('open');
-        svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.44');
-        svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.10');
-        svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','7');
-      } else {
-        if (_svgBrainSelected !== null) {
-          const prev = _svgBrainSelected;
-          svgEl.querySelector(`#rg${prev}a`)?.setAttribute('stop-opacity','0.44');
-          svgEl.querySelector(`#rg${prev}b`)?.setAttribute('stop-opacity','0.10');
-          svgEl.querySelector(`#gl${prev}gb`)?.setAttribute('stdDeviation','7');
-        }
-        _svgBrainSelected = idx;
-        svgEl.querySelector(`#rg${idx}a`)?.setAttribute('stop-opacity','0.78');
-        svgEl.querySelector(`#rg${idx}b`)?.setAttribute('stop-opacity','0.22');
-        svgEl.querySelector(`#gl${idx}gb`)?.setAttribute('stdDeviation','20');
-        _showBrainInfoPanel(idx, name);
-      }
-    });
-
-    cell.addEventListener('dblclick', () => _openDrillDown(name));
-  });
+  _wireBrainSVGEventsOn(svgEl, _svgBrainCache, playlistColors, '', false);
 }
 
 function _showBrainInfoPanel(idx, name) {
@@ -2040,6 +2066,272 @@ function _showBrainInfoPanel(idx, name) {
       _showBrainInfoPanel(j,plNames[j]);
     });
   });
+}
+
+function _buildPlaylistColorsFor(playlists) {
+  const map = {};
+  (playlists || []).forEach((pl, i) => {
+    const hue = Math.round((i / Math.max(playlists.length, 1)) * 360);
+    map[pl.name || pl] = `hsl(${hue}, 70%, 62%)`;
+  });
+  return map;
+}
+
+function _wireBrainSVGEventsOn(svgEl, cache, pColors, pfx, isFriend) {
+  const labelLayer = svgEl.querySelector(`#${pfx}bv-labels`);
+  const hintEl = svgEl.querySelector('#bv-hint');
+  const { seeds, conns, plNames } = cache;
+  const selectedTracker = isFriend ? { v: null } : null;
+
+  svgEl.querySelectorAll('.bv-cell').forEach(cell => {
+    const idx = parseInt(cell.dataset.idx);
+    const name = cell.dataset.name;
+    const col = pColors[name]||COLOR_UNTAGGED;
+
+    cell.addEventListener('mouseenter', () => {
+      svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.68');
+      svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.18');
+      svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','15');
+      const [sx,sy]=seeds[idx];
+      const label = name.length>20 ? name.slice(0,18)+'…' : name;
+      const srcPts = isFriend ? comparePoints : points;
+      const trackCount = srcPts.filter(p=>(p.playlists||[]).includes(name)).length;
+      if (labelLayer) labelLayer.innerHTML = `
+        <rect x="${sx-68}" y="${sy-38}" width="136" height="22" rx="4" fill="rgba(5,5,12,0.85)"/>
+        <text x="${sx}" y="${sy-22}" text-anchor="middle" fill="${col}"
+          font-size="10.5" font-family="'DM Mono',monospace" font-weight="500">${_esc(label)}</text>
+        <rect x="${sx-52}" y="${sy-16}" width="104" height="14" rx="3" fill="rgba(5,5,12,0.7)"/>
+        <text x="${sx}" y="${sy-6}" text-anchor="middle" fill="rgba(255,255,255,0.45)"
+          font-size="8" font-family="'DM Mono',monospace">${trackCount} tracks · click to explore</text>`;
+      if (hintEl) hintEl.style.display = 'none';
+      svgEl.querySelectorAll('.bv-conn').forEach(ln => {
+        if (parseInt(ln.dataset.a)===idx||parseInt(ln.dataset.b)===idx) {
+          ln.setAttribute('stroke',col);
+          ln.setAttribute('stroke-width','1.8');
+          ln.setAttribute('opacity','0.55');
+        }
+      });
+    });
+
+    cell.addEventListener('mouseleave', () => {
+      const isSel = isFriend ? (selectedTracker && selectedTracker.v === idx) : (_svgBrainSelected === idx);
+      if (!isSel) {
+        svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.44');
+        svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.10');
+        svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','7');
+      }
+      if (labelLayer) labelLayer.innerHTML = '';
+      if (hintEl) hintEl.style.display = '';
+      svgEl.querySelectorAll('.bv-conn').forEach(ln => {
+        if (parseInt(ln.dataset.a)===idx||parseInt(ln.dataset.b)===idx) {
+          ln.setAttribute('stroke','rgba(255,255,255,0.055)');
+          ln.setAttribute('stroke-width','0.8');
+          ln.setAttribute('opacity','1');
+        }
+      });
+    });
+
+    cell.addEventListener('click', () => {
+      if (isFriend) {
+        if (selectedTracker.v === idx) {
+          selectedTracker.v = null;
+          svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.44');
+          svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.10');
+          svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','7');
+          document.getElementById('brain-info-panel').classList.remove('open');
+        } else {
+          if (selectedTracker.v !== null) {
+            const prev = selectedTracker.v;
+            svgEl.querySelector(`#${pfx}rg${prev}a`)?.setAttribute('stop-opacity','0.44');
+            svgEl.querySelector(`#${pfx}rg${prev}b`)?.setAttribute('stop-opacity','0.10');
+            svgEl.querySelector(`#${pfx}gl${prev}gb`)?.setAttribute('stdDeviation','7');
+          }
+          selectedTracker.v = idx;
+          svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.78');
+          svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.22');
+          svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','20');
+          _showFriendLobePanel(idx, name, cache, pColors);
+        }
+      } else {
+        if (_svgBrainSelected === idx) {
+          _svgBrainSelected = null;
+          document.getElementById('brain-info-panel').classList.remove('open');
+          svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.44');
+          svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.10');
+          svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','7');
+        } else {
+          if (_svgBrainSelected !== null) {
+            const prev = _svgBrainSelected;
+            svgEl.querySelector(`#${pfx}rg${prev}a`)?.setAttribute('stop-opacity','0.44');
+            svgEl.querySelector(`#${pfx}rg${prev}b`)?.setAttribute('stop-opacity','0.10');
+            svgEl.querySelector(`#${pfx}gl${prev}gb`)?.setAttribute('stdDeviation','7');
+          }
+          _svgBrainSelected = idx;
+          svgEl.querySelector(`#${pfx}rg${idx}a`)?.setAttribute('stop-opacity','0.78');
+          svgEl.querySelector(`#${pfx}rg${idx}b`)?.setAttribute('stop-opacity','0.22');
+          svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','20');
+          _showBrainInfoPanel(idx, name);
+        }
+      }
+    });
+
+    if (!isFriend) {
+      cell.addEventListener('dblclick', () => _openDrillDown(name));
+    }
+  });
+}
+
+function _buildCmpLegend(containerId, plNames, pColors) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = plNames.map(name => {
+    const col = pColors[name] || COLOR_UNTAGGED;
+    return `<div style="display:flex;align-items:center;gap:5px;flex-shrink:0;font-size:9px;color:var(--text-dim);white-space:nowrap">
+      <div style="width:6px;height:6px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col}80;flex-shrink:0"></div>
+      ${_esc(name)}</div>`;
+  }).join('');
+}
+
+function _buildCmpCenter(d) {
+  const el = document.getElementById('cmp-center');
+  if (!el || !d) return;
+  const pct = Math.round(d.compatibility * 100);
+  const C = 2 * Math.PI * 38;
+  const offset = C * (1 - d.compatibility);
+  const color = pct >= 70 ? '#34d399' : pct >= 40 ? '#a78bfa' : '#f87171';
+
+  const pairsHtml = (d.similar_playlists || []).slice(0, 8).map(p => `
+    <div class="cmp-pl-pair">
+      <div class="cmp-pl-name" title="${_esc(p.playlist_a)}">${_esc(p.playlist_a)}</div>
+      <div class="cmp-pl-score">${Math.round(p.score * 100)}%</div>
+      <div class="cmp-pl-name r" title="${_esc(p.playlist_b)}">${_esc(p.playlist_b)}</div>
+    </div>`).join('');
+
+  el.innerHTML = `
+    <div class="cmp-ring-wrap">
+      <svg width="96" height="96" viewBox="0 0 96 96">
+        <circle cx="48" cy="48" r="38" fill="none" stroke="var(--border)" stroke-width="9"/>
+        <circle cx="48" cy="48" r="38" fill="none" stroke="${color}" stroke-width="9"
+          stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"/>
+      </svg>
+      <div class="cmp-ring-label">
+        <span class="cmp-ring-pct" style="color:${color}">${pct}%</span>
+        <span class="cmp-ring-sub">match</span>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--accent);text-align:center">${d.shared_count} shared tracks</div>
+    ${pairsHtml ? `<div class="cmp-section-title">Similar Playlists</div><div style="width:100%">${pairsHtml}</div>` : ''}
+    <div style="font-size:8px;color:rgba(255,255,255,.2);text-align:center;line-height:1.4;margin-top:4px">Click a lobe on the right<br>to copy your friend's playlist</div>
+  `;
+}
+
+function _showFriendLobePanel(idx, name, cache, pColors) {
+  const panel = document.getElementById('brain-info-panel');
+  const { N } = cache;
+  const col = pColors[name] || COLOR_UNTAGGED;
+  const trackIds = comparePoints
+    .filter(p => (p.playlists || []).includes(name))
+    .map(p => p.id).filter(Boolean);
+  const trackCount = trackIds.length;
+  const side = idx < Math.ceil(N / 2) ? 'LEFT' : 'RIGHT';
+
+  panel.innerHTML = `<div class="bpi-inner">
+    <div>
+      <div style="font-size:9px;color:var(--text-dim);letter-spacing:.14em;text-transform:uppercase;margin-bottom:5px">
+        ${_esc(compareDisplayName)}'s ${side} LOBE
+      </div>
+      <div style="font-family:Syne,sans-serif;font-weight:700;font-size:20px;line-height:1.2;color:${col};text-shadow:0 0 28px ${col}40">
+        ${_esc(name)}
+      </div>
+    </div>
+    <div style="width:44px;height:3px;border-radius:2px;background:${col};opacity:.5"></div>
+    <div style="padding:12px 8px;background:var(--surface);border-radius:8px;text-align:center">
+      <div style="font-family:Syne,sans-serif;font-weight:700;font-size:24px;color:${col}">${trackCount}</div>
+      <div style="font-size:9px;color:var(--text-dim);margin-top:3px;letter-spacing:.1em">TRACKS</div>
+    </div>
+    <button id="bpi-copy-spotify" style="padding:10px;background:var(--accent);border:none;border-radius:8px;color:#000;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">
+      Add to my Spotify
+    </button>
+    <div id="bpi-copy-status" style="font-size:10px;color:var(--text-dim);text-align:center;display:none;line-height:1.5"></div>
+    <button id="bpi-copy-desel" style="padding:8px;background:transparent;border:none;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;width:100%;text-align:center">
+      Close
+    </button>
+  </div>`;
+
+  panel.classList.add('open');
+
+  panel.querySelector('#bpi-copy-spotify').addEventListener('click', async () => {
+    const btn = panel.querySelector('#bpi-copy-spotify');
+    const status = panel.querySelector('#bpi-copy-status');
+    btn.disabled = true;
+    btn.textContent = 'Copying…';
+    status.style.display = 'block';
+    status.textContent = `Adding ${trackCount} tracks…`;
+    try {
+      const resp = await fetch('/import-friend-playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playlist_name: name, track_ids: trackIds, friend_display_name: compareDisplayName }),
+      });
+      if (!resp.ok) throw new Error();
+      const d = await resp.json();
+      status.style.color = 'var(--accent)';
+      status.textContent = `Added ${d.track_count} tracks to "${d.name}"`;
+      btn.textContent = 'Done!';
+    } catch {
+      status.style.color = '#f87171';
+      status.textContent = 'Failed — are you logged in to Spotify?';
+      btn.disabled = false;
+      btn.textContent = 'Retry';
+    }
+  });
+
+  panel.querySelector('#bpi-copy-desel').addEventListener('click', () => {
+    panel.classList.remove('open');
+    _svgFriendBrainSelected = null;
+  });
+}
+
+function _hideCompareBrainView() {
+  document.getElementById('cmp-brain-view').style.display = 'none';
+}
+
+function _showCompareBrainView() {
+  const view = document.getElementById('cmp-brain-view');
+  view.style.display = 'flex';
+  canvas.style.opacity = '0';
+
+  document.querySelector('#cmp-name-me span').textContent = mapData?.display_name || userId;
+  document.querySelector('#cmp-name-friend span').textContent = compareDisplayName;
+
+  const svgMe = document.getElementById('cmp-svg-me');
+  const myKey = 'cm' + (points.length || 0);
+  if (svgMe.dataset.built !== myKey) {
+    if (!_svgBrainCache) _svgBrainCache = _computeSVGBrainData();
+    if (_svgBrainCache) {
+      svgMe.innerHTML = _buildBrainSVGMarkupFor(_svgBrainCache, playlistColors, 'cm');
+      svgMe.dataset.built = myKey;
+      _wireBrainSVGEventsOn(svgMe, _svgBrainCache, playlistColors, 'cm', false);
+      _buildCmpLegend('cmp-legend-me', _svgBrainCache.plNames, playlistColors);
+    }
+  }
+
+  const svgFriend = document.getElementById('cmp-svg-friend');
+  const friendKey = 'cf' + (comparePoints.length || 0);
+  if (svgFriend.dataset.built !== friendKey && _friendMapData) {
+    if (!_svgFriendBrainCache) {
+      _svgFriendBrainCache = _computeSVGBrainDataFor(comparePoints, _friendMapData);
+      _friendColorsMap = _buildPlaylistColorsFor(_friendMapData.playlists || []);
+    }
+    if (_svgFriendBrainCache) {
+      svgFriend.innerHTML = _buildBrainSVGMarkupFor(_svgFriendBrainCache, _friendColorsMap, 'cf');
+      svgFriend.dataset.built = friendKey;
+      _wireBrainSVGEventsOn(svgFriend, _svgFriendBrainCache, _friendColorsMap, 'cf', true);
+      _buildCmpLegend('cmp-legend-friend', _svgFriendBrainCache.plNames, _friendColorsMap);
+    }
+  }
+
+  if (_cmpData) _buildCmpCenter(_cmpData);
 }
 
 function _selectBrainLobeByName(name) {
@@ -3593,6 +3885,7 @@ document.getElementById('btn-brain').addEventListener('click', () => {
     btn.lastChild.textContent = ' Brain';
     canvas.style.cursor = 'grab';
   }
+  if (!brainMode) _hideCompareBrainView();
   render();
 });
 
@@ -3720,6 +4013,10 @@ async function loadCompare(friendId) {
     if (!resp.ok) throw new Error(`Server error (${resp.status})`);
     const data = await resp.json();
 
+    _friendMapData = data;
+    _svgFriendBrainCache = null;
+    _friendColorsMap = {};
+    _cmpData = null;
     comparePoints = normaliseComparePoints(data.points);
     compareDisplayName = data.display_name || friendId;
     friendMapPlaylists = data.playlists || [];
@@ -3732,7 +4029,11 @@ async function loadCompare(friendId) {
     const cResp = await fetch(`/compare/${encodeURIComponent(userId)}/${encodeURIComponent(friendId)}`);
     if (cResp.ok) {
       const cData = await cResp.json();
+      _cmpData = cData;
       _renderCompareResults(cData);
+      if (document.getElementById('cmp-brain-view').style.display !== 'none') {
+        _buildCmpCenter(_cmpData);
+      }
     }
 
     _renderFriendPlaylists();
@@ -3929,8 +4230,22 @@ document.getElementById('compare-badge').addEventListener('click', () => {
   comparePoints = [];
   compareDisplayName = '';
   friendMapPlaylists = [];
+  _friendMapData = null;
+  _svgFriendBrainCache = null;
+  _friendColorsMap = {};
+  _cmpData = null;
+  _hideCompareBrainView();
   document.getElementById('compare-badge').classList.remove('visible');
   render();
+});
+
+document.getElementById('btn-copy-uid')?.addEventListener('click', () => {
+  navigator.clipboard.writeText(userId).then(() => {
+    const btn = document.getElementById('btn-copy-uid');
+    btn.style.color = 'var(--accent)';
+    btn.style.opacity = '1';
+    setTimeout(() => { btn.style.color = ''; btn.style.opacity = ''; }, 1500);
+  });
 });
 
 // Close modal on backdrop click
