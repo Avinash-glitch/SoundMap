@@ -2221,10 +2221,11 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
   const panel = document.getElementById('brain-info-panel');
   const { N, otherNames = [] } = cache;
   const col = name === 'Others' ? COLOR_OTHERS : (pColors[name] || COLOR_UNTAGGED);
-  const trackIds = name === 'Others'
-    ? comparePoints.filter(p=>(p.playlists||[]).some(pl=>otherNames.includes(pl))).map(p=>p.id).filter(Boolean)
-    : comparePoints.filter(p => (p.playlists || []).includes(name)).map(p => p.id).filter(Boolean);
-  const trackCount = trackIds.length;
+  const matchedPts = name === 'Others'
+    ? comparePoints.filter(p=>(p.playlists||[]).some(pl=>otherNames.includes(pl)))
+    : comparePoints.filter(p => (p.playlists || []).includes(name));
+  const trackMeta = matchedPts.filter(p=>p.id).map(p=>({id:p.id,name:p.name||'',artist:p.artist||'',isrc:p.isrc||null}));
+  const trackCount = trackMeta.length;
   const side = idx < Math.ceil(N / 2) ? 'LEFT' : 'RIGHT';
 
   panel.innerHTML = `<div class="bpi-inner">
@@ -2258,14 +2259,14 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
     btn.disabled = true;
     btn.textContent = 'Copying…';
     status.style.display = 'block';
-    status.textContent = `Adding ${trackCount} tracks…`;
-    console.log('[import] playlist:', name, '| tracks:', trackIds.length, '| friend:', compareDisplayName);
+    status.textContent = `Adding ${trackMeta.length} tracks…`;
+    console.log('[import] playlist:', name, '| tracks:', trackMeta.length, '| friend:', compareDisplayName);
     try {
-      if (!trackIds.length) throw new Error('No tracks found for this playlist');
+      if (!trackMeta.length) throw new Error('No tracks found for this playlist');
       const resp = await fetch('/import-friend-playlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlist_name: name, track_ids: trackIds, friend_display_name: compareDisplayName }),
+        body: JSON.stringify({ playlist_name: name, tracks: trackMeta, friend_display_name: compareDisplayName }),
       });
       console.log('[import] response status:', resp.status);
       if (resp.status === 401) {

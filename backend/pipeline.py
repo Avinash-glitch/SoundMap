@@ -812,7 +812,7 @@ def _fetch_apple_library(
             "duration_ms": attrs.get("durationInMillis") or 0,
             "popularity": 50,
             "release_year": release_year,
-            "isrc": None,
+            "isrc": attrs.get("isrc"),
             "playlists": track_to_pls.get(tid, []),
             "genre_tags": [g.lower() for g in genre_names[:5]],
             "play_score": 1,

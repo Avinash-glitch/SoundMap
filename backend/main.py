@@ -869,15 +869,65 @@ async def get_map(user_id: str) -> JSONResponse:
     return JSONResponse(data)
 
 
+def _resolve_to_spotify_uris(tracks: list[dict], h: dict) -> list[str]:
+    """
+    Convert a list of track dicts to spotify:track:ID URIs.
+    Handles both Spotify tracks (direct) and Apple Music tracks (resolved via ISRC or name search).
+    Each track dict: {id, name, artist, isrc}
+    """
+    import re
+    spotify_id_re = re.compile(r'^[A-Za-z0-9]{22}$')
+    uris: list[str] = []
+    for t in tracks:
+        tid = t.get("id") or ""
+        if spotify_id_re.match(tid):
+            uris.append(f"spotify:track:{tid}")
+            continue
+        # Apple Music ID — resolve via ISRC first, then name+artist fallback
+        spotify_id = None
+        isrc = t.get("isrc")
+        if isrc:
+            r = _requests.get(
+                "https://api.spotify.com/v1/search",
+                headers=h,
+                params={"q": f"isrc:{isrc}", "type": "track", "limit": 1},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                items = (r.json().get("tracks") or {}).get("items") or []
+                if items:
+                    spotify_id = items[0]["id"]
+        if not spotify_id:
+            name = t.get("name") or ""
+            artist = t.get("artist") or ""
+            if name:
+                q = f"track:{name}"
+                if artist:
+                    q += f" artist:{artist}"
+                r = _requests.get(
+                    "https://api.spotify.com/v1/search",
+                    headers=h,
+                    params={"q": q, "type": "track", "limit": 1},
+                    timeout=10,
+                )
+                if r.status_code == 200:
+                    items = (r.json().get("tracks") or {}).get("items") or []
+                    if items:
+                        spotify_id = items[0]["id"]
+        if spotify_id:
+            uris.append(f"spotify:track:{spotify_id}")
+    return uris
+
+
 @app.post("/import-friend-playlist")
 async def import_friend_playlist(request: Request) -> JSONResponse:
     """
     Copy a friend's playlist into the logged-in user's Spotify library.
 
     Body: {
-      "playlist_name": str,          # original playlist name
-      "track_ids": [str, ...],       # Spotify track IDs from friend's map
-      "friend_display_name": str     # used to label the new playlist
+      "playlist_name": str,
+      "tracks": [{id, name, artist, isrc}, ...],  # full track objects for Apple Music resolution
+      "friend_display_name": str
     }
     """
     user_id = request.session.get("user_id")
@@ -890,20 +940,20 @@ async def import_friend_playlist(request: Request) -> JSONResponse:
     try:
         body = await request.json()
         playlist_name: str = (body.get("playlist_name") or "").strip()
-        track_ids: list[str] = body.get("track_ids") or []
+        tracks: list[dict] = body.get("tracks") or []
         friend_name: str = (body.get("friend_display_name") or "Friend").strip()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
     if not playlist_name:
         raise HTTPException(status_code=400, detail="playlist_name required")
-    if not track_ids:
-        raise HTTPException(status_code=400, detail="track_ids required")
+    if not tracks:
+        raise HTTPException(status_code=400, detail="tracks required")
 
     h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     new_name = f"{playlist_name} (from {friend_name})"
-    print(f"[import-friend-playlist] user={user_id} | playlist='{new_name}' | tracks={len(track_ids)}")
+    print(f"[import-friend-playlist] user={user_id} | playlist='{new_name}' | tracks={len(tracks)}")
 
     create_resp = _requests.post(
         "https://api.spotify.com/v1/me/playlists",
@@ -923,7 +973,9 @@ async def import_friend_playlist(request: Request) -> JSONResponse:
     pl_id = pl_data["id"]
     pl_url = pl_data["external_urls"]["spotify"]
 
-    uris = [f"spotify:track:{tid}" for tid in track_ids if tid]
+    uris = _resolve_to_spotify_uris(tracks, h)
+    print(f"[import-friend-playlist] resolved {len(uris)}/{len(tracks)} tracks to Spotify URIs")
+
     added = 0
     for i in range(0, len(uris), 100):
         r = _requests.post(
