@@ -107,7 +107,7 @@ def _start_login(
         "scope": SCOPES,
         "show_dialog": "true",
     }
-    return RedirectResponse(f"{SPOTIFY_AUTH_URL}?{urlencode(params)}")
+    return RedirectResponse(f"{SPOTIFY_AUTH_URL}?{urlencode(params)}", status_code=303)
 
 
 @router.get("/callback")
