@@ -14,12 +14,16 @@
       --bg: #0a0a0f;
       --bg2: #111118;
       --surface: #18181f;
+      --surface2: #1c1d23;
       --border: #2a2a35;
       --text: #e8e8f0;
       --text-dim: #888899;
       --accent: #1db954;
       --accent-dim: #158a3e;
       --accent-glow: rgba(29, 185, 84, 0.15);
+      --compare: #7c5cff;
+      --apple: #fc3158;
+      --destructive: #ef4444;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -967,43 +971,294 @@
       white-space: nowrap;
     }
 
+    /* ---- Mobile app shell from soundmap-static ---- */
+    .mobile-toolbar,
+    .mobile-more-sheet {
+      display: none;
+    }
+
+    .mobile-toolbar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 45;
+      background: rgba(22,23,28,.94);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid var(--border);
+      padding: 8px 6px calc(8px + env(safe-area-inset-bottom, 0px));
+      justify-content: space-around;
+    }
+
+    .mobile-toolbar button {
+      min-width: 44px;
+      min-height: 44px;
+      flex: 1;
+      background: transparent;
+      border: 0;
+      color: var(--text-dim);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    .mobile-toolbar button.active,
+    .mobile-toolbar button:focus-visible {
+      color: var(--accent);
+      outline: none;
+    }
+
+    .mobile-toolbar svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .mobile-more-sheet {
+      position: fixed;
+      inset: auto 0 0 0;
+      z-index: 60;
+      background: rgba(10,10,15,.65);
+      min-height: 100%;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 0 10px calc(10px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .mobile-more-sheet.open { display: flex; }
+
+    .mobile-more-panel {
+      width: min(420px, 100%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px 14px 10px 10px;
+      padding: 10px;
+      box-shadow: 0 -18px 60px rgba(0,0,0,.4);
+    }
+
+    .mobile-more-title {
+      padding: 8px 8px 10px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: .92rem;
+    }
+
+    .mobile-more-action {
+      width: 100%;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 12px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: .82rem;
+      cursor: pointer;
+      margin-bottom: 8px;
+      text-align: left;
+    }
+
+    .mobile-more-action.apple { color: #ff7a8f; border-color: rgba(252,49,88,.35); }
+    .mobile-more-action.danger { color: #f87171; border-color: rgba(239,68,68,.35); }
+
     /* ---- Mobile ---- */
     @media (max-width: 600px) {
+      html, body { background: #0f1014; }
       .legend { display: none; }
+      .mobile-toolbar { display: flex; }
 
       /* Topbar: logo + minimal right side only */
-      .topbar { padding: 0.55rem 0.75rem; background: rgba(10,10,15,0.95); }
+      .topbar {
+        padding: calc(0.55rem + env(safe-area-inset-top, 0px)) 0.75rem 0.55rem;
+        background: rgba(15,16,20,0.96);
+        border-bottom: 1px solid rgba(42,43,50,.75);
+      }
       .topbar-right { gap: 0.4rem; }
 
       /* Hide desktop-only topbar items on mobile */
       #btn-compare,
+      #btn-brain,
       #btn-merge,
       #btn-apple,
       #btn-save-moods,
+      #btn-ai,
+      #btn-refresh,
+      #btn-delete-data,
       .compare-badge { display: none !important; }
 
       /* Shrink remaining buttons */
-      #btn-ai { padding: 0 0.6rem; font-size: .65rem; }
-      #btn-refresh { width: 30px; height: 30px; }
       .user-badge { padding: 0.3rem 0.6rem; font-size: .72rem; }
       #user-badge-persona { display: none !important; }
 
       /* Search bar full-width below topbar */
       .search-wrap {
-        top: 3rem;
+        top: calc(3.1rem + env(safe-area-inset-top, 0px));
         width: calc(100vw - 1.5rem);
         left: 0.75rem;
         transform: none;
       }
 
-      /* Sidebar full-width on mobile */
-      .sidebar { width: 100vw; }
+      /* Sidebar becomes a bottom sheet on mobile */
+      .sidebar {
+        top: auto;
+        right: 0;
+        left: 0;
+        bottom: 0;
+        width: 100vw;
+        height: min(78vh, 620px);
+        border-left: none;
+        border-top: 1px solid var(--border);
+        border-radius: 16px 16px 0 0;
+        transform: translateY(100%);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      .sidebar.open { transform: translateY(0); }
+      .sidebar-art {
+        width: 88px;
+        height: 88px;
+        aspect-ratio: auto;
+        border-radius: 8px;
+        margin: 1rem 0 0 1.25rem;
+      }
+      .sidebar-body { padding-top: .9rem; }
 
       /* Zoom controls smaller on mobile */
-      .btn-zoom { width: 30px; height: 30px; font-size: 1rem; }
+      .zoom-controls {
+        bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px));
+        right: .75rem;
+      }
+      .btn-zoom { width: 32px; height: 32px; font-size: 1rem; }
 
       /* Now Playing shifts up above zoom controls */
-      #now-playing { bottom: 4.5rem; }
+      #now-playing {
+        bottom: calc(4.35rem + env(safe-area-inset-bottom, 0px));
+        left: .75rem;
+        right: 3.6rem;
+        transform: none;
+        max-width: none;
+        border-radius: 8px;
+        padding: .48rem .7rem .48rem .5rem;
+      }
+
+      #brain-svg {
+        top: calc(92px + env(safe-area-inset-top, 0px));
+        bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+        height: auto;
+      }
+      #brain-legend-strip {
+        bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+        height: 46px;
+        justify-content: flex-start;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding: 7px 10px;
+        scrollbar-width: none;
+      }
+      #brain-legend-strip::-webkit-scrollbar { display: none; }
+      .brain-legend-chip {
+        flex-shrink: 0;
+        font-size: 9px;
+        padding: 4px 8px;
+      }
+
+      #brain-info-panel {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-height: min(72vh, 560px);
+        border-left: none;
+        border-top: 1px solid var(--border);
+        border-radius: 16px 16px 0 0;
+        transform: translateY(100%);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      #brain-info-panel.open { transform: translateY(0); }
+      .bpi-inner { padding: 20px 18px; gap: 14px; }
+
+      .modal-backdrop {
+        align-items: flex-end;
+        padding: 0 10px calc(10px + env(safe-area-inset-bottom, 0px));
+      }
+      .modal {
+        width: min(440px, 100%) !important;
+        max-height: min(84vh, 720px);
+        overflow-y: auto;
+        border-radius: 16px 16px 10px 10px;
+        padding: 1.1rem;
+      }
+      .modal-actions {
+        position: sticky;
+        bottom: 0;
+        background: linear-gradient(to top, var(--surface) 80%, transparent);
+        padding-top: .75rem;
+      }
+
+      #cmp-brain-view {
+        top: calc(48px + env(safe-area-inset-top, 0px));
+        bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+        overflow-y: auto;
+        display: none;
+      }
+      .cmp-names-row {
+        height: auto;
+        display: none;
+      }
+      .cmp-main {
+        display: flex;
+        flex-direction: column;
+        overflow: visible;
+        min-height: auto;
+        padding: 10px;
+        gap: 10px;
+      }
+      .cmp-half {
+        flex: none;
+        min-height: 360px;
+        height: 48vh;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: radial-gradient(ellipse at top, rgba(124,92,255,.16), #0a0b0f);
+      }
+      .cmp-half::before {
+        content: attr(data-mobile-title);
+        position: absolute;
+        top: 8px;
+        left: 10px;
+        z-index: 2;
+        font-family: 'Syne', sans-serif;
+        font-size: .78rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .cmp-half svg {
+        top: 28px;
+        bottom: 42px;
+        height: calc(100% - 70px);
+      }
+      .cmp-center {
+        order: 2;
+        width: 100%;
+        max-height: none;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px;
+      }
+      #cmp-half-me { order: 1; }
+      #cmp-half-friend { order: 3; }
+      .cmp-half-legend {
+        height: 40px;
+        overflow-x: auto;
+      }
     }
   </style>
 </head>
@@ -1032,13 +1287,13 @@
     <div class="cmp-name-sep">vs</div>
     <div class="cmp-name-col" id="cmp-name-friend"><div class="dot" style="background:#a78bfa"></div><span></span></div>
   </div>
-  <div class="cmp-main">
-    <div class="cmp-half" id="cmp-half-me">
+    <div class="cmp-main">
+    <div class="cmp-half" id="cmp-half-me" data-mobile-title="Your Mind Map">
       <svg id="cmp-svg-me" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
       <div class="cmp-half-legend" id="cmp-legend-me"></div>
     </div>
     <div class="cmp-center" id="cmp-center"></div>
-    <div class="cmp-half" id="cmp-half-friend">
+    <div class="cmp-half" id="cmp-half-friend" data-mobile-title="Friend's Mind Map">
       <svg id="cmp-svg-friend" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
       <div class="cmp-half-legend" id="cmp-legend-friend"></div>
     </div>
@@ -1401,6 +1656,42 @@
 <div class="zoom-controls">
   <button class="btn-zoom" id="btn-zoom-in">+</button>
   <button class="btn-zoom" id="btn-zoom-out">−</button>
+</div>
+
+<!-- Mobile bottom toolbar -->
+<div class="mobile-toolbar" id="mobile-toolbar">
+  <button id="mobile-search" type="button" class="active" title="Search">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <span>Search</span>
+  </button>
+  <button id="mobile-compare" type="button" title="Compare">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4"/><path d="M15.4 6.5l-6.8 4"/></svg>
+    <span>Compare</span>
+  </button>
+  <button id="mobile-view" type="button" title="Switch view">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="12" cy="19" r="2"/><path d="M7 12h3M14 12h3M12 7v3M12 14v3"/></svg>
+    <span>View</span>
+  </button>
+  <button id="mobile-ai" type="button" title="AI Curator">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.1 6.3L22 9.3l-5 4.9 1.2 6.8L12 17.8 5.8 21 7 14.2 2 9.3l6.9-1L12 2z"/></svg>
+    <span>AI</span>
+  </button>
+  <button id="mobile-more" type="button" title="More">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+    <span>More</span>
+  </button>
+</div>
+
+<div class="mobile-more-sheet" id="mobile-more-sheet">
+  <div class="mobile-more-panel">
+    <div class="mobile-more-title">More</div>
+    <button class="mobile-more-action apple" id="mobile-more-apple" type="button">Connect Apple Music</button>
+    <button class="mobile-more-action" id="mobile-more-merge" type="button">Merge playlists</button>
+    <button class="mobile-more-action" id="mobile-more-moods" type="button">Save mood playlists</button>
+    <button class="mobile-more-action" id="mobile-more-remaining" type="button">Organise remaining tracks</button>
+    <button class="mobile-more-action" id="mobile-more-rebuild" type="button">Rebuild map</button>
+    <button class="mobile-more-action danger" id="mobile-more-delete" type="button">Delete data and logout</button>
+  </div>
 </div>
 
 <!-- Now Playing widget -->
@@ -2325,15 +2616,21 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
 
 function _hideCompareBrainView() {
   document.getElementById('cmp-brain-view').style.display = 'none';
+  document.body.classList.remove('compare-brain-open');
 }
 
 function _showCompareBrainView() {
   const view = document.getElementById('cmp-brain-view');
   view.style.display = 'flex';
+  document.body.classList.add('compare-brain-open');
   canvas.style.opacity = '0';
 
-  document.querySelector('#cmp-name-me span').textContent = mapData?.display_name || userId;
-  document.querySelector('#cmp-name-friend span').textContent = compareDisplayName;
+  const myName = mapData?.display_name || userId;
+  const friendName = compareDisplayName || 'Friend';
+  document.querySelector('#cmp-name-me span').textContent = myName;
+  document.querySelector('#cmp-name-friend span').textContent = friendName;
+  document.getElementById('cmp-half-me').dataset.mobileTitle = `${myName}'s Mind Map`;
+  document.getElementById('cmp-half-friend').dataset.mobileTitle = `${friendName}'s Mind Map`;
 
   const svgMe = document.getElementById('cmp-svg-me');
   const myKey = 'cm' + (points.length || 0);
@@ -3913,6 +4210,35 @@ document.getElementById('btn-delete-data').addEventListener('click', async () =>
     btn.lastChild.textContent = ' Delete Data';
   }
 });
+
+function _closeMobileMore() {
+  document.getElementById('mobile-more-sheet')?.classList.remove('open');
+}
+
+function _clickById(id) {
+  document.getElementById(id)?.click();
+}
+
+document.getElementById('mobile-search')?.addEventListener('click', () => {
+  document.getElementById('search-input')?.focus();
+});
+
+document.getElementById('mobile-compare')?.addEventListener('click', () => _clickById('btn-compare'));
+document.getElementById('mobile-view')?.addEventListener('click', () => _clickById('btn-brain'));
+document.getElementById('mobile-ai')?.addEventListener('click', () => _clickById('btn-ai'));
+document.getElementById('mobile-more')?.addEventListener('click', () => {
+  document.getElementById('mobile-more-sheet')?.classList.add('open');
+});
+document.getElementById('mobile-more-sheet')?.addEventListener('click', e => {
+  if (e.target === e.currentTarget) _closeMobileMore();
+});
+
+document.getElementById('mobile-more-apple')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-apple'); });
+document.getElementById('mobile-more-merge')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-merge'); });
+document.getElementById('mobile-more-moods')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-save-moods'); });
+document.getElementById('mobile-more-remaining')?.addEventListener('click', () => { _closeMobileMore(); _openRemainingModal(); });
+document.getElementById('mobile-more-rebuild')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-refresh'); });
+document.getElementById('mobile-more-delete')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-delete-data'); });
 
 document.getElementById('btn-brain').addEventListener('click', () => {
   brainMode = !brainMode;
