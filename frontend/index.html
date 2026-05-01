@@ -119,6 +119,75 @@
 
     .btn-connect svg { flex-shrink: 0; }
 
+    .spotify-dialog {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.62);
+      backdrop-filter: blur(5px);
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .spotify-dialog.open { display: flex; }
+
+    .spotify-card {
+      width: min(440px, 92vw);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: left;
+      box-shadow: 0 18px 60px rgba(0,0,0,.35);
+    }
+
+    .spotify-card h2 {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.05rem;
+      margin-bottom: .65rem;
+    }
+
+    .spotify-card p {
+      font-size: .78rem;
+      color: var(--text-dim);
+      line-height: 1.6;
+      margin-bottom: .75rem;
+    }
+
+    .callback-url {
+      display: block;
+      margin: .5rem 0 1rem;
+      padding: .55rem .65rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: .68rem;
+      word-break: break-all;
+    }
+
+    .dialog-actions {
+      display: flex;
+      gap: .6rem;
+      justify-content: flex-end;
+      margin-top: 1rem;
+    }
+
+    .dialog-btn {
+      padding: .6rem 1rem;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: .85rem;
+      cursor: pointer;
+    }
+
+    .dialog-btn.secondary { background: transparent; color: var(--text-dim); }
+    .dialog-btn.primary { background: var(--accent); color: #000; border-color: var(--accent); text-decoration: none; }
+
     .btn-connect-apple {
       display: inline-flex;
       align-items: center;
@@ -142,6 +211,14 @@
       border-color: rgba(250, 60, 60, 0.6);
     }
     .btn-connect-apple svg { flex-shrink: 0; }
+
+    .apple-subnote {
+      max-width: 320px;
+      margin-top: -0.75rem;
+      font-size: 0.72rem;
+      line-height: 1.45;
+      color: var(--text-dim);
+    }
 
     .demo-link {
       font-size: 0.85rem;
@@ -200,26 +277,38 @@
   <div id="error-banner" class="error-banner"></div>
 
   <div class="cta-group">
-    <a href="/auth/login" class="btn-connect">
+    <button id="btn-spotify-index" class="btn-connect" style="border:none;cursor:pointer">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
         <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
       </svg>
       Connect Spotify
-    </a>
-    <button id="btn-apple-index" class="btn-connect-apple">
+    </button>
+    <a id="btn-apple-index" class="btn-connect-apple" href="/apple-login.html">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
         <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/>
       </svg>
-      Transfer to Apple Music
-    </button>
-    <div id="apple-login-note" style="display:none;font-size:.78rem;color:#a78bfa;margin-top:.5rem;text-align:center">
-      Connecting Spotify first to build your map — redirecting…
-    </div>
+      Connect to Apple Music
+    </a>
+    <div class="apple-subnote">You need to have an active Apple Music subscription to access your Mind Map.</div>
     <a href="/soundmap-demo.html" class="demo-link" target="_blank">See a demo first →</a>
   </div>
 </div>
 
 <div class="footer">soundmap</div>
+
+<div class="spotify-dialog" id="spotify-dialog">
+  <div class="spotify-card">
+    <h2>Before you connect Spotify</h2>
+    <p>Have you been added by the owner to this Spotify app?</p>
+    <p>If not, ask the owner to add your Spotify account email to the app's users. Or create your own Spotify app, add this callback URL, and use its client ID in your deployment settings.</p>
+    <code class="callback-url">https://web-production-7b33.up.railway.app/auth/callback</code>
+    <p>Yes, the same SoundMap app can be accessed with another Spotify account, but in Spotify development mode that account must be added to the app first.</p>
+    <div class="dialog-actions">
+      <button class="dialog-btn secondary" id="spotify-dialog-cancel">Cancel</button>
+      <a class="dialog-btn primary" href="/auth/login">Continue to Spotify</a>
+    </div>
+  </div>
+</div>
 
 <script>
   // Show error from query param
@@ -237,22 +326,15 @@
     banner.style.display = 'block';
   }
 
-  // Apple Music button — go to map if already logged in, else explain and start Spotify login
-  document.getElementById('btn-apple-index').addEventListener('click', async () => {
-    try {
-      const resp = await fetch('/me');
-      if (resp.ok) {
-        const { user_id } = await resp.json();
-        location.href = `/map.html?user=${encodeURIComponent(user_id)}&connect_apple=1`;
-      } else {
-        // Show explanation before redirecting to Spotify
-        const note = document.getElementById('apple-login-note');
-        note.style.display = 'block';
-        setTimeout(() => { location.href = '/auth/login?next=apple'; }, 2000);
-      }
-    } catch (_) {
-      location.href = '/auth/login?next=apple';
-    }
+  const spotifyDialog = document.getElementById('spotify-dialog');
+  document.getElementById('btn-spotify-index').addEventListener('click', () => {
+    spotifyDialog.classList.add('open');
+  });
+  document.getElementById('spotify-dialog-cancel').addEventListener('click', () => {
+    spotifyDialog.classList.remove('open');
+  });
+  spotifyDialog.addEventListener('click', e => {
+    if (e.target === spotifyDialog) spotifyDialog.classList.remove('open');
   });
 
   // ---- Animated background: floating dots ----

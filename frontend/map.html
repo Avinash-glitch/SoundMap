@@ -1098,11 +1098,11 @@
       </svg>
       Save to Spotify
     </button>
-    <button class="btn-icon" id="btn-apple" title="Transfer to Apple Music" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(250,60,60,.35);color:#fa6060">
+    <button class="btn-icon" id="btn-apple" title="Connect to Apple Music" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(250,60,60,.35);color:#fa6060">
       <svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;flex-shrink:0">
         <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/>
       </svg>
-      Apple Music
+      Connect Apple
     </button>
     <button class="btn-icon" id="btn-compare" title="Compare with a friend">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1367,7 +1367,7 @@
       <svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px;color:#fa6060;flex-shrink:0">
         <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/>
       </svg>
-      Transfer to Apple Music
+      Connect to Apple Music
     </div>
     <button id="apple-modal-close" class="modal-close" style="position:absolute;top:.75rem;right:.75rem;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:1rem;line-height:1;padding:.25rem">✕</button>
     <div id="apple-modal-body" style="margin-top:.75rem"></div>
@@ -3879,7 +3879,7 @@ document.getElementById('merge-confirm').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 document.getElementById('btn-refresh').addEventListener('click', () => {
   if (confirm('Rebuild your map with your latest Spotify library? This takes ~2 minutes.')) {
-    location.href = '/auth/login';
+    location.href = '/auth/login?force=1';
   }
 });
 
@@ -4080,10 +4080,12 @@ function _renderCompareResults(d) {
   if (d.similar_playlists.length) {
     html += `<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">Most similar playlists</div>`;
     html += d.similar_playlists.slice(0, 6).map(p => `
-      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:.4rem;align-items:center;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
+      <div style="display:grid;grid-template-columns:1fr auto 1fr auto;gap:.4rem;align-items:center;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
         <div style="font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(p.playlist_a)}">${_esc(p.playlist_a)}</div>
         <div style="font-size:.6rem;color:var(--accent2);background:rgba(124,106,247,.15);border-radius:4px;padding:.1rem .35rem;white-space:nowrap">${Math.round(p.score*100)}%</div>
         <div style="font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right" title="${_esc(p.playlist_b)}">${_esc(p.playlist_b)}</div>
+        <button class="cmp-merge-pair" data-mine="${_esc(p.playlist_a)}" data-friend="${_esc(p.playlist_b)}"
+          style="font-size:.62rem;padding:.2rem .4rem;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text-dim);cursor:pointer">Merge</button>
       </div>`).join('');
   }
 
@@ -4110,6 +4112,9 @@ function _renderCompareResults(d) {
   }
   resultsEl.innerHTML = html;
   document.getElementById('compare-modal').classList.add('open');
+  resultsEl.querySelectorAll('.cmp-merge-pair').forEach(btn => {
+    btn.addEventListener('click', () => _mergeFriendPlaylistPair(btn.dataset.mine, btn.dataset.friend, btn));
+  });
 }
 
 function _renderFriendPlaylists() {
@@ -4135,10 +4140,9 @@ function _renderFriendPlaylists() {
       <div style="max-height:180px;overflow-y:auto;scrollbar-width:thin;margin-bottom:.6rem">`;
 
   for (const [name, trackIds] of playlists) {
-    const idsJson = _esc(JSON.stringify(trackIds));
     html += `
       <label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;cursor:pointer;font-size:.72rem;border-bottom:1px solid rgba(255,255,255,.04)">
-        <input type="checkbox" class="friend-pl-check" data-name="${_esc(name)}" data-ids="${idsJson}"
+        <input type="checkbox" class="friend-pl-check" data-name="${_esc(name)}"
           style="accent-color:var(--accent2);cursor:pointer;flex-shrink:0">
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" title="${_esc(name)}">${_esc(name)}</span>
         <span style="color:var(--text-dim);flex-shrink:0;font-size:.68rem">${trackIds.length} tracks</span>
@@ -4180,7 +4184,7 @@ async function _importSelectedPlaylists() {
   for (let i = 0; i < checks.length; i++) {
     const check = checks[i];
     const name = check.dataset.name;
-    const trackIds = JSON.parse(check.dataset.ids);
+    const tracks = _friendPlaylistTracks(name);
     statusEl.textContent = `Importing ${i + 1}/${checks.length}: ${name}…`;
 
     try {
@@ -4189,7 +4193,7 @@ async function _importSelectedPlaylists() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           playlist_name: name,
-          track_ids: trackIds,
+          tracks,
           friend_display_name: compareDisplayName,
         }),
       });
@@ -4213,6 +4217,45 @@ async function _importSelectedPlaylists() {
   statusEl.innerHTML = msg || 'Done';
   btn.disabled = false;
   btn.textContent = 'Add more';
+}
+
+function _friendPlaylistTracks(name) {
+  return comparePoints
+    .filter(p => (p.playlists || []).includes(name) && p.id)
+    .map(p => ({ id: p.id, name: p.name || '', artist: p.artist || '', isrc: p.isrc || null }));
+}
+
+async function _mergeFriendPlaylistPair(myPlaylistName, friendPlaylistName, btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Merging…';
+  try {
+    const friendTracks = _friendPlaylistTracks(friendPlaylistName);
+    if (!friendTracks.length) throw new Error('No tracks found in that friend playlist');
+    const resp = await fetch('/merge-friend-playlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        my_playlist_name: myPlaylistName,
+        friend_playlist_name: friendPlaylistName,
+        friend_tracks: friendTracks,
+        friend_display_name: compareDisplayName,
+      }),
+    });
+    if (!resp.ok) {
+      let detail = 'Merge failed';
+      try { detail = (await resp.json()).detail || detail; } catch {}
+      throw new Error(detail);
+    }
+    const data = await resp.json();
+    btn.textContent = 'Done';
+    btn.title = `Created ${data.name}`;
+    if (data.url) window.open(data.url, '_blank', 'noopener');
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = original;
+    alert(err.message || 'Could not merge playlists');
+  }
 }
 
 function _esc(s) {

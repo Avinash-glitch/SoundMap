@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SoundMap — Apple Music</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js" async></script>
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #18181f;
+      --border: #2a2a35;
+      --text: #e8e8f0;
+      --text-dim: #888899;
+      --apple: #fa3c44;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      padding: 2rem;
+    }
+    .panel {
+      width: min(460px, 92vw);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem;
+    }
+    .brand {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1.6rem;
+      margin-bottom: 1.2rem;
+    }
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.25rem;
+      margin-bottom: .55rem;
+    }
+    p {
+      color: var(--text-dim);
+      font-size: .82rem;
+      line-height: 1.65;
+      margin-bottom: 1rem;
+    }
+    .btn {
+      width: 100%;
+      border: none;
+      border-radius: 100px;
+      background: var(--apple);
+      color: #fff;
+      padding: .8rem 1rem;
+      font-family: 'Syne', sans-serif;
+      font-size: .95rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .status {
+      min-height: 1.2rem;
+      margin-top: .8rem;
+      font-size: .78rem;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+    .error { color: #f87171; }
+    a { color: var(--apple); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <div class="brand">SoundMap</div>
+    <h1>Connect to Apple Music</h1>
+    <p>You need to have an active Apple Music subscription to access your Mind Map.</p>
+    <p>Apple will ask you to authorize SoundMap. After that, your library is mapped from your Apple Music playlists and library metadata.</p>
+    <button class="btn" id="apple-auth-btn">Connect Apple Music</button>
+    <div class="status" id="status"></div>
+  </main>
+
+  <script>
+    const btn = document.getElementById('apple-auth-btn');
+    const statusEl = document.getElementById('status');
+
+    function setStatus(message, isError = false) {
+      statusEl.textContent = message;
+      statusEl.className = isError ? 'status error' : 'status';
+    }
+
+    async function configureMusicKit() {
+      setStatus('Loading Apple Music login…');
+      const resp = await fetch('/apple/token');
+      if (!resp.ok) {
+        let detail = 'Apple Music is not configured on this server.';
+        try { detail = (await resp.json()).detail || detail; } catch {}
+        throw new Error(detail);
+      }
+      const { developer_token } = await resp.json();
+
+      if (typeof MusicKit === 'undefined') {
+        await new Promise((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error('MusicKit JS failed to load.')), 8000);
+          document.addEventListener('musickitloaded', () => { clearTimeout(t); resolve(); }, { once: true });
+        });
+      }
+
+      await MusicKit.configure({
+        developerToken: developer_token,
+        app: { name: 'SoundMap', build: '1.0.0' },
+      });
+      return MusicKit.getInstance();
+    }
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Authorizing…';
+      try {
+        const music = await configureMusicKit();
+        if (!music.isAuthorized) await music.authorize();
+        setStatus('Starting your Apple Music map…');
+        const resp = await fetch('/apple/start-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            music_user_token: music.musicUserToken,
+            storefront: music.storefrontCountryCode || 'us',
+          }),
+        });
+        if (!resp.ok) {
+          let detail = 'Could not start Apple Music map.';
+          try { detail = (await resp.json()).detail || detail; } catch {}
+          throw new Error(detail);
+        }
+        const { job_id, user_id } = await resp.json();
+        location.href = `/loading.html?user=${encodeURIComponent(user_id)}&job=${encodeURIComponent(job_id)}`;
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Connect Apple Music';
+        setStatus(err.message || 'Apple Music authorization was cancelled.', true);
+      }
+    });
+  </script>
+</body>
+</html>

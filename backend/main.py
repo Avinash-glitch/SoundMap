@@ -99,6 +99,11 @@ async def compare_page():
     return FileResponse(FRONTEND / "compare.html")
 
 
+@app.get("/apple-login.html")
+async def apple_login_page():
+    return FileResponse(FRONTEND / "apple-login.html")
+
+
 @app.get("/status/{job_id}")
 async def job_status(job_id: str) -> JSONResponse:
     job = get_job(job_id)
@@ -809,8 +814,6 @@ async def apple_developer_token() -> JSONResponse:
 async def apple_start_job(request: Request) -> JSONResponse:
     """Start an Apple Music pipeline job. Body: {music_user_token, storefront}."""
     user_id = request.session.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in — connect Spotify first")
 
     try:
         body = await request.json()
@@ -823,6 +826,12 @@ async def apple_start_job(request: Request) -> JSONResponse:
 
     if not music_user_token:
         raise HTTPException(status_code=400, detail="music_user_token required")
+
+    if not user_id:
+        import hashlib
+        user_id = "apple_" + hashlib.sha256(music_user_token.encode()).hexdigest()[:16]
+        request.session["user_id"] = user_id
+        request.session["display_name"] = "Apple Music Library"
 
     request.session["music_user_token"] = music_user_token
     request.session["storefront"] = storefront
@@ -990,6 +999,86 @@ async def import_friend_playlist(request: Request) -> JSONResponse:
             added += min(100, len(uris) - i)
 
     print(f"[import-friend-playlist] created '{new_name}' ({added}/{len(uris)} tracks) for {user_id}")
+    return JSONResponse({"name": new_name, "track_count": added, "url": pl_url})
+
+
+@app.post("/merge-friend-playlist")
+async def merge_friend_playlist(request: Request) -> JSONResponse:
+    """Create a new Spotify playlist from one of yours plus a friend's playlist."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    token = await _get_valid_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
+
+    try:
+        body = await request.json()
+        my_playlist_name: str = (body.get("my_playlist_name") or "").strip()
+        friend_playlist_name: str = (body.get("friend_playlist_name") or "").strip()
+        friend_name: str = (body.get("friend_display_name") or "Friend").strip()
+        friend_tracks: list[dict] = body.get("friend_tracks") or []
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if not my_playlist_name or not friend_playlist_name:
+        raise HTTPException(status_code=400, detail="my_playlist_name and friend_playlist_name required")
+    if not friend_tracks:
+        raise HTTPException(status_code=400, detail="friend_tracks required")
+
+    map_data = storage.load_map(user_id)
+    if not map_data:
+        raise HTTPException(status_code=404, detail="Your map was not found — rebuild your map first")
+
+    own_ids: list[str] = []
+    seen_ids: set[str] = set()
+    for p in map_data.get("points", []):
+        tid = p.get("id")
+        if tid and tid not in seen_ids and my_playlist_name in (p.get("playlists") or []):
+            seen_ids.add(tid)
+            own_ids.append(tid)
+    if not own_ids:
+        raise HTTPException(status_code=400, detail=f"No tracks found in your playlist: {my_playlist_name}")
+
+    h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    friend_uris = _resolve_to_spotify_uris(friend_tracks, h)
+    uris: list[str] = []
+    seen_uris: set[str] = set()
+    for uri in [*(f"spotify:track:{tid}" for tid in own_ids), *friend_uris]:
+        if uri not in seen_uris:
+            seen_uris.add(uri)
+            uris.append(uri)
+
+    new_name = f"{my_playlist_name} + {friend_playlist_name}"
+    create_resp = _requests.post(
+        "https://api.spotify.com/v1/me/playlists",
+        headers=h,
+        json={
+            "name": new_name,
+            "public": False,
+            "description": f"Merged from your playlist and {friend_name}'s SoundMap playlist",
+        },
+    )
+    if create_resp.status_code == 403:
+        raise HTTPException(status_code=403, detail="Spotify permissions missing — please reconnect Spotify")
+    if create_resp.status_code not in (200, 201):
+        raise HTTPException(status_code=502, detail=f"Could not create playlist: {create_resp.text[:300]}")
+
+    pl_data = create_resp.json()
+    pl_id = pl_data["id"]
+    pl_url = pl_data["external_urls"]["spotify"]
+
+    added = 0
+    for i in range(0, len(uris), 100):
+        r = _requests.post(
+            f"https://api.spotify.com/v1/playlists/{pl_id}/items",
+            headers=h,
+            json={"uris": uris[i:i + 100]},
+        )
+        if r.status_code in (200, 201):
+            added += min(100, len(uris) - i)
+
+    print(f"[merge-friend-playlist] created '{new_name}' ({added}/{len(uris)} tracks) for {user_id}")
     return JSONResponse({"name": new_name, "track_count": added, "url": pl_url})
 
 

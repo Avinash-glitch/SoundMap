@@ -41,8 +41,8 @@ def _generate_pkce_pair() -> tuple[str, str]:
 
 
 @router.get("/login")
-async def login(request: Request, next: str | None = None) -> RedirectResponse:
-    """Redirect user to Spotify OAuth consent screen. Optional ?next=apple carries intent."""
+async def login(request: Request, next: str | None = None, force: str | None = None) -> RedirectResponse:
+    """Redirect user to Spotify OAuth consent screen."""
     client_id = os.environ["SPOTIFY_CLIENT_ID"]
     redirect_uri = os.environ["SPOTIFY_REDIRECT_URI"]
 
@@ -50,6 +50,8 @@ async def login(request: Request, next: str | None = None) -> RedirectResponse:
     request.session["code_verifier"] = code_verifier
     if next:
         request.session["login_next"] = next
+    if force in ("1", "true", "yes"):
+        request.session["force_rebuild"] = True
 
     params = {
         "client_id": client_id,
@@ -124,7 +126,8 @@ async def callback(request: Request, code: str | None = None, error: str | None 
     extra = "&connect_apple=1" if login_next == "apple" else ""
 
     # Skip processing if a fresh map already exists
-    if storage.map_exists(user_id) and storage.map_age_hours(user_id) < 24:
+    force_rebuild = bool(request.session.pop("force_rebuild", False))
+    if not force_rebuild and storage.map_exists(user_id) and storage.map_age_hours(user_id) < 24:
         print(f"[auth] Fresh map found for {user_id} — skipping pipeline")
         return RedirectResponse(f"{app_url}/map.html?user={user_id}{extra}")
 
