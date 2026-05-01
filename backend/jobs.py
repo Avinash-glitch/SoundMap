@@ -11,7 +11,14 @@ jobs: dict[str, dict] = {}
 _stop_events: dict[str, threading.Event] = {}
 
 
-def submit_job(access_token: str, user_id: str, display_name: str, api_key: str = "", provider: str = "") -> str:
+def submit_job(
+    access_token: str,
+    user_id: str,
+    display_name: str,
+    api_key: str = "",
+    provider: str = "",
+    share_for_comparison: bool = True,
+) -> str:
     """Queue a pipeline job and return the job_id."""
     from . import pipeline  # lazy import avoids circular deps at module load
 
@@ -42,6 +49,7 @@ def submit_job(access_token: str, user_id: str, display_name: str, api_key: str 
                 api_key=api_key,
                 provider=provider,
                 stop_event=stop_event,
+                share_for_comparison=share_for_comparison,
             )
             jobs[job_id]["status"] = "done"
             jobs[job_id]["progress"] = 100

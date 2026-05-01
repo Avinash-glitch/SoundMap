@@ -188,6 +188,64 @@
     .dialog-btn.secondary { background: transparent; color: var(--text-dim); }
     .dialog-btn.primary { background: var(--accent); color: #000; border-color: var(--accent); text-decoration: none; }
 
+    .credential-toggle {
+      margin: .4rem 0 .75rem;
+      background: transparent;
+      border: none;
+      color: var(--accent);
+      font-family: 'DM Mono', monospace;
+      font-size: .75rem;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .credential-fields {
+      display: none;
+      gap: .5rem;
+      margin: .4rem 0 .9rem;
+    }
+
+    .credential-fields.open { display: grid; }
+
+    .credential-fields input {
+      width: 100%;
+      padding: .55rem .65rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: .75rem;
+      outline: none;
+    }
+
+    .privacy-choice {
+      display: grid;
+      gap: .45rem;
+      margin-top: .75rem;
+    }
+
+    .privacy-choice label {
+      display: flex;
+      gap: .55rem;
+      align-items: flex-start;
+      padding: .65rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: .75rem;
+      line-height: 1.45;
+      cursor: pointer;
+    }
+
+    .privacy-choice span {
+      display: block;
+      color: var(--text-dim);
+      font-size: .68rem;
+      margin-top: .12rem;
+    }
+
     .btn-connect-apple {
       display: inline-flex;
       align-items: center;
@@ -300,12 +358,32 @@
   <div class="spotify-card">
     <h2>Before you connect Spotify</h2>
     <p>Have you been added by the owner to this Spotify app?</p>
-    <p>If not, ask the owner to add your Spotify account email to the app's users. Or create your own Spotify app, add this callback URL, and use its client ID in your deployment settings.</p>
+    <p>If not, ask the owner to add your Spotify account email to the app's users. Or create your own Spotify app, add this callback URL, and paste your Client ID and Client Secret below.</p>
     <code class="callback-url">https://web-production-7b33.up.railway.app/auth/callback</code>
     <p>Yes, the same SoundMap app can be accessed with another Spotify account, but in Spotify development mode that account must be added to the app first.</p>
+    <button class="credential-toggle" id="credential-toggle">Use my own Spotify app credentials</button>
+    <div class="credential-fields" id="credential-fields">
+      <input id="spotify-client-id" placeholder="Spotify Client ID" autocomplete="off" spellcheck="false" />
+      <input id="spotify-client-secret" placeholder="Spotify Client Secret" autocomplete="off" spellcheck="false" />
+    </div>
+    <p>Your playlist map data is stored in our Supabase database so friend comparison can work. You can choose a private mind map instead, and you can delete your stored data from the map page.</p>
+    <div class="privacy-choice">
+      <label>
+        <input type="radio" name="share-choice" value="1" checked />
+        <div>Generate my map and allow comparison
+          <span>Your map can be compared with friends who have your SoundMap ID.</span>
+        </div>
+      </label>
+      <label>
+        <input type="radio" name="share-choice" value="0" />
+        <div>Generate mind map only
+          <span>Your map is still generated, but it is blocked from friend comparison.</span>
+        </div>
+      </label>
+    </div>
     <div class="dialog-actions">
       <button class="dialog-btn secondary" id="spotify-dialog-cancel">Cancel</button>
-      <a class="dialog-btn primary" href="/auth/login">Continue to Spotify</a>
+      <button class="dialog-btn primary" id="spotify-dialog-continue">Continue to Spotify</button>
     </div>
   </div>
 </div>
@@ -332,6 +410,26 @@
   });
   document.getElementById('spotify-dialog-cancel').addEventListener('click', () => {
     spotifyDialog.classList.remove('open');
+  });
+  document.getElementById('credential-toggle').addEventListener('click', () => {
+    document.getElementById('credential-fields').classList.toggle('open');
+  });
+  document.getElementById('spotify-dialog-continue').addEventListener('click', () => {
+    const share = document.querySelector('input[name="share-choice"]:checked')?.value || '1';
+    const clientId = document.getElementById('spotify-client-id').value.trim();
+    const clientSecret = document.getElementById('spotify-client-secret').value.trim();
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/auth/custom-login';
+    for (const [name, value] of Object.entries({ share, client_id: clientId, client_secret: clientSecret })) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    }
+    document.body.appendChild(form);
+    form.submit();
   });
   spotifyDialog.addEventListener('click', e => {
     if (e.target === spotifyDialog) spotifyDialog.classList.remove('open');

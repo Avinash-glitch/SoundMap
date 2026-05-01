@@ -309,6 +309,7 @@
   const userId = params.get('user');
   const preJobId = params.get('job'); // set when job was already started (e.g. Apple Music flow)
   const connectApple = params.get('connect_apple') === '1';
+  const privateMap = params.get('private_map') === '1';
 
   if (!userId) { location.href = '/'; }
 
@@ -384,7 +385,10 @@
       const resp = await fetch('/start-job', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: apiKey || undefined }),
+        body: JSON.stringify({
+          api_key: apiKey || undefined,
+          share_for_comparison: !privateMap,
+        }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();

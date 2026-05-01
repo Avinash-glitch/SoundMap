@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from .auth import router as auth_router, refresh_access_token
+from .auth import forget_user_credentials, router as auth_router, refresh_access_token
 from .jobs import get_job, submit_job, stop_job
 from .models import JobStatus
 from . import storage
@@ -194,14 +194,25 @@ async def start_job(request: Request) -> JSONResponse:
 
     api_key = ""
     provider = ""
+    share_for_comparison = bool(request.session.get("share_for_comparison", True))
     try:
         body = await request.json()
         api_key = (body.get("api_key") or "").strip()
         provider = (body.get("provider") or "").strip().lower()
+        if body.get("share_for_comparison") is not None:
+            share_for_comparison = bool(body.get("share_for_comparison"))
     except Exception:
         pass
 
-    job_id = submit_job(token, user_id, display_name, api_key=api_key, provider=provider)
+    request.session["share_for_comparison"] = share_for_comparison
+    job_id = submit_job(
+        token,
+        user_id,
+        display_name,
+        api_key=api_key,
+        provider=provider,
+        share_for_comparison=share_for_comparison,
+    )
     return JSONResponse({"job_id": job_id, "user_id": user_id})
 
 
@@ -701,6 +712,10 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
         raise HTTPException(status_code=404, detail=f"No map found for {user_id_a} — they need to process their library first")
     if not map_b:
         raise HTTPException(status_code=404, detail=f"No map found for {user_id_b} — they need to process their library first")
+    if not map_a.get("share_for_comparison", True):
+        raise HTTPException(status_code=403, detail=f"{map_a.get('display_name') or user_id_a} has not opted in to comparison")
+    if not map_b.get("share_for_comparison", True):
+        raise HTTPException(status_code=403, detail=f"{map_b.get('display_name') or user_id_b} has not opted in to comparison")
 
     pts_a = map_a.get("points", [])
     pts_b = map_b.get("points", [])
@@ -797,6 +812,40 @@ async def me(request: Request) -> JSONResponse:
     return JSONResponse({"user_id": user_id, "display_name": display_name})
 
 
+@app.post("/logout")
+async def logout(request: Request) -> JSONResponse:
+    """Clear the current browser session without deleting stored map data."""
+    user_id = request.session.get("user_id")
+    if user_id:
+        forget_user_credentials(user_id)
+    request.session.clear()
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/me/data")
+async def delete_my_data(request: Request) -> JSONResponse:
+    """Delete the logged-in user's stored map data and clear their session."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    deleted_ids = []
+    ids_to_delete = {user_id}
+    if user_id.endswith("_apple"):
+        ids_to_delete.add(user_id[:-6])
+    else:
+        ids_to_delete.add(f"{user_id}_apple")
+
+    for uid in ids_to_delete:
+        if uid and storage.delete_map(uid):
+            deleted_ids.append(uid)
+        if uid:
+            forget_user_credentials(uid)
+
+    request.session.clear()
+    return JSONResponse({"ok": True, "deleted_user_ids": sorted(deleted_ids)})
+
+
 @app.get("/apple/token")
 async def apple_developer_token() -> JSONResponse:
     """Return a short-lived Apple Music developer token for MusicKit JS."""
@@ -874,10 +923,14 @@ async def apple_configured() -> JSONResponse:
 
 
 @app.get("/map/{user_id}")
-async def get_map(user_id: str) -> JSONResponse:
+async def get_map(user_id: str, request: Request) -> JSONResponse:
     data = storage.load_map(user_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Map not found — processing may still be running")
+    session_user = request.session.get("user_id")
+    allowed_ids = {session_user, f"{session_user}_apple" if session_user else None}
+    if data.get("share_for_comparison") is False and user_id not in allowed_ids:
+        raise HTTPException(status_code=403, detail="This user has made their mind map private")
     return JSONResponse(data)
 
 

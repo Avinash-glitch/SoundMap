@@ -46,6 +46,23 @@ def save_map(user_id: str, map_data: dict) -> None:
     (STORAGE_DIR / f"{user_id}.json").write_text(json.dumps(map_data), encoding="utf-8")
 
 
+def delete_map(user_id: str) -> bool:
+    """Delete stored map data for a user. Returns True if a stored row/file was removed."""
+    deleted = False
+    sb = _get_supabase()
+    if sb:
+        try:
+            result = sb.table("user_maps").delete().eq("user_id", user_id).execute()
+            deleted = bool(getattr(result, "data", None))
+        except Exception as e:
+            print(f"[storage] Supabase delete failed, falling back to file: {e}")
+    p = STORAGE_DIR / f"{user_id}.json"
+    if p.exists():
+        p.unlink()
+        deleted = True
+    return deleted
+
+
 def load_map(user_id: str) -> dict | None:
     """Return map data or None if not found."""
     sb = _get_supabase()

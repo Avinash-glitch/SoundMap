@@ -37,6 +37,7 @@ def process_user(
     api_key: str = "",
     provider: str = "",
     stop_event=None,
+    share_for_comparison: bool = True,
 ) -> dict:
     """
     Full pipeline for one user.
@@ -48,9 +49,11 @@ def process_user(
             on_progress(pct, msg)
         print(f"[pipeline] {pct:3d}% — {msg}")
 
-    if storage.map_exists(user_id) and storage.map_age_hours(user_id) < 24:
+    existing = storage.load_map(user_id) if storage.map_exists(user_id) else None
+    existing_share = bool(existing.get("share_for_comparison", True)) if existing else None
+    if existing and existing_share == bool(share_for_comparison) and storage.map_age_hours(user_id) < 24:
         progress(100, "Loaded from cache.")
-        return storage.load_map(user_id)
+        return existing
 
     headers = {"Authorization": f"Bearer {spotify_token}"}
 
@@ -85,6 +88,7 @@ def process_user(
     # ---- 5. Build output --------------------------------------------------
     progress(90, "Building map…")
     map_data = _build_map_data(tracks, coords, track_genres, display_name=display_name, playlist_meta=playlist_meta, pl_to_mood=pl_to_mood, persona=persona, remaining=remaining)
+    map_data["share_for_comparison"] = bool(share_for_comparison)
 
     storage.save_map(user_id, map_data)
     progress(100, "Done!")

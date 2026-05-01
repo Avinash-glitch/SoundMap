@@ -1117,6 +1117,12 @@
       </svg>
       Refresh
     </button>
+    <button class="btn-icon" id="btn-delete-data" title="Logout and delete my stored data" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(248,113,113,.35);color:#f87171">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
+        <path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/>
+      </svg>
+      Delete Data
+    </button>
   </div>
 </div>
 
@@ -1565,6 +1571,10 @@ async function loadMap() {
     if (mapData.persona) {
       const badge = document.getElementById('user-badge-persona');
       if (badge) { badge.textContent = mapData.persona; badge.style.display = 'block'; }
+    }
+    if (mapData.share_for_comparison === false) {
+      const uidEl = document.getElementById('uid-display');
+      if (uidEl) uidEl.title = 'Private mind map — comparison is disabled';
     }
 
     resize();
@@ -3880,6 +3890,27 @@ document.getElementById('merge-confirm').addEventListener('click', async () => {
 document.getElementById('btn-refresh').addEventListener('click', () => {
   if (confirm('Rebuild your map with your latest Spotify library? This takes ~2 minutes.')) {
     location.href = '/auth/login?force=1';
+  }
+});
+
+document.getElementById('btn-delete-data').addEventListener('click', async () => {
+  const ok = confirm('Delete your stored SoundMap data from Supabase and log out on this browser? This cannot be undone.');
+  if (!ok) return;
+  const btn = document.getElementById('btn-delete-data');
+  btn.disabled = true;
+  btn.lastChild.textContent = ' Deleting';
+  try {
+    const resp = await fetch('/me/data', { method: 'DELETE' });
+    if (!resp.ok) {
+      let detail = 'Could not delete your data';
+      try { detail = (await resp.json()).detail || detail; } catch {}
+      throw new Error(detail);
+    }
+    location.href = '/';
+  } catch (err) {
+    alert(err.message || 'Could not delete your data');
+    btn.disabled = false;
+    btn.lastChild.textContent = ' Delete Data';
   }
 });
 
