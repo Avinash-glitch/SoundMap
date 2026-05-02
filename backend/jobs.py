@@ -70,6 +70,7 @@ def submit_apple_job(
     storefront: str = "us",
     api_key: str = "",
     provider: str = "",
+    force: bool = False,
 ) -> str:
     """Queue an Apple Music pipeline job and return the job_id."""
     from . import pipeline
@@ -98,6 +99,7 @@ def submit_apple_job(
                 on_progress=_on_progress,
                 api_key=api_key,
                 provider=provider,
+                force=force,
             )
             jobs[job_id]["status"] = "done"
             jobs[job_id]["progress"] = 100

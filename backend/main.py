@@ -870,6 +870,7 @@ async def apple_start_job(request: Request) -> JSONResponse:
         storefront = (body.get("storefront") or "us").strip().lower()
         api_key = (body.get("api_key") or "").strip()
         provider = (body.get("provider") or "").strip().lower()
+        force = bool(body.get("force"))
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
@@ -882,12 +883,16 @@ async def apple_start_job(request: Request) -> JSONResponse:
         request.session["user_id"] = user_id
         request.session["display_name"] = "Apple Music Library"
 
+    if user_id.endswith("_apple"):
+        user_id = user_id[:-6]
+        request.session["user_id"] = user_id
+
     request.session["music_user_token"] = music_user_token
     request.session["storefront"] = storefront
 
     from .jobs import submit_apple_job
     apple_user_id = f"{user_id}_apple"
-    job_id = submit_apple_job(music_user_token, user_id, storefront, api_key=api_key, provider=provider)
+    job_id = submit_apple_job(music_user_token, user_id, storefront, api_key=api_key, provider=provider, force=force)
     return JSONResponse({"job_id": job_id, "user_id": apple_user_id})
 
 
@@ -1147,23 +1152,25 @@ async def import_to_apple(request: Request) -> JSONResponse:
     }
     Uses ISRC to match tracks in the Apple Music catalog, falls back to name+artist search.
     """
-    music_user_token = request.session.get("music_user_token")
-    storefront = request.session.get("storefront") or "us"
-    if not music_user_token:
-        raise HTTPException(status_code=401, detail="Apple Music session not found — reconnect Apple Music")
-
     try:
         body = await request.json()
         playlist_name: str = (body.get("playlist_name") or "").strip()
         tracks: list[dict] = body.get("tracks") or []
         friend_name: str = (body.get("friend_display_name") or "Friend").strip()
+        music_user_token = (body.get("music_user_token") or request.session.get("music_user_token") or "").strip()
+        storefront = (body.get("storefront") or request.session.get("storefront") or "us").strip().lower()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
+    if not music_user_token:
+        raise HTTPException(status_code=401, detail="Apple Music session not found — reconnect Apple Music")
     if not playlist_name:
         raise HTTPException(status_code=400, detail="playlist_name required")
     if not tracks:
         raise HTTPException(status_code=400, detail="tracks required")
+
+    request.session["music_user_token"] = music_user_token
+    request.session["storefront"] = storefront
 
     from .apple_auth import get_developer_token
     try:
@@ -1181,6 +1188,7 @@ async def import_to_apple(request: Request) -> JSONResponse:
 
     # Resolve each track to an Apple Music catalog ID
     catalog_ids: list[str] = []
+    seen_catalog_ids: set[str] = set()
     for t in tracks:
         isrc = t.get("isrc")
         apple_id = None
@@ -1209,7 +1217,8 @@ async def import_to_apple(request: Request) -> JSONResponse:
                     results = ((r.json().get("results") or {}).get("songs") or {}).get("data") or []
                     if results:
                         apple_id = results[0]["id"]
-        if apple_id:
+        if apple_id and apple_id not in seen_catalog_ids:
+            seen_catalog_ids.add(apple_id)
             catalog_ids.append(apple_id)
 
     print(f"[import-to-apple] resolved {len(catalog_ids)}/{len(tracks)} tracks")
@@ -1217,18 +1226,29 @@ async def import_to_apple(request: Request) -> JSONResponse:
     if not catalog_ids:
         raise HTTPException(status_code=422, detail="Could not match any tracks in Apple Music catalog")
 
-    # Create a named playlist with the resolved tracks
+    # Add the catalog songs to the user's library first. Apple may ignore IDs
+    # it cannot add, but this makes subsequent playlist insertion more reliable.
+    for i in range(0, len(catalog_ids), 50):
+        chunk = catalog_ids[i:i + 50]
+        lib_resp = _requests.post(
+            f"{base}/v1/me/library",
+            headers=h,
+            params={"ids[songs]": ",".join(chunk)},
+            timeout=20,
+        )
+        print(f"[import-to-apple] add-to-library batch={i // 50 + 1} status={lib_resp.status_code}")
+        if lib_resp.status_code not in (202, 200, 201, 204):
+            raise HTTPException(status_code=502, detail=f"Could not add songs to Apple Music library: {lib_resp.text[:200]}")
+
+    # Create a named playlist, then add tracks through the playlist tracks endpoint
+    # so failures are visible instead of reporting success for an empty playlist.
     new_name = f"{playlist_name} (from {friend_name})"
     playlist_body = {
         "attributes": {
             "name": new_name,
             "description": f"Imported from {friend_name}'s SoundMap",
-        },
-        "relationships": {
-            "tracks": {
-                "data": [{"id": cid, "type": "songs"} for cid in catalog_ids]
-            }
-        },
+            "isPublic": False,
+        }
     }
     r = _requests.post(
         f"{base}/v1/me/library/playlists",
@@ -1240,8 +1260,27 @@ async def import_to_apple(request: Request) -> JSONResponse:
     if r.status_code not in (200, 201):
         raise HTTPException(status_code=502, detail=f"Could not create Apple Music playlist: {r.text[:200]}")
 
-    print(f"[import-to-apple] created '{new_name}' ({len(catalog_ids)} tracks)")
-    return JSONResponse({"name": new_name, "track_count": len(catalog_ids)})
+    playlist_data = r.json()
+    playlist_id = ((playlist_data.get("data") or [{}])[0] or {}).get("id")
+    if not playlist_id:
+        raise HTTPException(status_code=502, detail="Apple Music created a playlist but did not return its ID")
+
+    added = 0
+    for i in range(0, len(catalog_ids), 100):
+        chunk = catalog_ids[i:i + 100]
+        add_resp = _requests.post(
+            f"{base}/v1/me/library/playlists/{playlist_id}/tracks",
+            headers={**h, "Content-Type": "application/json"},
+            json={"data": [{"id": cid, "type": "songs"} for cid in chunk]},
+            timeout=20,
+        )
+        print(f"[import-to-apple] add tracks batch={i // 100 + 1} status={add_resp.status_code} body={add_resp.text[:200]}")
+        if add_resp.status_code not in (200, 201, 202, 204):
+            raise HTTPException(status_code=502, detail=f"Could not add tracks to Apple Music playlist: {add_resp.text[:200]}")
+        added += len(chunk)
+
+    print(f"[import-to-apple] created '{new_name}' ({added}/{len(catalog_ids)} tracks) id={playlist_id}")
+    return JSONResponse({"name": new_name, "track_count": added, "matched_count": len(catalog_ids), "playlist_id": playlist_id})
 
 
 @app.post("/create-mood-playlists")

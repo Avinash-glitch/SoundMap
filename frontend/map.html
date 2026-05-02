@@ -1229,6 +1229,9 @@
       #brain-info-panel.open { transform: translateY(0); }
       .bpi-sheet-handle {
         display: block;
+        position: sticky;
+        top: 0;
+        z-index: 2;
         width: 46px;
         height: 22px;
         margin: 0 auto;
@@ -1829,6 +1832,10 @@ let hoveredPoint = null;
 let mapMode = 'playlists'; // 'moods' | 'playlists'
 let aiHighlightSet = null; // Set<string> | null — IDs returned by AI curator
 
+function _isAppleMap() {
+  return userId.endsWith('_apple') || mapData?.source === 'apple';
+}
+
 // Brain map state
 let brainMode = true;          // brain SVG is the default view
 let brainHovered = null;
@@ -1896,7 +1903,10 @@ async function loadMap() {
     if (mapData.source === 'apple') {
       const dot = document.querySelector('.user-badge .dot');
       if (dot) { dot.style.background = '#fa3c44'; }
-      document.getElementById('btn-apple').style.background = 'rgba(250,60,60,.12)';
+      const appleBtn = document.getElementById('btn-apple');
+      appleBtn.style.background = 'rgba(250,60,60,.12)';
+      appleBtn.lastChild.textContent = ' Apple Connected';
+      document.getElementById('btn-save-moods').style.display = 'none';
     }
 
     // Normalise coords to canvas space
@@ -1925,6 +1935,7 @@ async function loadMap() {
     if (topYears.length) chartYearRange = [Math.min(...topYears) - 1, Math.max(...topYears) + 1];
 
     buildLegend();
+    _loadTopTracks(_ttRange);
 
     // Show persona string under user badge if available
     if (mapData.persona) {
@@ -2623,7 +2634,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       <div style="font-family:Syne,sans-serif;font-weight:700;font-size:24px;color:${col}">${trackCount}</div>
       <div style="font-size:9px;color:var(--text-dim);margin-top:3px;letter-spacing:.1em">TRACKS</div>
     </div>
-    ${userId.endsWith('_apple')
+    ${_isAppleMap()
       ? `<button id="bpi-copy-spotify" style="padding:10px;background:#fc3c44;border:none;border-radius:8px;color:#fff;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">Add to my Apple Music</button>`
       : `<button id="bpi-copy-spotify" style="padding:10px;background:var(--accent);border:none;border-radius:8px;color:#000;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">Add to my Spotify</button>`
     }
@@ -2643,7 +2654,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
     btn.textContent = 'Copying…';
     status.style.display = 'block';
     status.textContent = `Adding ${trackMeta.length} tracks…`;
-    const isAppleUser = userId.endsWith('_apple');
+    const isAppleUser = _isAppleMap();
     const endpoint = isAppleUser ? '/import-to-apple' : '/import-friend-playlist';
     console.log('[import] playlist:', name, '| tracks:', trackMeta.length, '| friend:', compareDisplayName, '| endpoint:', endpoint);
     try {
@@ -2651,7 +2662,14 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlist_name: name, tracks: trackMeta, friend_display_name: compareDisplayName }),
+        body: JSON.stringify({
+          playlist_name: name,
+          tracks: trackMeta,
+          friend_display_name: compareDisplayName,
+          ...(isAppleUser && typeof MusicKit !== 'undefined' && MusicKit.getInstance?.().musicUserToken
+            ? { music_user_token: MusicKit.getInstance().musicUserToken, storefront: MusicKit.getInstance().storefrontCountryCode || 'us' }
+            : {}),
+        }),
       });
       console.log('[import] response status:', resp.status);
       if (resp.status === 401) {
@@ -2665,7 +2683,9 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       }
       if (resp.status === 403) {
         status.style.color = '#f87171';
-        status.innerHTML = 'Spotify permissions missing — <a href="/auth/login" style="color:var(--accent)">reconnect Spotify</a> then try again';
+        status.innerHTML = isAppleUser
+          ? 'Apple Music permissions missing — reconnect Apple Music then try again'
+          : 'Spotify permissions missing — <a href="/auth/login" style="color:var(--accent)">reconnect Spotify</a> then try again';
         btn.disabled = false;
         btn.textContent = 'Retry';
         return;
@@ -2678,7 +2698,9 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       }
       const d = await resp.json();
       status.style.color = 'var(--accent)';
-      status.textContent = `Added ${d.track_count} tracks to "${d.name}"`;
+      status.textContent = isAppleUser
+        ? `Added ${d.track_count} tracks to "${d.name}" — Apple Music may take a minute to show it`
+        : `Added ${d.track_count} tracks to "${d.name}"`;
       btn.textContent = 'Done!';
     } catch (e) {
       console.error('[import] failed:', e.message);
@@ -3565,6 +3587,37 @@ let _ttRange = 'short_term';
 
 async function _loadTopTracks(range) {
   const listEl = document.getElementById('tt-list');
+  const panel = document.getElementById('top-tracks-panel');
+  const header = panel.querySelector('.tt-header');
+  const toggles = panel.querySelector('.tt-toggles');
+
+  if (_isAppleMap()) {
+    header.textContent = 'Apple Music Map';
+    toggles.style.display = 'none';
+    const localTracks = [...points]
+      .sort((a, b) => (b.play_score || 0) - (a.play_score || 0))
+      .slice(0, 7);
+    if (!localTracks.length) {
+      listEl.innerHTML = '<div style="font-size:.65rem;color:var(--text-dim)">No Apple Music tracks in this map yet</div>';
+      return;
+    }
+    listEl.innerHTML = localTracks.map((t, i) => {
+      const row = `
+        <span class="tt-rank">${i + 1}</span>
+        ${t.album_art ? `<img class="tt-art" src="${esc(t.album_art)}" loading="lazy" alt="" />` : '<div class="tt-art"></div>'}
+        <div class="tt-info">
+          <div class="tt-name">${esc(t.name || 'Untitled')}</div>
+          <div class="tt-artist">${esc(t.artist || '')}</div>
+        </div>`;
+      return t.external_url
+        ? `<a class="tt-track" href="${esc(t.external_url)}" target="_blank" rel="noopener">${row}</a>`
+        : `<div class="tt-track">${row}</div>`;
+    }).join('');
+    return;
+  }
+
+  header.textContent = 'Top Tracks';
+  toggles.style.display = '';
   listEl.innerHTML = '<div style="font-size:.65rem;color:var(--text-dim)">Loading…</div>';
   try {
     const resp = await fetch(`/top-tracks?time_range=${range}`);
@@ -3593,9 +3646,6 @@ document.querySelectorAll('.tt-toggle').forEach(btn => {
     _loadTopTracks(_ttRange);
   });
 });
-
-// Load on page init (after data loads — deferred via setTimeout)
-setTimeout(() => _loadTopTracks(_ttRange), 500);
 
 // ---------------------------------------------------------------------------
 // Sidebar
@@ -4118,7 +4168,7 @@ async function _runAiCurator() {
         </div>
         <div style="display:flex;gap:.5rem">
           <button id="ai-show-map" class="btn-secondary" style="flex:1">Show on map</button>
-          <button id="ai-add-spotify" class="btn-primary" style="flex:1">Add to Spotify →</button>
+          <button id="ai-add-spotify" class="btn-primary" style="flex:1">${_isAppleMap() ? 'Add to Apple Music →' : 'Add to Spotify →'}</button>
         </div>
         <div id="ai-add-status" style="font-size:.72rem;margin-top:.5rem;display:none"></div>`;
 
@@ -4145,23 +4195,45 @@ async function _runAiCurator() {
         addBtn.textContent = 'Creating…';
         statusEl.style.display = 'none';
         try {
-          const r = await fetch('/create-ai-playlist', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name: data.name, track_ids: selIds, prompt: data.prompt || ''}),
-          });
+          const isApple = _isAppleMap();
+          let r;
+          if (isApple) {
+            const trackMeta = points
+              .filter(p => selIds.includes(p.id))
+              .map(p => ({ id: p.id, name: p.name || '', artist: p.artist || '', isrc: p.isrc || null }));
+            r = await fetch('/import-to-apple', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({
+                playlist_name: data.name,
+                tracks: trackMeta,
+                friend_display_name: 'SoundMap AI',
+                ...(typeof MusicKit !== 'undefined' && MusicKit.getInstance?.().musicUserToken
+                  ? { music_user_token: MusicKit.getInstance().musicUserToken, storefront: MusicKit.getInstance().storefrontCountryCode || 'us' }
+                  : {}),
+              }),
+            });
+          } else {
+            r = await fetch('/create-ai-playlist', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({name: data.name, track_ids: selIds, prompt: data.prompt || ''}),
+            });
+          }
           const d = await r.json();
           if (!r.ok) throw new Error(d.detail || 'Failed');
           statusEl.style.display = 'block';
           statusEl.style.color = 'var(--accent)';
-          statusEl.innerHTML = `✓ Created <a href="${d.url}" target="_blank" style="color:var(--accent)">${esc(d.name)}</a> — ${d.track_count} tracks`;
+          statusEl.innerHTML = d.url
+            ? `✓ Created <a href="${d.url}" target="_blank" style="color:var(--accent)">${esc(d.name)}</a> — ${d.track_count} tracks`
+            : `✓ Created ${esc(d.name)} — ${d.track_count} tracks`;
           addBtn.textContent = '✓ Added';
         } catch (err) {
           statusEl.style.display = 'block';
           statusEl.style.color = '#f87171';
           statusEl.textContent = err.message;
           addBtn.disabled = false;
-          addBtn.textContent = 'Add to Spotify →';
+          addBtn.textContent = _isAppleMap() ? 'Add to Apple Music →' : 'Add to Spotify →';
         }
       });
     }
@@ -4334,6 +4406,12 @@ document.getElementById('merge-confirm').addEventListener('click', async () => {
 // Refresh button
 // ---------------------------------------------------------------------------
 document.getElementById('btn-refresh').addEventListener('click', () => {
+  if (_isAppleMap()) {
+    if (confirm('Rebuild your map with your latest Apple Music library? This takes ~2 minutes.')) {
+      _startAppleMapJob(true);
+    }
+    return;
+  }
   if (confirm('Rebuild your map with your latest Spotify library? This takes ~2 minutes.')) {
     location.href = '/auth/login?force=1';
   }
@@ -5389,6 +5467,10 @@ document.getElementById('now-playing').addEventListener('click', () => {
 
 // Start polling after map loads so `points` is populated
 function startNowPlayingPolling() {
+  if (_isAppleMap()) {
+    document.getElementById('now-playing')?.classList.remove('visible');
+    return;
+  }
   pollNowPlaying();
   setInterval(pollNowPlaying, 5000);
 }
@@ -5405,13 +5487,7 @@ document.getElementById('apple-modal').addEventListener('click', e => {
 
 document.getElementById('btn-apple').addEventListener('click', () => _openAppleModal());
 
-async function _openAppleModal() {
-  const modal = document.getElementById('apple-modal');
-  const body = document.getElementById('apple-modal-body');
-  modal.classList.add('open');
-  body.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:.5rem 0">Loading MusicKit…</div>';
-
-  try {
+async function _ensureAppleMusicKit() {
     const resp = await fetch('/apple/token');
     if (!resp.ok) {
       const e = await resp.json();
@@ -5436,7 +5512,51 @@ async function _openAppleModal() {
       throw new Error(`MusicKit config failed: ${mkErr.message || mkErr} — visit /apple/test to diagnose`);
     }
 
-    const instance = MusicKit.getInstance();
+    return MusicKit.getInstance();
+}
+
+async function _startAppleMapJob(force = false) {
+  const modal = document.getElementById('apple-modal');
+  const body = document.getElementById('apple-modal-body');
+  modal.classList.add('open');
+  body.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:.5rem 0">Connecting to Apple Music…</div>';
+
+  try {
+    const instance = await _ensureAppleMusicKit();
+    if (!instance.isAuthorized) {
+      _showAppleAuth(() => _startAppleMapJob(force));
+      return;
+    }
+
+    body.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:.5rem 0">Starting Apple Music rebuild…</div>';
+    const { provider, key } = _getAiSettings();
+    const resp = await fetch('/apple/start-job', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        music_user_token: instance.musicUserToken,
+        storefront: instance.storefrontCountryCode || 'us',
+        api_key: key || undefined,
+        provider,
+        force,
+      }),
+    });
+    if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail || 'Failed to start'); }
+    const { job_id, user_id: appleUserId } = await resp.json();
+    location.href = `/loading.html?user=${encodeURIComponent(appleUserId)}&job=${encodeURIComponent(job_id)}`;
+  } catch (err) {
+    body.innerHTML = `<div style="color:#f87171;font-size:.82rem;padding:.5rem 0">${esc(err.message)}</div>`;
+  }
+}
+
+async function _openAppleModal() {
+  const modal = document.getElementById('apple-modal');
+  const body = document.getElementById('apple-modal-body');
+  modal.classList.add('open');
+  body.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:.5rem 0">Loading MusicKit…</div>';
+
+  try {
+    const instance = await _ensureAppleMusicKit();
     if (instance.isAuthorized) {
       _showAppleChoice();
     } else {
@@ -5493,30 +5613,7 @@ function _showAppleChoice() {
   `;
 
   document.getElementById('apple-build-btn').addEventListener('click', async () => {
-    const btn = document.getElementById('apple-build-btn');
-    const errEl = document.getElementById('apple-choice-err');
-    btn.disabled = true;
-    btn.querySelector('span').textContent = 'Starting…';
-    errEl.style.display = 'none';
-    try {
-      const mu = MusicKit.getInstance();
-      const musicUserToken = mu.musicUserToken;
-      const storefront = mu.storefrontCountryCode || 'us';
-      const { provider, key } = _getAiSettings();
-      const resp = await fetch('/apple/start-job', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ music_user_token: musicUserToken, storefront, api_key: key || undefined, provider }),
-      });
-      if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail || 'Failed to start'); }
-      const { job_id, user_id: appleUserId } = await resp.json();
-      location.href = `/loading.html?user=${encodeURIComponent(appleUserId)}&job=${encodeURIComponent(job_id)}`;
-    } catch (err) {
-      btn.disabled = false;
-      btn.querySelector('span').textContent = 'Build Apple Music Map';
-      errEl.textContent = err.message;
-      errEl.style.display = 'block';
-    }
+    _startAppleMapJob(false);
   });
 
   document.getElementById('apple-transfer-choice-btn').addEventListener('click', () => {
@@ -5583,51 +5680,25 @@ async function _doAppleTransfer(selectedPlaylists) {
   for (let pi = 0; pi < selectedPlaylists.length; pi++) {
     const plName = selectedPlaylists[pi];
     const plTracks = points.filter(p => (p.playlists || []).includes(plName));
-    statusEl.textContent = `Searching "${plName}" (${pi + 1}/${selectedPlaylists.length})…`;
-
-    const catalogIds = [];
-    for (let i = 0; i < plTracks.length; i++) {
-      const t = plTracks[i];
-      try {
-        const res = await mu.api.music(`/v1/catalog/${storefront}/search`, {
-          term: `${t.name} ${t.artist}`,
-          types: 'songs',
-          limit: 1,
-        });
-        const song = res.data?.results?.songs?.data?.[0];
-        if (song) catalogIds.push(song.id);
-      } catch (_) {}
-      if (i % 10 === 9) {
-        statusEl.textContent = `Searching "${plName}" — ${catalogIds.length}/${i + 1} matched…`;
-        await new Promise(r => setTimeout(r, 50)); // breathe
-      }
-    }
-
-    if (!catalogIds.length) {
-      results.push({ name: plName, matched: 0, created: false });
-      continue;
-    }
-
-    statusEl.textContent = `Creating "${plName}" in Apple Music…`;
+    const trackMeta = plTracks.map(t => ({ id: t.id, name: t.name || '', artist: t.artist || '', isrc: t.isrc || null }));
+    statusEl.textContent = `Copying "${plName}" to Apple Music (${pi + 1}/${selectedPlaylists.length})…`;
     try {
-      await mu.api.music('/v1/me/library/playlists', {}, {
-        fetchOptions: {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            attributes: {
-              name: plName,
-              description: 'Transferred from SoundMap (Spotify)',
-            },
-            relationships: {
-              tracks: { data: catalogIds.map(id => ({ id, type: 'songs' })) },
-            },
-          }),
-        },
+      const resp = await fetch('/import-to-apple', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playlist_name: plName,
+          tracks: trackMeta,
+          friend_display_name: mapData?.display_name || 'SoundMap',
+          music_user_token: mu.musicUserToken,
+          storefront,
+        }),
       });
-      results.push({ name: plName, matched: catalogIds.length, total: plTracks.length, created: true });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Failed');
+      results.push({ name: plName, matched: data.track_count || 0, total: plTracks.length, created: true });
     } catch (err) {
-      results.push({ name: plName, matched: catalogIds.length, total: plTracks.length, created: false, error: err.message });
+      results.push({ name: plName, matched: 0, total: plTracks.length, created: false, error: err.message });
     }
   }
 
@@ -5647,8 +5718,9 @@ async function _doAppleTransfer(selectedPlaylists) {
 
   body.innerHTML = `
     <p style="font-size:.85rem;color:var(--accent);margin-bottom:.75rem">
-      ✓ Transferred ${created.length} of ${results.length} playlist${results.length !== 1 ? 's' : ''} to Apple Music
+      ✓ Sent ${created.length} of ${results.length} playlist${results.length !== 1 ? 's' : ''} to Apple Music
     </p>
+    <p style="font-size:.72rem;color:var(--text-dim);line-height:1.5;margin-bottom:.6rem">Apple Music can take a minute to show newly-created playlists in your library.</p>
     <div style="max-height:260px;overflow-y:auto;scrollbar-width:thin">${rows}</div>
     <button id="apple-transfer-again" class="btn-secondary" style="width:100%;margin-top:.75rem">Transfer more</button>
   `;

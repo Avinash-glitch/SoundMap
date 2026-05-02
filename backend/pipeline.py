@@ -835,6 +835,7 @@ def process_apple_user(
     on_progress=None,
     api_key: str = "",
     provider: str = "",
+    force: bool = False,
 ) -> dict:
     """
     Full pipeline for an Apple Music library.
@@ -849,7 +850,7 @@ def process_apple_user(
 
     apple_id = f"{user_id}_apple"
 
-    if storage.map_exists(apple_id) and storage.map_age_hours(apple_id) < 24:
+    if not force and storage.map_exists(apple_id) and storage.map_age_hours(apple_id) < 24:
         progress(100, "Loaded from cache.")
         return storage.load_map(apple_id)
 
