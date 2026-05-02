@@ -146,6 +146,11 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
     else:
         top_s = []
     top_track_ids: set[str] = {t["id"] for t in top_s if t.get("id")}
+    current_taste_scores: dict[str, int] = {
+        t["id"]: max(1, 100 - i * 2)
+        for i, t in enumerate(top_s[:50])
+        if t.get("id")
+    }
 
     if not _stopped():
         top_m = _fetch_top_tracks_range(headers, "medium_term")
@@ -179,6 +184,7 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
         t["recency_score"] = recency_scored.get(t["id"], 0)
         t["depth_score"] = depth_scored.get(t["id"], 0)
         t["is_top_track"] = t["id"] in top_track_ids
+        t["current_taste_score"] = current_taste_scores.get(t["id"], 0)
 
     tracks = sorted(all_candidates, key=lambda t: t["play_score"], reverse=True)
 
@@ -770,6 +776,14 @@ def _fetch_apple_library(
     track_to_pls: dict[str, list[str]] = {}
     all_track_attrs: dict[str, dict] = {}
 
+    def _merge_attrs(tid: str, attrs: dict) -> None:
+        if not tid:
+            return
+        current = all_track_attrs.setdefault(tid, {})
+        for key, value in (attrs or {}).items():
+            if value and not current.get(key):
+                current[key] = value
+
     for i, pl in enumerate(playlists):
         pl_name = (pl.get("attributes") or {}).get("name") or f"Playlist {i + 1}"
         pl_id = pl["id"]
@@ -780,8 +794,7 @@ def _fetch_apple_library(
             if not tid:
                 continue
             attrs = t.get("attributes") or {}
-            if tid not in all_track_attrs:
-                all_track_attrs[tid] = attrs
+            _merge_attrs(tid, attrs)
             track_to_pls.setdefault(tid, []).append(pl_name)
 
     if on_progress:
@@ -789,8 +802,30 @@ def _fetch_apple_library(
 
     for t in _get_all("/v1/me/library/songs"):
         tid = t.get("id")
-        if tid and tid not in all_track_attrs:
-            all_track_attrs[tid] = t.get("attributes") or {}
+        _merge_attrs(tid, t.get("attributes") or {})
+
+    if on_progress:
+        on_progress(53, "Checking recent Apple Music plays…")
+
+    heavy_items = _get_all("/v1/me/history/heavy-rotation")
+    recent_items = _get_all("/v1/me/recent/played/tracks")
+    recent_rank: dict[str, int] = {}
+    current_taste_rank: dict[str, int] = {}
+    for rank, item in enumerate([*heavy_items[:50], *recent_items[:50]]):
+        attrs = item.get("attributes") or {}
+        keys = {
+            item.get("id") or "",
+            attrs.get("isrc") or "",
+            f"{(attrs.get('name') or '').strip().lower()}|{(attrs.get('artistName') or '').strip().lower()}",
+        }
+        play_params = attrs.get("playParams") or {}
+        keys.add(play_params.get("id") or "")
+        keys.add(play_params.get("catalogId") or "")
+        for key in keys:
+            if key and key not in recent_rank:
+                recent_rank[key] = rank
+            if key and key not in current_taste_rank:
+                current_taste_rank[key] = rank
 
     if on_progress:
         on_progress(55, f"Processing {len(all_track_attrs)} tracks…")
@@ -802,6 +837,24 @@ def _fetch_apple_library(
         art_url = artwork.get("url", "").replace("{w}", "60").replace("{h}", "60")
         rd = attrs.get("releaseDate") or ""
         release_year = int(rd[:4]) if len(rd) >= 4 and rd[:4].isdigit() else None
+        date_added = attrs.get("dateAdded") or attrs.get("addedDate") or ""
+        track_key = f"{(attrs.get('name') or '').strip().lower()}|{(attrs.get('artistName') or '').strip().lower()}"
+        recent_pos = min(
+            (
+                recent_rank[key]
+                for key in (tid, attrs.get("isrc") or "", track_key)
+                if key in recent_rank
+            ),
+            default=None,
+        )
+        current_pos = min(
+            (
+                current_taste_rank[key]
+                for key in (tid, attrs.get("isrc") or "", track_key)
+                if key in current_taste_rank
+            ),
+            default=None,
+        )
 
         tracks_out.append({
             "id": tid,
@@ -819,10 +872,22 @@ def _fetch_apple_library(
             "isrc": attrs.get("isrc"),
             "playlists": track_to_pls.get(tid, []),
             "genre_tags": [g.lower() for g in genre_names[:5]],
-            "play_score": 1,
-            "liked_at": "",
-            "is_top_track": False,
+            "play_score": 100 - recent_pos if recent_pos is not None else 1,
+            "liked_at": date_added,
+            "is_top_track": recent_pos is not None,
+            "current_taste_score": 100 - current_pos if current_pos is not None else 0,
         })
+
+    if not any(t.get("is_top_track") for t in tracks_out):
+        dated = sorted(
+            [t for t in tracks_out if t.get("liked_at")],
+            key=lambda t: t.get("liked_at") or "",
+            reverse=True,
+        )
+        for rank, track in enumerate(dated[:50]):
+            track["is_top_track"] = True
+            track["play_score"] = max(track.get("play_score", 1), 100 - rank)
+            track["current_taste_score"] = max(track.get("current_taste_score", 0), 100 - rank)
 
     print(f"[apple] library: {len(tracks_out)} tracks across {len(playlists)} playlists")
     return tracks_out
@@ -881,7 +946,7 @@ def process_apple_user(
     playlist_track_ids = {t["id"] for t in tracks if t.get("playlists")}
     remaining_slim = [
         {"id": t["id"], "name": t["name"], "artist": t["artist"],
-         "album_art": t["album_art"], "liked_at": "", "release_year": t.get("release_year")}
+         "album_art": t["album_art"], "liked_at": t.get("liked_at") or "", "release_year": t.get("release_year")}
         for t in tracks if t["id"] not in playlist_track_ids
     ]
 

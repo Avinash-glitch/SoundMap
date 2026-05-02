@@ -1107,6 +1107,7 @@
       /* Hide desktop-only topbar items on mobile */
       #btn-compare,
       #btn-brain,
+      #btn-taste-chart,
       #btn-merge,
       #btn-apple,
       #btn-save-moods,
@@ -1405,6 +1406,12 @@
         <line x1="12" y1="7" x2="12" y2="10"/><line x1="12" y1="14" x2="12" y2="17"/>
       </svg>
       Scatter
+    </button>
+    <button class="btn-icon" id="btn-taste-chart" title="Current taste vs release year" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
+        <path d="M4 19V5"/><path d="M4 19h16"/><circle cx="9" cy="15" r="1.5"/><circle cx="13" cy="11" r="1.5"/><circle cx="18" cy="7" r="1.5"/>
+      </svg>
+      Taste Era
     </button>
     <button class="btn-icon" id="btn-ai" title="AI Playlist Curator" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.35rem;border-color:rgba(29,185,84,.4)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
@@ -1757,6 +1764,7 @@
   <div class="mobile-more-panel">
     <div class="mobile-more-title">More</div>
     <button class="mobile-more-action apple" id="mobile-more-apple" type="button">Connect Apple Music</button>
+    <button class="mobile-more-action" id="mobile-more-chart" type="button">Taste era chart</button>
     <button class="mobile-more-action" id="mobile-more-merge" type="button">Merge playlists</button>
     <button class="mobile-more-action" id="mobile-more-moods" type="button">Save mood playlists</button>
     <button class="mobile-more-action" id="mobile-more-remaining" type="button">Organise remaining tracks</button>
@@ -1831,6 +1839,7 @@ let selectedPoint = null;
 let hoveredPoint = null;
 let mapMode = 'playlists'; // 'moods' | 'playlists'
 let aiHighlightSet = null; // Set<string> | null — IDs returned by AI curator
+let chartMode = false;
 
 function _isAppleMap() {
   return userId.endsWith('_apple') || mapData?.source === 'apple';
@@ -1866,9 +1875,10 @@ let _friendMapData = null;
 let drilldownTracks = null;
 let drilldownHovered = null;
 
-// Chart mode state — X = liked_at date, Y = release_year
+// Chart mode state — X = current taste depth, Y = release_year
 let chartLikedAtRange = [Date.now() - 5 * 365 * 86400e3, Date.now()]; // fallback: last 5 years
 let chartYearRange    = [1960, 2025];                                    // fallback release year range
+let chartTasteRange   = [0, 100];
 const CHART_ML = 52;   // left margin (Y-axis labels)
 const CHART_MB = 38;   // bottom margin (X-axis labels)
 const CHART_MT = 24;   // top margin
@@ -1956,10 +1966,10 @@ async function loadMap() {
     buildMoodColors(mapData.moods || []);
     buildPlaylistColors(mapData.playlists || []);
 
-    // Chart ranges — derived from top tracks only (they have is_top_track=true)
-    const topPts = points.filter(p => p.is_top_track && p.liked_at && p.release_year);
-    const topLikedAts = topPts.map(p => new Date(p.liked_at).getTime());
-    if (topLikedAts.length) chartLikedAtRange = [Math.min(...topLikedAts), Math.max(...topLikedAts)];
+    // Chart ranges — current-taste depth vs release year.
+    const topPts = _currentTasteTracks();
+    const topScores = topPts.map(_currentTasteScore).filter(s => s > 0);
+    if (topScores.length) chartTasteRange = [0, Math.max(...topScores)];
     const topYears = topPts.map(p => p.release_year).filter(y => y > 1900);
     if (topYears.length) chartYearRange = [Math.min(...topYears) - 1, Math.max(...topYears) + 1];
 
@@ -2034,6 +2044,7 @@ const COLOR_OTHERS  = '#7c8aa0';
 let activeGenreFilter = null;
 
 function render() {
+  if (chartMode) { _hideBrainOverlay(); _hideCompareBrainView(); renderChart(); return; }
   if (comparePoints.length && brainMode) { _hideBrainOverlay(); _showCompareBrainView(); return; }
   if (comparePoints.length) { _hideBrainOverlay(); _hideCompareBrainView(); renderWithCompare(); return; }
   _hideCompareBrainView();
@@ -3457,6 +3468,7 @@ function hitTestOwn(cx, cy) {
 }
 
 function hitTest(cx, cy) {
+  if (chartMode) return hitTestChart(cx, cy);
   return comparePoints.length ? hitTestAll(cx, cy) : hitTestOwn(cx, cy);
 }
 
@@ -3612,39 +3624,68 @@ document.getElementById('legend-remaining-btn').addEventListener('click', () => 
 // ---------------------------------------------------------------------------
 let _ttRange = 'short_term';
 
+function _currentTasteScore(p) {
+  return Number(p.current_taste_score || p.recency_score || (p.is_top_track ? p.play_score : 0) || 0);
+}
+
+function _currentTasteTracks() {
+  return [...points]
+    .filter(p => p.release_year && (p.is_top_track || _currentTasteScore(p) > 0))
+    .sort((a, b) => _currentTasteScore(b) - _currentTasteScore(a))
+    .slice(0, 50);
+}
+
+function _tasteEraInsight(tracks) {
+  const yrs = tracks.map(t => Number(t.release_year)).filter(y => y > 1900);
+  if (!yrs.length) return 'Your current era is still coming into focus.';
+  const buckets = {};
+  for (const yr of yrs) {
+    const decade = Math.floor(yr / 10) * 10;
+    buckets[decade] = (buckets[decade] || 0) + 1;
+  }
+  const [decade, count] = Object.entries(buckets).sort((a, b) => b[1] - a[1])[0];
+  const pct = Math.round((count / yrs.length) * 100);
+  return `Your current taste leans ${decade}s — ${pct}% of your strongest recent tracks come from that era.`;
+}
+
 async function _loadTopTracks(range) {
   const listEl = document.getElementById('tt-list');
   const panel = document.getElementById('top-tracks-panel');
   const header = panel.querySelector('.tt-header');
   const toggles = panel.querySelector('.tt-toggles');
+  const renderLocalTaste = () => {
+    const localTracks = _currentTasteTracks().slice(0, 7);
+    if (!localTracks.length) {
+      listEl.innerHTML = '<div style="font-size:.65rem;color:var(--text-dim)">No current-taste tracks in this map yet</div>';
+      return true;
+    }
+    listEl.innerHTML = `
+      <div style="font-size:.68rem;color:var(--accent);line-height:1.45;margin-bottom:.65rem">${esc(_tasteEraInsight(_currentTasteTracks()))}</div>
+      ${localTracks.map((t, i) => {
+        const row = `
+          <span class="tt-rank">${i + 1}</span>
+          ${t.album_art ? `<img class="tt-art" src="${esc(t.album_art)}" loading="lazy" alt="" />` : '<div class="tt-art"></div>'}
+          <div class="tt-info">
+            <div class="tt-name">${esc(t.name || 'Untitled')}</div>
+            <div class="tt-artist">${esc(t.artist || '')}${t.release_year ? ` · ${t.release_year}` : ''}</div>
+          </div>`;
+        return t.external_url
+          ? `<a class="tt-track" href="${esc(t.external_url)}" target="_blank" rel="noopener">${row}</a>`
+          : `<div class="tt-track">${row}</div>`;
+      }).join('')}`;
+    return true;
+  };
 
   if (_isAppleMap()) {
-    header.textContent = 'Apple Music Map';
+    header.textContent = 'Current Taste';
     toggles.style.display = 'none';
-    const localTracks = [...points]
-      .sort((a, b) => (b.play_score || 0) - (a.play_score || 0))
-      .slice(0, 7);
-    if (!localTracks.length) {
-      listEl.innerHTML = '<div style="font-size:.65rem;color:var(--text-dim)">No Apple Music tracks in this map yet</div>';
-      return;
-    }
-    listEl.innerHTML = localTracks.map((t, i) => {
-      const row = `
-        <span class="tt-rank">${i + 1}</span>
-        ${t.album_art ? `<img class="tt-art" src="${esc(t.album_art)}" loading="lazy" alt="" />` : '<div class="tt-art"></div>'}
-        <div class="tt-info">
-          <div class="tt-name">${esc(t.name || 'Untitled')}</div>
-          <div class="tt-artist">${esc(t.artist || '')}</div>
-        </div>`;
-      return t.external_url
-        ? `<a class="tt-track" href="${esc(t.external_url)}" target="_blank" rel="noopener">${row}</a>`
-        : `<div class="tt-track">${row}</div>`;
-    }).join('');
+    renderLocalTaste();
     return;
   }
 
   header.textContent = 'Top Tracks';
   toggles.style.display = '';
+  if (range === 'short_term' && renderLocalTaste()) return;
   listEl.innerHTML = '<div style="font-size:.65rem;color:var(--text-dim)">Loading…</div>';
   try {
     const resp = await fetch(`/top-tracks?time_range=${range}`);
@@ -4491,6 +4532,7 @@ document.getElementById('mobile-more-sheet')?.addEventListener('click', e => {
 });
 
 document.getElementById('mobile-more-apple')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-apple'); });
+document.getElementById('mobile-more-chart')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-taste-chart'); });
 document.getElementById('mobile-more-merge')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-merge'); });
 document.getElementById('mobile-more-moods')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-save-moods'); });
 document.getElementById('mobile-more-remaining')?.addEventListener('click', () => { _closeMobileMore(); _openRemainingModal(); });
@@ -4498,6 +4540,7 @@ document.getElementById('mobile-more-rebuild')?.addEventListener('click', () => 
 document.getElementById('mobile-more-delete')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-delete-data'); });
 
 document.getElementById('btn-brain').addEventListener('click', () => {
+  chartMode = false;
   brainMode = !brainMode;
   brainHovered = null;
   _svgBrainSelected = null;
@@ -4521,6 +4564,19 @@ document.getElementById('btn-brain').addEventListener('click', () => {
     canvas.style.cursor = 'grab';
   }
   if (!brainMode) _hideCompareBrainView();
+  render();
+});
+
+document.getElementById('btn-taste-chart').addEventListener('click', () => {
+  chartMode = !chartMode;
+  brainMode = false;
+  activeGenreFilter = null;
+  selectedPoint = null;
+  hoveredPoint = null;
+  document.getElementById('track-tooltip').classList.remove('visible');
+  const btn = document.getElementById('btn-taste-chart');
+  btn.style.borderColor = chartMode ? 'rgba(29,185,84,.55)' : '';
+  btn.style.color = chartMode ? 'var(--accent)' : '';
   render();
 });
 
@@ -4938,14 +4994,14 @@ document.getElementById('compare-modal').addEventListener('click', e => {
 });
 
 // ---------------------------------------------------------------------------
-// Chart mode — Popularity vs Release Year
+// Chart mode — Current Taste vs Release Year
 // ---------------------------------------------------------------------------
 
-// X = liked_at timestamp (ms), Y = release_year
-function chartToCanvas(likedAtMs, releaseYear) {
-  const [minTs, maxTs] = chartLikedAtRange;
+// X = current taste score, Y = release_year
+function chartToCanvas(tasteScore, releaseYear) {
+  const [minTaste, maxTaste] = chartTasteRange;
   const [minYr, maxYr] = chartYearRange;
-  const cx = CHART_ML + (likedAtMs - minTs) / Math.max(maxTs - minTs, 1) * (W - CHART_ML - CHART_MR);
+  const cx = CHART_ML + (tasteScore - minTaste) / Math.max(maxTaste - minTaste, 1) * (W - CHART_ML - CHART_MR);
   const cy = CHART_MT + (1 - (releaseYear - minYr) / Math.max(maxYr - minYr, 1)) * (H - CHART_MT - CHART_MB);
   return { cx, cy };
 }
@@ -4954,15 +5010,23 @@ function renderChart() {
   ctx.clearRect(0, 0, W, H);
   ctx.font = '10px DM Mono, monospace';
 
-  const [minTs, maxTs] = chartLikedAtRange;
+  const [minTaste, maxTaste] = chartTasteRange;
   const [minYr, maxYr] = chartYearRange;
-  const minDate = new Date(minTs);
-  const maxDate = new Date(maxTs);
+  const chartTracks = _currentTasteTracks();
 
-  // ---- X grid: one line per year the user was actively liking songs ----
-  for (let yr = minDate.getFullYear(); yr <= maxDate.getFullYear(); yr++) {
-    const ts = new Date(yr, 0, 1).getTime();
-    const { cx } = chartToCanvas(ts, minYr);
+  if (!chartTracks.length) {
+    ctx.fillStyle = '#888899';
+    ctx.textAlign = 'center';
+    ctx.font = '12px DM Mono, monospace';
+    ctx.fillText('No current-taste tracks with release years yet. Rebuild your map first.', W / 2, H / 2);
+    return;
+  }
+
+  // ---- X grid: current-taste depth ----
+  const xSteps = 5;
+  for (let i = 0; i <= xSteps; i++) {
+    const score = minTaste + (maxTaste - minTaste) * (i / xSteps);
+    const { cx } = chartToCanvas(score, minYr);
     ctx.strokeStyle = 'rgba(42,42,53,0.7)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -4971,14 +5035,14 @@ function renderChart() {
     ctx.stroke();
     ctx.fillStyle = '#666677';
     ctx.textAlign = 'center';
-    ctx.fillText(yr.toString(), cx, H - CHART_MB + 14);
+    ctx.fillText(i === xSteps ? 'deep' : Math.round(score).toString(), cx, H - CHART_MB + 14);
   }
 
   // ---- Y grid: release year every 5 or 10 years ----
   const step = (maxYr - minYr) > 40 ? 10 : 5;
   const startY = Math.ceil(minYr / step) * step;
   for (let yr = startY; yr <= maxYr; yr += step) {
-    const { cy } = chartToCanvas(minTs, yr);
+    const { cy } = chartToCanvas(minTaste, yr);
     const isMajor = yr % 10 === 0;
     ctx.strokeStyle = isMajor ? 'rgba(42,42,53,0.8)' : 'rgba(42,42,53,0.35)';
     ctx.lineWidth = isMajor ? 1 : 0.5;
@@ -4997,7 +5061,7 @@ function renderChart() {
   ctx.fillStyle = '#888899';
   ctx.font = '11px DM Mono, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('Date added to Liked Songs →  (top 50 recent tracks)', W / 2, H - 5);
+  ctx.fillText('How deep it is in your current taste →', W / 2, H - 5);
   ctx.save();
   ctx.translate(13, H / 2);
   ctx.rotate(-Math.PI / 2);
@@ -5013,11 +5077,11 @@ function renderChart() {
   ctx.lineTo(W - CHART_MR, H - CHART_MB);
   ctx.stroke();
 
-  // ---- Dots — top tracks that also have a liked_at date ----
-  for (const p of points) {
-    if (!p.is_top_track || !p.liked_at || !p.release_year) continue;
-    const likedAtMs = new Date(p.liked_at).getTime();
-    const { cx, cy } = chartToCanvas(likedAtMs, p.release_year);
+  // ---- Dots — top 50 current taste tracks ----
+  for (const p of chartTracks) {
+    const tasteScore = _currentTasteScore(p);
+    if (!tasteScore || !p.release_year) continue;
+    const { cx, cy } = chartToCanvas(tasteScore, p.release_year);
     const isSel = selectedPoint && selectedPoint.id === p.id;
     const isHov = hoveredPoint && hoveredPoint.id === p.id;
     const color = pointColor(p);
@@ -5043,10 +5107,10 @@ function renderChart() {
 
 function hitTestChart(cx, cy) {
   let best = null, bestDist = HIT_RADIUS + 4;
-  for (const p of points) {
-    if (!p.liked_at || !p.release_year) continue;
-    const likedAtMs = new Date(p.liked_at).getTime();
-    const { cx: px, cy: py } = chartToCanvas(likedAtMs, p.release_year);
+  for (const p of _currentTasteTracks()) {
+    const tasteScore = _currentTasteScore(p);
+    if (!tasteScore || !p.release_year) continue;
+    const { cx: px, cy: py } = chartToCanvas(tasteScore, p.release_year);
     const d = Math.hypot(cx - px, cy - py);
     if (d < bestDist) { bestDist = d; best = p; }
   }
