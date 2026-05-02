@@ -1903,10 +1903,25 @@ async function loadMap() {
     if (mapData.source === 'apple') {
       const dot = document.querySelector('.user-badge .dot');
       if (dot) { dot.style.background = '#fa3c44'; }
-      const appleBtn = document.getElementById('btn-apple');
-      appleBtn.style.background = 'rgba(250,60,60,.12)';
-      appleBtn.lastChild.textContent = ' Apple Connected';
+      const crossServiceBtn = document.getElementById('btn-apple');
+      crossServiceBtn.title = 'Connect Spotify';
+      crossServiceBtn.style.background = 'rgba(29,185,84,.10)';
+      crossServiceBtn.style.borderColor = 'rgba(29,185,84,.45)';
+      crossServiceBtn.style.color = 'var(--accent)';
+      crossServiceBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0">
+          <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.52 17.34c-.24.36-.66.48-1.02.24-2.82-1.74-6.36-2.1-10.56-1.14-.42.12-.78-.18-.9-.54-.12-.42.18-.78.54-.9 4.56-1.02 8.52-.6 11.64 1.32.42.18.48.66.3 1.02zm1.44-3.3c-.3.42-.84.6-1.26.3-3.24-1.98-8.16-2.58-11.94-1.38-.48.12-1.02-.12-1.14-.6-.12-.48.12-1.02.6-1.14 4.38-1.32 9.78-.66 13.5 1.62.36.18.54.78.24 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.3c-.6.18-1.2-.18-1.38-.72-.18-.6.18-1.2.72-1.38 4.26-1.26 11.28-1.02 15.72 1.62.54.3.72 1.02.42 1.56-.3.42-1.02.6-1.56.3z"/>
+        </svg>
+        Connect Spotify`;
+      const mobileApple = document.getElementById('mobile-more-apple');
+      if (mobileApple) {
+        mobileApple.textContent = 'Connect Spotify';
+        mobileApple.classList.remove('apple');
+      }
       document.getElementById('btn-save-moods').style.display = 'none';
+    } else {
+      const crossServiceBtn = document.getElementById('btn-apple');
+      crossServiceBtn.lastChild.textContent = ' Connect Apple Music';
     }
 
     // Normalise coords to canvas space
@@ -5485,7 +5500,13 @@ document.getElementById('apple-modal').addEventListener('click', e => {
   if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
 });
 
-document.getElementById('btn-apple').addEventListener('click', () => _openAppleModal());
+document.getElementById('btn-apple').addEventListener('click', () => {
+  if (_isAppleMap()) {
+    location.href = '/auth/login?next=apple';
+    return;
+  }
+  _openAppleModal();
+});
 
 async function _ensureAppleMusicKit() {
     const resp = await fetch('/apple/token');
