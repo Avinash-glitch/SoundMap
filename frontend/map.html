@@ -4758,7 +4758,7 @@ function _renderFriendPlaylists() {
       <div id="friend-pl-status" style="font-size:.7rem;margin-bottom:.5rem;display:none;line-height:1.5"></div>
       <button id="btn-import-playlists"
         style="width:100%;padding:.45rem;background:var(--accent2);color:#fff;border:none;border-radius:6px;font-size:.75rem;cursor:pointer;font-weight:600">
-        Add selected to my Spotify
+        ${_isAppleMap() ? 'Add selected to my Apple Music' : 'Add selected to my Spotify'}
       </button>
     </div>`;
 
@@ -4783,6 +4783,8 @@ async function _importSelectedPlaylists() {
   btn.disabled = true;
   statusEl.style.display = 'block';
   statusEl.style.color = 'var(--text-dim)';
+  const isApple = _isAppleMap();
+  const endpoint = isApple ? '/import-to-apple' : '/import-friend-playlist';
 
   const results = [];
   for (let i = 0; i < checks.length; i++) {
@@ -4792,13 +4794,16 @@ async function _importSelectedPlaylists() {
     statusEl.textContent = `Importing ${i + 1}/${checks.length}: ${name}…`;
 
     try {
-      const resp = await fetch('/import-friend-playlist', {
+      const resp = await fetch(endpoint, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           playlist_name: name,
           tracks,
           friend_display_name: compareDisplayName,
+          ...(isApple && typeof MusicKit !== 'undefined' && MusicKit.getInstance?.().musicUserToken
+            ? { music_user_token: MusicKit.getInstance().musicUserToken, storefront: MusicKit.getInstance().storefrontCountryCode || 'us' }
+            : {}),
         }),
       });
       if (resp.ok) {
@@ -4814,9 +4819,12 @@ async function _importSelectedPlaylists() {
 
   const succeeded = results.filter(r => r.ok);
   const failed = results.filter(r => !r.ok);
-  let msg = succeeded.map(r =>
-    `<a href="${_esc(r.url)}" target="_blank" style="color:var(--accent2)">${_esc(r.name)}</a> — ${r.count} tracks added`
-  ).join('<br>');
+  let msg = succeeded.map(r => {
+    const nameHtml = r.url
+      ? `<a href="${_esc(r.url)}" target="_blank" style="color:var(--accent2)">${_esc(r.name)}</a>`
+      : _esc(r.name);
+    return `${nameHtml} — ${r.count} tracks added${isApple ? ' (may take a minute to show)' : ''}`;
+  }).join('<br>');
   if (failed.length) msg += (msg ? '<br>' : '') + `<span style="color:#f87171">Failed: ${failed.map(r => _esc(r.name)).join(', ')}</span>`;
   statusEl.innerHTML = msg || 'Done';
   btn.disabled = false;
