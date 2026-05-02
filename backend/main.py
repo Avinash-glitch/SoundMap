@@ -104,6 +104,12 @@ async def apple_login_page():
     return FileResponse(FRONTEND / "apple-login.html")
 
 
+@app.get("/demo.html")
+@app.get("/soundmap-demo.html")
+async def demo_page():
+    return FileResponse(FRONTEND / "demo.html")
+
+
 @app.get("/status/{job_id}")
 async def job_status(job_id: str) -> JSONResponse:
     job = get_job(job_id)
