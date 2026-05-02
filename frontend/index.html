@@ -28,6 +28,7 @@
       color: var(--text);
       font-family: 'DM Mono', monospace;
       overflow: hidden;
+      overflow-x: hidden;
     }
 
     /* ---- Background canvas ---- */
@@ -60,6 +61,7 @@
       font-size: clamp(3rem, 10vw, 6rem);
       letter-spacing: -0.03em;
       line-height: 1;
+      max-width: 100%;
       background: linear-gradient(135deg, #fff 40%, var(--accent) 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -314,7 +316,39 @@
 
     /* ---- Mobile ---- */
     @media (max-width: 480px) {
-      .btn-connect { padding: 0.85rem 2rem; font-size: 0.95rem; }
+      .page {
+        padding: 1rem;
+      }
+
+      .wordmark {
+        width: 100%;
+        font-size: clamp(2.55rem, 16vw, 4rem);
+        letter-spacing: 0;
+        line-height: 1.05;
+        overflow: visible;
+      }
+
+      .description {
+        max-width: 100%;
+        font-size: .82rem;
+        margin-bottom: 2rem;
+      }
+
+      .cta-group {
+        width: 100%;
+      }
+
+      .btn-connect {
+        padding: 0.85rem 2rem;
+        font-size: 0.95rem;
+        width: min(100%, 320px);
+        justify-content: center;
+      }
+
+      .btn-connect-apple {
+        width: min(100%, 320px);
+        justify-content: center;
+      }
     }
   </style>
 </head>
