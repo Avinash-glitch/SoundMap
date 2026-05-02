@@ -1836,6 +1836,20 @@ function _isAppleMap() {
   return userId.endsWith('_apple') || mapData?.source === 'apple';
 }
 
+function _appleMusicSessionPayload() {
+  if (typeof MusicKit === 'undefined' || typeof MusicKit.getInstance !== 'function') return {};
+  try {
+    const instance = MusicKit.getInstance();
+    if (!instance?.musicUserToken) return {};
+    return {
+      music_user_token: instance.musicUserToken,
+      storefront: instance.storefrontCountryCode || 'us',
+    };
+  } catch {
+    return {};
+  }
+}
+
 // Brain map state
 let brainMode = true;          // brain SVG is the default view
 let brainHovered = null;
@@ -2681,9 +2695,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
           playlist_name: name,
           tracks: trackMeta,
           friend_display_name: compareDisplayName,
-          ...(isAppleUser && typeof MusicKit !== 'undefined' && MusicKit.getInstance?.().musicUserToken
-            ? { music_user_token: MusicKit.getInstance().musicUserToken, storefront: MusicKit.getInstance().storefrontCountryCode || 'us' }
-            : {}),
+          ...(isAppleUser ? _appleMusicSessionPayload() : {}),
         }),
       });
       console.log('[import] response status:', resp.status);
@@ -4223,9 +4235,7 @@ async function _runAiCurator() {
                 playlist_name: data.name,
                 tracks: trackMeta,
                 friend_display_name: 'SoundMap AI',
-                ...(typeof MusicKit !== 'undefined' && MusicKit.getInstance?.().musicUserToken
-                  ? { music_user_token: MusicKit.getInstance().musicUserToken, storefront: MusicKit.getInstance().storefrontCountryCode || 'us' }
-                  : {}),
+                ..._appleMusicSessionPayload(),
               }),
             });
           } else {
@@ -4801,9 +4811,7 @@ async function _importSelectedPlaylists() {
           playlist_name: name,
           tracks,
           friend_display_name: compareDisplayName,
-          ...(isApple && typeof MusicKit !== 'undefined' && MusicKit.getInstance?.().musicUserToken
-            ? { music_user_token: MusicKit.getInstance().musicUserToken, storefront: MusicKit.getInstance().storefrontCountryCode || 'us' }
-            : {}),
+          ...(isApple ? _appleMusicSessionPayload() : {}),
         }),
       });
       if (resp.ok) {
