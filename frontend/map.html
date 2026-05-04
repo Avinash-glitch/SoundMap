@@ -1392,6 +1392,9 @@
         <button id="btn-copy-uid" title="Copy ID" style="background:none;border:none;padding:2px;cursor:pointer;color:var(--text-dim);display:flex;align-items:center;opacity:.5;transition:opacity .15s,color .15s">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
         </button>
+        <button id="btn-share-uid" title="Share compare invite" style="background:none;border:none;padding:2px;cursor:pointer;color:var(--text-dim);display:flex;align-items:center;opacity:.55;transition:opacity .15s,color .15s">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.5 15.4 6.5"/><path d="M8.6 13.5 15.4 17.5"/></svg>
+        </button>
       </div>
     </div>
     <div class="compare-badge" id="compare-badge">
@@ -1500,7 +1503,7 @@
   <div class="modal">
     <div class="modal-title">Compare with a friend</div>
     <div class="modal-sub">
-      Ask your friend to visit this app, log in with their Spotify, then share
+      Ask your friend to visit this app, log in with Spotify or Apple Music, then share
       their user ID with you. Paste it below to overlay their library on your map.
     </div>
     <input class="modal-input" id="compare-input" placeholder="Friend's user ID…" autocomplete="off" />
@@ -1870,6 +1873,7 @@ let _svgFriendBrainSelected = null;
 let _friendColorsMap = {};
 let _cmpData = null;
 let _friendMapData = null;
+let _appleShareForComparison = true;
 
 // Drill-down state
 let drilldownTracks = null;
@@ -1916,6 +1920,7 @@ async function loadMap() {
     const resp = await fetch(`/map/${userId}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     mapData = await resp.json();
+    _appleShareForComparison = mapData.share_for_comparison !== false;
 
     // Set user name badge
     if (mapData.display_name) {
@@ -1994,6 +1999,7 @@ async function loadMap() {
     const overlay = document.getElementById('loading-overlay');
     overlay.style.opacity = '0';
     setTimeout(() => { overlay.style.display = 'none'; }, 500);
+    _consumeCompareInvite();
 
   } catch (err) {
     console.error('[loadMap] error:', err);
@@ -2002,6 +2008,17 @@ async function loadMap() {
         Failed to load map data.<br/><a href="/" style="color:var(--accent)">Try again</a>
       </div>`;
   }
+}
+
+function _consumeCompareInvite() {
+  const inviteFromUrl = params.get('compare');
+  if (inviteFromUrl) sessionStorage.setItem('soundmap_compare_invite', inviteFromUrl.trim());
+  const friendId = (sessionStorage.getItem('soundmap_compare_invite') || '').trim();
+  if (!friendId || friendId === userId) return;
+  sessionStorage.removeItem('soundmap_compare_invite');
+  const input = document.getElementById('compare-input');
+  if (input) input.value = friendId;
+  loadCompare(friendId);
 }
 
 // ---------------------------------------------------------------------------
@@ -4739,13 +4756,22 @@ async function loadCompare(friendId) {
 
 function _renderCompareResults(d) {
   const pct = Math.round(d.compatibility * 100);
-  const label = pct >= 70 ? '🎯 High match' : pct >= 40 ? '🎵 Good overlap' : '🔍 Low overlap';
+  const label = pct >= 70 ? 'High match' : pct >= 40 ? 'Good overlap' : 'Low overlap';
+  const artists = d.artist_similarity || {};
+  const artistRecs = artists.recommendations_a_from_b || [];
+  const sharedArtists = artists.shared_artists || [];
 
   let html = `
     <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
       <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.7rem">Similarity Results</div>
       <div style="font-size:1.3rem;font-weight:700;color:var(--accent2);margin-bottom:.2rem">${pct}% compatible</div>
-      <div style="font-size:.72rem;color:var(--text-dim);margin-bottom:.9rem">${label} — ${d.shared_count} shared track${d.shared_count !== 1 ? 's' : ''}</div>`;
+      <div style="font-size:.72rem;color:var(--text-dim);margin-bottom:.9rem">${label} - ${d.shared_count} shared track${d.shared_count !== 1 ? 's' : ''}</div>
+      <div class="cmp-tabs" style="display:flex;gap:.4rem;margin-bottom:.8rem">
+        <button class="cmp-tab active" data-tab="playlist" style="flex:1;padding:.45rem;border:1px solid var(--accent2);border-radius:7px;background:rgba(124,106,247,.16);color:var(--text);font-size:.7rem;cursor:pointer">Playlist Similarity</button>
+        <button class="cmp-tab" data-tab="artist" style="flex:1;padding:.45rem;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--text-dim);font-size:.7rem;cursor:pointer">Artist Similarity</button>
+      </div>
+      <div id="cmp-playlist-tab" class="cmp-tab-panel">
+    `;
 
   if (d.similar_playlists.length) {
     html += `<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">Most similar playlists</div>`;
@@ -4769,7 +4795,35 @@ function _renderCompareResults(d) {
       </div>`;
   }
 
-  html += `<a href="/compare.html?a=${encodeURIComponent(d.user_a.id)}&b=${encodeURIComponent(d.user_b.id)}" target="_blank"
+  html += `</div><div id="cmp-artist-tab" class="cmp-tab-panel" style="display:none">`;
+
+  if (sharedArtists.length) {
+    html += `<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">Shared artists</div>`;
+    html += sharedArtists.slice(0, 8).map(a => `
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:.45rem;align-items:center;padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
+        <div style="font-size:.74rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(a.artist)}</div>
+        <div style="font-size:.62rem;color:var(--text-dim);white-space:nowrap">you ${a.track_count_a}</div>
+        <div style="font-size:.62rem;color:var(--accent2);white-space:nowrap">friend ${a.track_count_b}</div>
+      </div>`).join('');
+  } else {
+    html += '<p style="font-size:.72rem;color:var(--text-dim)">No shared artists found yet.</p>';
+  }
+
+  if (artistRecs.length) {
+    html += `<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin:.9rem 0 .5rem">Songs you might like</div>`;
+    html += artistRecs.slice(0, 10).map(r => `
+      <div style="display:flex;gap:.55rem;align-items:center;padding:.42rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
+        ${r.track.album_art ? `<img src="${_esc(r.track.album_art)}" alt="" loading="lazy" style="width:34px;height:34px;border-radius:4px;object-fit:cover;flex-shrink:0">` : `<div style="width:34px;height:34px;border-radius:4px;background:var(--surface2);flex-shrink:0"></div>`}
+        <div style="min-width:0;flex:1">
+          <div style="font-size:.72rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(r.track.name)}</div>
+          <div style="font-size:.62rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">by ${_esc(r.artist)}</div>
+        </div>
+      </div>`).join('');
+  } else if (sharedArtists.length) {
+    html += '<p style="font-size:.72rem;color:var(--text-dim);margin-top:.8rem">You already have the strongest songs found for your shared artists.</p>';
+  }
+
+  html += `</div><a href="/compare.html?a=${encodeURIComponent(d.user_a.id)}&b=${encodeURIComponent(d.user_b.id)}" target="_blank"
     style="display:inline-block;margin-top:.9rem;font-size:.7rem;color:var(--accent2)">Open full comparison →</a>
   </div>`;
 
@@ -4782,6 +4836,20 @@ function _renderCompareResults(d) {
   }
   resultsEl.innerHTML = html;
   document.getElementById('compare-modal').classList.add('open');
+  resultsEl.querySelectorAll('.cmp-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const active = tab.dataset.tab;
+      resultsEl.querySelectorAll('.cmp-tab').forEach(t => {
+        const on = t.dataset.tab === active;
+        t.classList.toggle('active', on);
+        t.style.borderColor = on ? 'var(--accent2)' : 'var(--border)';
+        t.style.background = on ? 'rgba(124,106,247,.16)' : 'transparent';
+        t.style.color = on ? 'var(--text)' : 'var(--text-dim)';
+      });
+      document.getElementById('cmp-playlist-tab').style.display = active === 'playlist' ? 'block' : 'none';
+      document.getElementById('cmp-artist-tab').style.display = active === 'artist' ? 'block' : 'none';
+    });
+  });
   resultsEl.querySelectorAll('.cmp-merge-pair').forEach(btn => {
     btn.addEventListener('click', () => _mergeFriendPlaylistPair(btn.dataset.mine, btn.dataset.friend, btn));
   });
@@ -4828,7 +4896,7 @@ function _renderFriendPlaylists() {
       </button>
     </div>`;
 
-  let resultsEl = document.getElementById('compare-results');
+  let resultsEl = document.getElementById('cmp-playlist-tab') || document.getElementById('compare-results');
   if (!resultsEl) {
     resultsEl = document.createElement('div');
     resultsEl.id = 'compare-results';
@@ -4986,6 +5054,26 @@ document.getElementById('btn-copy-uid')?.addEventListener('click', () => {
     btn.style.opacity = '1';
     setTimeout(() => { btn.style.color = ''; btn.style.opacity = ''; }, 1500);
   });
+});
+
+document.getElementById('btn-share-uid')?.addEventListener('click', async () => {
+  const inviteUrl = `${location.origin}/?compare=${encodeURIComponent(userId)}`;
+  const text = `Compare your music taste with me on SoundMap: ${inviteUrl}`;
+  const btn = document.getElementById('btn-share-uid');
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'Compare with me on SoundMap', text, url: inviteUrl });
+    } else {
+      await navigator.clipboard.writeText(text);
+    }
+    btn.style.color = 'var(--accent)';
+    btn.style.opacity = '1';
+    setTimeout(() => { btn.style.color = ''; btn.style.opacity = ''; }, 1500);
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    const whatsapp = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(whatsapp, '_blank', 'noopener');
+  }
 });
 
 // Close modal on backdrop click
@@ -5640,6 +5728,7 @@ async function _startAppleMapJob(force = false) {
         api_key: key || undefined,
         provider,
         force,
+        share_for_comparison: _appleShareForComparison,
       }),
     });
     if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail || 'Failed to start'); }
@@ -5672,8 +5761,18 @@ function _showAppleAuth(thenFn) {
   const body = document.getElementById('apple-modal-body');
   body.innerHTML = `
     <p style="font-size:.82rem;color:var(--text-dim);margin-bottom:1.1rem;line-height:1.55">
-      Authorise SoundMap to access your Apple Music library.
+      Authorise SoundMap to access your Apple Music library. Your playlist map data is stored in our Supabase database so friend comparison can work.
     </p>
+    <div style="display:grid;gap:.5rem;margin-bottom:1rem">
+      <label style="display:flex;gap:.55rem;align-items:flex-start;padding:.65rem;border:1px solid var(--border);border-radius:8px;font-size:.74rem;line-height:1.45;cursor:pointer">
+        <input type="radio" name="apple-share-choice" value="1" checked style="accent-color:#fa3c44">
+        <span>Generate my map and allow comparison<br><span style="color:var(--text-dim);font-size:.66rem">Friends can compare with you using your SoundMap ID.</span></span>
+      </label>
+      <label style="display:flex;gap:.55rem;align-items:flex-start;padding:.65rem;border:1px solid var(--border);border-radius:8px;font-size:.74rem;line-height:1.45;cursor:pointer">
+        <input type="radio" name="apple-share-choice" value="0" style="accent-color:#fa3c44">
+        <span>Generate mind map only<br><span style="color:var(--text-dim);font-size:.66rem">Your map is generated but blocked from friend comparison.</span></span>
+      </label>
+    </div>
     <button id="apple-auth-btn" class="btn-primary" style="width:100%;background:#fa3c44;border-color:#fa3c44">
       Connect Apple Music
     </button>
@@ -5686,6 +5785,7 @@ function _showAppleAuth(thenFn) {
     btn.textContent = 'Authorizing…';
     errEl.style.display = 'none';
     try {
+      _appleShareForComparison = (document.querySelector('input[name="apple-share-choice"]:checked')?.value || '1') === '1';
       await MusicKit.getInstance().authorize();
       if (thenFn) thenFn(); else _showAppleChoice();
     } catch (err) {
@@ -5701,6 +5801,16 @@ function _showAppleChoice() {
   const body = document.getElementById('apple-modal-body');
   body.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:.6rem">
+      <div style="display:grid;gap:.45rem;margin-bottom:.2rem">
+        <label style="display:flex;gap:.55rem;align-items:flex-start;padding:.6rem;border:1px solid var(--border);border-radius:8px;font-size:.72rem;line-height:1.4;cursor:pointer">
+          <input type="radio" name="apple-choice-share" value="1" checked style="accent-color:#fa3c44">
+          <span>Allow friend comparison<br><span style="color:var(--text-dim);font-size:.64rem">Store map data for comparison. You can delete it later.</span></span>
+        </label>
+        <label style="display:flex;gap:.55rem;align-items:flex-start;padding:.6rem;border:1px solid var(--border);border-radius:8px;font-size:.72rem;line-height:1.4;cursor:pointer">
+          <input type="radio" name="apple-choice-share" value="0" style="accent-color:#fa3c44">
+          <span>Mind map only<br><span style="color:var(--text-dim);font-size:.64rem">Block this map from friend comparison.</span></span>
+        </label>
+      </div>
       <button id="apple-build-btn" class="btn-primary" style="background:#fa3c44;border-color:#fa3c44;text-align:left;padding:.85rem 1rem;height:auto;display:flex;flex-direction:column;gap:.2rem;border-radius:10px">
         <span style="font-size:.88rem;font-weight:600">Build Apple Music Map</span>
         <span style="font-size:.72rem;opacity:.75;font-weight:400">Create a separate map from your Apple Music library</span>
@@ -5714,6 +5824,7 @@ function _showAppleChoice() {
   `;
 
   document.getElementById('apple-build-btn').addEventListener('click', async () => {
+    _appleShareForComparison = (document.querySelector('input[name="apple-choice-share"]:checked')?.value || '1') === '1';
     _startAppleMapJob(false);
   });
 

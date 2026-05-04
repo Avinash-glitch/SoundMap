@@ -200,6 +200,53 @@
     color: var(--text-dim);
     margin-bottom: .6rem;
   }
+  .tabs {
+    display: flex;
+    gap: .5rem;
+    margin-bottom: 1rem;
+  }
+  .tab-btn {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: .76rem;
+    padding: .55rem .7rem;
+  }
+  .tab-btn.active {
+    border-color: var(--accent);
+    background: rgba(124,106,247,.14);
+    color: var(--text);
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .artist-row, .rec-row {
+    display: flex;
+    align-items: center;
+    gap: .65rem;
+    padding: .55rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .artist-row:last-child, .rec-row:last-child { border-bottom: none; }
+  .artist-main, .rec-main { min-width: 0; flex: 1; }
+  .artist-name, .rec-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text);
+  }
+  .artist-meta, .rec-meta { color: var(--text-dim); font-size: .68rem; margin-top: .15rem; }
+  .rec-row img {
+    width: 42px;
+    height: 42px;
+    border-radius: 4px;
+    object-fit: cover;
+    background: var(--surface2);
+    flex-shrink: 0;
+  }
 
   /* User name pills */
   .user-pill {
@@ -224,10 +271,10 @@
 <div class="page">
   <a href="/" class="back">← SoundMap</a>
   <h1>Compare Libraries</h1>
-  <p class="subtitle">Find shared tracks and matching playlists between two SoundMap users.</p>
+  <p class="subtitle">Find shared tracks, matching playlists, and artist-based song recommendations between two SoundMap users.</p>
 
   <div class="card">
-    <div class="card-title">Enter two Spotify user IDs</div>
+    <div class="card-title">Enter two SoundMap user IDs</div>
     <div class="form-row">
       <input id="input-a" type="text" placeholder="Your user ID (e.g. 31abc123…)" />
       <input id="input-b" type="text" placeholder="Friend's user ID" />
@@ -259,17 +306,37 @@
       </div>
     </div>
 
-    <!-- Similar playlists -->
-    <div class="card" id="playlists-card">
-      <div class="card-title">Most Similar Playlists</div>
-      <div id="playlists-list"></div>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="playlist">Playlist Similarity</button>
+      <button class="tab-btn" data-tab="artist">Artist Similarity</button>
     </div>
 
-    <!-- Shared tracks -->
-    <div class="card" id="shared-card">
-      <div class="card-title">Shared Tracks</div>
-      <div class="track-count-badge" id="shared-count"></div>
-      <div class="tracks-grid" id="tracks-grid"></div>
+    <div class="tab-panel active" id="playlist-panel">
+      <div class="card" id="playlists-card">
+        <div class="card-title">Most Similar Playlists</div>
+        <div id="playlists-list"></div>
+      </div>
+
+      <div class="card" id="shared-card">
+        <div class="card-title">Shared Tracks</div>
+        <div class="track-count-badge" id="shared-count"></div>
+        <div class="tracks-grid" id="tracks-grid"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="artist-panel">
+      <div class="card">
+        <div class="card-title">Shared Artists</div>
+        <div id="artists-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Songs A Might Like From B</div>
+        <div id="recs-a-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Songs B Might Like From A</div>
+        <div id="recs-b-list"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -330,6 +397,7 @@ function renderResults(d) {
   document.getElementById('compat-info').innerHTML = `
     <span class="user-pill">${esc(nameA)}</span> &amp; <span class="user-pill">${esc(nameB)}</span><br><br>
     <strong>${d.shared_count}</strong> track${d.shared_count !== 1 ? 's' : ''} in common<br>
+    <strong>${d.artist_similarity?.shared_artist_count || 0}</strong> shared artist${(d.artist_similarity?.shared_artist_count || 0) !== 1 ? 's' : ''}<br>
     <span style="color:var(--text-dim)">${d.user_a.track_count} tracks mapped for ${esc(nameA)}</span><br>
     <span style="color:var(--text-dim)">${d.user_b.track_count} tracks mapped for ${esc(nameB)}</span>
   `;
@@ -367,8 +435,58 @@ function renderResults(d) {
     `).join('');
   }
 
+  renderArtistSimilarity(d);
+
   document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
+
+function renderArtistSimilarity(d) {
+  const sim = d.artist_similarity || {};
+  const artists = sim.shared_artists || [];
+  const recsA = sim.recommendations_a_from_b || [];
+  const recsB = sim.recommendations_b_from_a || [];
+  const nameA = d.user_a.display_name || 'User A';
+  const nameB = d.user_b.display_name || 'User B';
+
+  document.querySelector('#artist-panel .card:nth-child(2) .card-title').textContent = `Songs ${nameA} might like from ${nameB}`;
+  document.querySelector('#artist-panel .card:nth-child(3) .card-title').textContent = `Songs ${nameB} might like from ${nameA}`;
+
+  document.getElementById('artists-list').innerHTML = artists.length
+    ? artists.slice(0, 20).map(a => `
+      <div class="artist-row">
+        <div class="artist-main">
+          <div class="artist-name">${esc(a.artist)}</div>
+          <div class="artist-meta">${esc(nameA)}: ${a.track_count_a} tracks - ${esc(nameB)}: ${a.track_count_b} tracks</div>
+        </div>
+        <div class="pl-score">${Math.round((a.score_a + a.score_b) / 2)}</div>
+      </div>`).join('')
+    : '<p style="color:var(--text-dim);font-size:.78rem">No shared artists found yet.</p>';
+
+  document.getElementById('recs-a-list').innerHTML = recList(recsA, `No missing songs found for ${nameA}.`);
+  document.getElementById('recs-b-list').innerHTML = recList(recsB, `No missing songs found for ${nameB}.`);
+}
+
+function recList(recs, emptyText) {
+  if (!recs.length) return `<p style="color:var(--text-dim);font-size:.78rem">${esc(emptyText)}</p>`;
+  return recs.map(r => `
+    <div class="rec-row">
+      ${r.track.album_art ? `<img src="${esc(r.track.album_art)}" loading="lazy" alt="">` : '<img alt="">'}
+      <div class="rec-main">
+        <div class="rec-name">${esc(r.track.name)}</div>
+        <div class="rec-meta">by ${esc(r.artist)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+    document.getElementById(`${tab}-panel`)?.classList.add('active');
+  });
+});
 
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

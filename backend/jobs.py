@@ -4,6 +4,8 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+from .notifications import send_notification
+
 _executor = ThreadPoolExecutor(max_workers=4)
 
 # job_id → {status, progress, message, user_id, display_name, error}
@@ -34,6 +36,13 @@ def submit_job(
         "display_name": display_name,
         "error": None,
     }
+    send_notification(
+        "Map job queued",
+        display_name=display_name,
+        user_id=user_id,
+        share_for_comparison=share_for_comparison,
+        job_id=job_id,
+    )
 
     def _on_progress(pct: int, message: str) -> None:
         jobs[job_id]["progress"] = pct
@@ -41,6 +50,12 @@ def submit_job(
 
     def _run() -> None:
         jobs[job_id]["status"] = "processing"
+        send_notification(
+            "Map job started",
+            display_name=display_name,
+            user_id=user_id,
+            job_id=job_id,
+        )
         try:
             pipeline.process_user(
                 access_token, user_id,
@@ -54,11 +69,24 @@ def submit_job(
             jobs[job_id]["status"] = "done"
             jobs[job_id]["progress"] = 100
             jobs[job_id]["message"] = "Done!"
+            send_notification(
+                "Map job completed",
+                display_name=display_name,
+                user_id=user_id,
+                job_id=job_id,
+            )
         except Exception as exc:
             jobs[job_id]["status"] = "error"
             jobs[job_id]["error"] = str(exc)
             jobs[job_id]["message"] = f"Error: {exc}"
             print(f"[jobs] Pipeline failed for {user_id}: {exc}")
+            send_notification(
+                "Map job failed",
+                display_name=display_name,
+                user_id=user_id,
+                job_id=job_id,
+                error=str(exc),
+            )
 
     _executor.submit(_run)
     return job_id
@@ -71,6 +99,7 @@ def submit_apple_job(
     api_key: str = "",
     provider: str = "",
     force: bool = False,
+    share_for_comparison: bool = True,
 ) -> str:
     """Queue an Apple Music pipeline job and return the job_id."""
     from . import pipeline
@@ -86,6 +115,13 @@ def submit_apple_job(
         "display_name": "Apple Music Library",
         "error": None,
     }
+    send_notification(
+        "Apple map job queued",
+        user_id=apple_id,
+        source_user_id=user_id,
+        storefront=storefront,
+        job_id=job_id,
+    )
 
     def _on_progress(pct: int, message: str) -> None:
         jobs[job_id]["progress"] = pct
@@ -93,6 +129,13 @@ def submit_apple_job(
 
     def _run() -> None:
         jobs[job_id]["status"] = "processing"
+        send_notification(
+            "Apple map job started",
+            user_id=apple_id,
+            source_user_id=user_id,
+            storefront=storefront,
+            job_id=job_id,
+        )
         try:
             pipeline.process_apple_user(
                 music_user_token, user_id, storefront,
@@ -100,15 +143,31 @@ def submit_apple_job(
                 api_key=api_key,
                 provider=provider,
                 force=force,
+                share_for_comparison=share_for_comparison,
             )
             jobs[job_id]["status"] = "done"
             jobs[job_id]["progress"] = 100
             jobs[job_id]["message"] = "Done!"
+            send_notification(
+                "Apple map job completed",
+                user_id=apple_id,
+                source_user_id=user_id,
+                storefront=storefront,
+                job_id=job_id,
+            )
         except Exception as exc:
             jobs[job_id]["status"] = "error"
             jobs[job_id]["error"] = str(exc)
             jobs[job_id]["message"] = f"Error: {exc}"
             print(f"[jobs] Apple pipeline failed for {user_id}: {exc}")
+            send_notification(
+                "Apple map job failed",
+                user_id=apple_id,
+                source_user_id=user_id,
+                storefront=storefront,
+                job_id=job_id,
+                error=str(exc),
+            )
 
     _executor.submit(_run)
     return job_id

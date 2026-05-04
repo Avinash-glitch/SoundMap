@@ -66,6 +66,29 @@
       cursor: pointer;
     }
     .btn:disabled { opacity: .55; cursor: default; }
+    .privacy-choice {
+      display: grid;
+      gap: .55rem;
+      margin: .9rem 0 1.1rem;
+    }
+    .privacy-choice label {
+      display: flex;
+      gap: .6rem;
+      align-items: flex-start;
+      padding: .75rem;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--text);
+      font-size: .78rem;
+      line-height: 1.45;
+      cursor: pointer;
+    }
+    .privacy-choice span {
+      display: block;
+      color: var(--text-dim);
+      font-size: .68rem;
+      margin-top: .15rem;
+    }
     .status {
       min-height: 1.2rem;
       margin-top: .8rem;
@@ -83,6 +106,21 @@
     <h1>Connect to Apple Music</h1>
     <p>You need to have an active Apple Music subscription to access your Mind Map.</p>
     <p>Apple will ask you to authorize SoundMap. After that, your library is mapped from your Apple Music playlists and library metadata.</p>
+    <p>Your playlist map data is stored in our Supabase database so friend comparison can work. You can delete your stored data from the map page.</p>
+    <div class="privacy-choice">
+      <label>
+        <input type="radio" name="share-choice" value="1" checked />
+        <div>Generate my map and allow comparison
+          <span>Your map can be compared with friends who have your SoundMap ID.</span>
+        </div>
+      </label>
+      <label>
+        <input type="radio" name="share-choice" value="0" />
+        <div>Generate mind map only
+          <span>Your map is still generated, but it is blocked from friend comparison.</span>
+        </div>
+      </label>
+    </div>
     <button class="btn" id="apple-auth-btn">Connect Apple Music</button>
     <div class="status" id="status"></div>
   </main>
@@ -133,6 +171,7 @@
           body: JSON.stringify({
             music_user_token: music.musicUserToken,
             storefront: music.storefrontCountryCode || 'us',
+            share_for_comparison: (document.querySelector('input[name="share-choice"]:checked')?.value || '1') === '1',
           }),
         });
         if (!resp.ok) {

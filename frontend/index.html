@@ -403,7 +403,7 @@
   <div class="spotify-card">
     <h2>Before you connect Spotify</h2>
     <p>Have you been added by the owner to this Spotify app?</p>
-    <p>If not, ask the owner to add your Spotify account email to the app's users. Or create your own Spotify app, add this callback URL, and paste your Client ID and Client Secret below.</p>
+    <p>If not, ask the owner to add your Spotify account email to the app's users. Or create your own Spotify app from the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener" style="color:var(--accent)">Spotify Developer Dashboard</a>, add this callback URL, and paste your Client ID and Client Secret below.</p>
     <code class="callback-url">https://web-production-7b33.up.railway.app/auth/callback</code>
     <p>Yes, the same SoundMap app can be accessed with another Spotify account, but in Spotify development mode that account must be added to the app first.</p>
     <button class="credential-toggle" id="credential-toggle">Use my own Spotify app credentials</button>
@@ -437,6 +437,10 @@
   // Show error from query param
   const params = new URLSearchParams(location.search);
   const err = params.get('error');
+  const compareInvite = params.get('compare');
+  if (compareInvite) {
+    sessionStorage.setItem('soundmap_compare_invite', compareInvite.trim());
+  }
   if (err) {
     const msgs = {
       spotify_denied: 'Spotify login was cancelled.',

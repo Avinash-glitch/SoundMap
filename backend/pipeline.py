@@ -901,6 +901,7 @@ def process_apple_user(
     api_key: str = "",
     provider: str = "",
     force: bool = False,
+    share_for_comparison: bool = True,
 ) -> dict:
     """
     Full pipeline for an Apple Music library.
@@ -917,7 +918,11 @@ def process_apple_user(
 
     if not force and storage.map_exists(apple_id) and storage.map_age_hours(apple_id) < 24:
         progress(100, "Loaded from cache.")
-        return storage.load_map(apple_id)
+        cached = storage.load_map(apple_id)
+        if cached is not None and cached.get("share_for_comparison", True) != bool(share_for_comparison):
+            cached["share_for_comparison"] = bool(share_for_comparison)
+            storage.save_map(apple_id, cached)
+        return cached
 
     progress(3, "Connecting to Apple Music…")
     dev_token = get_developer_token()
@@ -958,6 +963,7 @@ def process_apple_user(
         remaining=remaining_slim,
     )
     map_data["source"] = "apple"
+    map_data["share_for_comparison"] = bool(share_for_comparison)
 
     storage.save_map(apple_id, map_data)
     progress(100, "Done!")

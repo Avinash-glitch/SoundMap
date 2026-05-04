@@ -16,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import forget_user_credentials, router as auth_router, refresh_access_token
 from .jobs import get_job, submit_job, stop_job
 from .models import JobStatus
+from .notifications import send_notification
 from . import storage
 
 load_dotenv()
@@ -80,7 +81,15 @@ async def _get_valid_token(request: Request) -> str | None:
 
 
 @app.get("/")
-async def index():
+async def index(request: Request):
+    send_notification(
+        "Homepage visit",
+        path=str(request.url.path),
+        query=request.url.query or None,
+        client_ip=getattr(request.client, "host", None),
+        user_agent=request.headers.get("user-agent"),
+        referer=request.headers.get("referer"),
+    )
     return FileResponse(FRONTEND / "index.html")
 
 
@@ -747,6 +756,102 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
         reverse=True,
     )
 
+    def clean_key(value: str) -> str:
+        return _re.sub(r"\s+", " ", (value or "").strip().lower())
+
+    def track_key(track: dict) -> str:
+        isrc = clean_key(track.get("isrc") or "")
+        if isrc:
+            return f"isrc:{isrc}"
+        return f"name:{clean_key(track.get('name') or '')}|artist:{clean_key(track.get('artist') or '')}"
+
+    def track_score(track: dict) -> float:
+        return float(track.get("current_taste_score") or track.get("play_score") or 1)
+
+    def track_payload(track: dict, score: float | None = None) -> dict:
+        return {
+            "id": track.get("id", ""),
+            "name": track.get("name", ""),
+            "artist": track.get("artist", ""),
+            "album": track.get("album", ""),
+            "album_art": track.get("album_art", ""),
+            "external_url": track.get("external_url", ""),
+            "isrc": track.get("isrc"),
+            "score": round(score if score is not None else track_score(track), 3),
+        }
+
+    def build_artist_profile(pts: list[dict]) -> tuple[dict[str, dict], set[str]]:
+        owned_keys = {track_key(p) for p in pts if p.get("name") and p.get("artist")}
+        artists: dict[str, dict] = {}
+        for p in pts:
+            names = p.get("artists") or [p.get("artist")]
+            for raw_name in names:
+                name = (raw_name or "").strip()
+                key = clean_key(name)
+                if not key:
+                    continue
+                entry = artists.setdefault(key, {
+                    "name": name,
+                    "track_count": 0,
+                    "score": 0.0,
+                    "tracks": {},
+                })
+                score = track_score(p)
+                entry["track_count"] += 1
+                entry["score"] += score
+                tk = track_key(p)
+                current = entry["tracks"].get(tk)
+                if current is None or score > current["score"]:
+                    entry["tracks"][tk] = {"track": p, "score": score}
+        return artists, owned_keys
+
+    def artist_recommendations(source_profile: dict[str, dict], target_keys: set[str], limit: int = 24) -> list[dict]:
+        recs: list[dict] = []
+        for artist_key, source_artist in source_profile.items():
+            candidates = [
+                item
+                for tk, item in source_artist["tracks"].items()
+                if tk not in target_keys
+            ]
+            if not candidates:
+                continue
+            candidates.sort(key=lambda item: item["score"], reverse=True)
+            for item in candidates[:3]:
+                recs.append({
+                    "artist": source_artist["name"],
+                    "artist_score": round(source_artist["score"], 3),
+                    "source_track_count": source_artist["track_count"],
+                    "track": track_payload(item["track"], item["score"]),
+                })
+        recs.sort(key=lambda r: (r["artist_score"], r["track"]["score"]), reverse=True)
+        return recs[:limit]
+
+    artists_a, owned_keys_a = build_artist_profile(pts_a)
+    artists_b, owned_keys_b = build_artist_profile(pts_b)
+    shared_artist_keys = set(artists_a) & set(artists_b)
+    shared_artists = sorted(
+        [
+            {
+                "artist": artists_a[key]["name"],
+                "score_a": round(artists_a[key]["score"], 3),
+                "score_b": round(artists_b[key]["score"], 3),
+                "track_count_a": artists_a[key]["track_count"],
+                "track_count_b": artists_b[key]["track_count"],
+            }
+            for key in shared_artist_keys
+        ],
+        key=lambda a: (a["score_a"] + a["score_b"], a["track_count_a"] + a["track_count_b"]),
+        reverse=True,
+    )
+    recommendations_a_from_b = artist_recommendations(
+        {key: artists_b[key] for key in shared_artist_keys},
+        owned_keys_a,
+    )
+    recommendations_b_from_a = artist_recommendations(
+        {key: artists_a[key] for key in shared_artist_keys},
+        owned_keys_b,
+    )
+
     # Build per-playlist genre vectors (11-dim, one per genre bucket)
     GENRES = ["metal", "hip-hop", "electronic", "rock", "pop", "jazz", "classical", "folk", "latin", "world", "other"]
 
@@ -804,6 +909,12 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
         "shared_tracks": shared_tracks[:50],
         "shared_count": len(shared_ids),
         "similar_playlists": pairs[:20],
+        "artist_similarity": {
+            "shared_artists": shared_artists[:30],
+            "shared_artist_count": len(shared_artist_keys),
+            "recommendations_a_from_b": recommendations_a_from_b,
+            "recommendations_b_from_a": recommendations_b_from_a,
+        },
         "compatibility": compatibility,
     })
 
@@ -877,6 +988,7 @@ async def apple_start_job(request: Request) -> JSONResponse:
         api_key = (body.get("api_key") or "").strip()
         provider = (body.get("provider") or "").strip().lower()
         force = bool(body.get("force"))
+        share_for_comparison = bool(body.get("share_for_comparison", request.session.get("share_for_comparison", True)))
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
@@ -895,10 +1007,19 @@ async def apple_start_job(request: Request) -> JSONResponse:
 
     request.session["music_user_token"] = music_user_token
     request.session["storefront"] = storefront
+    request.session["share_for_comparison"] = share_for_comparison
 
     from .jobs import submit_apple_job
     apple_user_id = f"{user_id}_apple"
-    job_id = submit_apple_job(music_user_token, user_id, storefront, api_key=api_key, provider=provider, force=force)
+    job_id = submit_apple_job(
+        music_user_token,
+        user_id,
+        storefront,
+        api_key=api_key,
+        provider=provider,
+        force=force,
+        share_for_comparison=share_for_comparison,
+    )
     return JSONResponse({"job_id": job_id, "user_id": apple_user_id})
 
 
