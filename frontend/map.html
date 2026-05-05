@@ -4895,9 +4895,9 @@ function _renderCompareResults(d) {
     html += d.similar_playlists.slice(0, 6).map(p => `
       <div style="display:grid;grid-template-columns:1fr auto 1fr auto;gap:.4rem;align-items:center;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
         <div style="font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(p.playlist_a)}">${_esc(p.playlist_a)}</div>
-        <div style="font-size:.6rem;color:var(--accent2);background:rgba(124,106,247,.15);border-radius:4px;padding:.1rem .35rem;white-space:nowrap">${Math.round(p.score*100)}%</div>
+        <div style="font-size:.6rem;color:var(--accent2);background:rgba(124,106,247,.15);border-radius:4px;padding:.1rem .35rem;white-space:nowrap" title="${p.shared_track_count || 0} shared tracks · ${p.shared_artist_count || 0} shared artists">${Math.round(p.score*100)}%</div>
         <div style="font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right" title="${_esc(p.playlist_b)}">${_esc(p.playlist_b)}</div>
-        <button class="cmp-merge-pair" data-mine="${_esc(p.playlist_a)}" data-friend="${_esc(p.playlist_b)}"
+        <button class="cmp-merge-pair" data-mine="${_esc(p.playlist_a_key || p.playlist_a)}" data-mine-label="${_esc(p.playlist_a)}" data-friend="${_esc(p.playlist_b_key || p.playlist_b)}" data-friend-label="${_esc(p.playlist_b)}"
           style="font-size:.62rem;padding:.2rem .4rem;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text-dim);cursor:pointer">Merge</button>
       </div>`).join('');
   }
@@ -4968,7 +4968,7 @@ function _renderCompareResults(d) {
     });
   });
   resultsEl.querySelectorAll('.cmp-merge-pair').forEach(btn => {
-    btn.addEventListener('click', () => _mergeFriendPlaylistPair(btn.dataset.mine, btn.dataset.friend, btn));
+    btn.addEventListener('click', () => _mergeFriendPlaylistPair(btn.dataset.mine, btn.dataset.friend, btn, btn.dataset.mineLabel, btn.dataset.friendLabel));
   });
 }
 
@@ -5101,7 +5101,7 @@ function _friendPlaylistTracks(name) {
     .map(p => ({ id: p.id, name: p.name || '', artist: p.artist || '', isrc: p.isrc || null }));
 }
 
-async function _mergeFriendPlaylistPair(myPlaylistName, friendPlaylistName, btn) {
+async function _mergeFriendPlaylistPair(myPlaylistName, friendPlaylistName, btn, myPlaylistLabel = '', friendPlaylistLabel = '') {
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Merging…';
@@ -5114,7 +5114,9 @@ async function _mergeFriendPlaylistPair(myPlaylistName, friendPlaylistName, btn)
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         my_playlist_name: myPlaylistName,
+        my_playlist_label: myPlaylistLabel || myPlaylistName,
         friend_playlist_name: friendPlaylistName,
+        friend_playlist_label: friendPlaylistLabel || friendPlaylistName,
         friend_tracks: friendTracks,
         friend_display_name: compareDisplayName,
         ...targetPayload,

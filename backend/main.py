@@ -716,8 +716,6 @@ async def now_playing(request: Request) -> JSONResponse:
 @app.get("/compare/{user_id_a}/{user_id_b}")
 async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
     """Compare two users' music libraries — shared tracks and similar playlists."""
-    import math
-
     map_a = storage.load_map(user_id_a)
     map_b = storage.load_map(user_id_b)
     if not map_a:
@@ -849,48 +847,90 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
         owned_keys_b,
     )
 
-    # Build per-playlist genre vectors (11-dim, one per genre bucket)
-    GENRES = ["metal", "hip-hop", "electronic", "rock", "pop", "jazz", "classical", "folk", "latin", "world", "other"]
+    def playlist_refs_for(track: dict) -> list[tuple[str, str]]:
+        refs = track.get("playlist_refs") or []
+        out: list[tuple[str, str]] = []
+        for ref in refs:
+            key = str(ref.get("id") or ref.get("name") or "").strip()
+            name = str(ref.get("name") or key).strip()
+            if key:
+                out.append((key, name))
+        if out:
+            return out
+        return [
+            (str(name).strip(), str(name).strip())
+            for name in (track.get("playlists") or [])
+            if str(name).strip()
+        ]
 
-    def build_vectors(pts: list[dict]) -> dict[str, list[float]]:
-        pl_counts: dict[str, dict[str, int]] = {}
+    def build_playlist_profiles(pts: list[dict]) -> dict[str, dict]:
+        profiles: dict[str, dict] = {}
         for p in pts:
-            genre = p.get("genre") or "other"
-            for pl in (p.get("playlists") or []):
-                pl_counts.setdefault(pl, {})
-                pl_counts[pl][genre] = pl_counts[pl].get(genre, 0) + 1
-        vecs = {}
-        for pl, counts in pl_counts.items():
-            total = sum(counts.values()) or 1
-            if total < 3:
+            tk = track_key(p)
+            if not tk:
                 continue
-            vecs[pl] = [counts.get(g, 0) / total for g in GENRES]
-        return vecs
+            artist_keys = {clean_key(a) for a in (p.get("artists") or [p.get("artist")]) if clean_key(a)}
+            for pl_key, pl_name in playlist_refs_for(p):
+                entry = profiles.setdefault(pl_key, {
+                    "key": pl_key,
+                    "name": pl_name,
+                    "track_keys": set(),
+                    "artist_keys": set(),
+                })
+                entry["track_keys"].add(tk)
+                entry["artist_keys"].update(artist_keys)
+        return profiles
 
-    def cosine(a: list[float], b: list[float]) -> float:
-        dot = sum(x * y for x, y in zip(a, b))
-        mag = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(x * x for x in b))
-        return dot / mag if mag else 0.0
+    def overlap_score(a: set[str], b: set[str]) -> float:
+        if not a or not b:
+            return 0.0
+        return len(a & b) / max(min(len(a), len(b)), 1)
 
-    vecs_a = build_vectors(pts_a)
-    vecs_b = build_vectors(pts_b)
+    playlists_a = build_playlist_profiles(pts_a)
+    playlists_b = build_playlist_profiles(pts_b)
+    raw_pairs = []
+    for pl_a in playlists_a.values():
+        for pl_b in playlists_b.values():
+            shared_pl_tracks = pl_a["track_keys"] & pl_b["track_keys"]
+            shared_pl_artists = pl_a["artist_keys"] & pl_b["artist_keys"]
+            if not shared_pl_tracks and not shared_pl_artists:
+                continue
+            track_overlap = overlap_score(pl_a["track_keys"], pl_b["track_keys"])
+            artist_overlap = overlap_score(pl_a["artist_keys"], pl_b["artist_keys"])
+            score = (track_overlap * 0.7) + (artist_overlap * 0.3)
+            if score < 0.08:
+                continue
+            raw_pairs.append({
+                "playlist_a": pl_a["name"],
+                "playlist_a_key": pl_a["key"],
+                "playlist_b": pl_b["name"],
+                "playlist_b_key": pl_b["key"],
+                "score": round(score, 3),
+                "track_overlap": round(track_overlap, 3),
+                "artist_overlap": round(artist_overlap, 3),
+                "shared_track_count": len(shared_pl_tracks),
+                "shared_artist_count": len(shared_pl_artists),
+            })
 
+    raw_pairs.sort(
+        key=lambda x: (x["score"], x["shared_track_count"], x["shared_artist_count"]),
+        reverse=True,
+    )
     pairs = []
-    for pl_a, vec_a in vecs_a.items():
-        for pl_b, vec_b in vecs_b.items():
-            score = cosine(vec_a, vec_b)
-            if score >= 0.25:
-                pairs.append({"playlist_a": pl_a, "playlist_b": pl_b, "score": round(score, 3)})
-    pairs.sort(key=lambda x: x["score"], reverse=True)
+    used_a: set[str] = set()
+    used_b: set[str] = set()
+    for pair in raw_pairs:
+        if pair["playlist_a_key"] in used_a or pair["playlist_b_key"] in used_b:
+            continue
+        used_a.add(pair["playlist_a_key"])
+        used_b.add(pair["playlist_b_key"])
+        pairs.append(pair)
+        if len(pairs) >= 20:
+            break
 
-    # Compatibility score: genre similarity + shared track bonus
-    if vecs_a and vecs_b:
-        best_per_a = [max((cosine(va, vb) for vb in vecs_b.values()), default=0.0) for va in vecs_a.values()]
-        genre_compat = sum(best_per_a) / len(best_per_a)
-        track_bonus = len(shared_ids) / max(len(ids_a), len(ids_b), 1) * 0.3
-        compatibility = round(min(genre_compat * 0.7 + track_bonus, 1.0), 3)
-    else:
-        compatibility = round(len(shared_ids) / max(len(ids_a), len(ids_b), 1), 3)
+    library_track_overlap = overlap_score(owned_keys_a, owned_keys_b)
+    library_artist_overlap = overlap_score(set(artists_a), set(artists_b))
+    compatibility = round(min((library_track_overlap * 0.65) + (library_artist_overlap * 0.35), 1.0), 3)
 
     return JSONResponse({
         "user_a": {
@@ -1201,7 +1241,9 @@ async def merge_friend_playlist(request: Request) -> JSONResponse:
     try:
         body = await request.json()
         my_playlist_name: str = (body.get("my_playlist_name") or "").strip()
+        my_playlist_label: str = (body.get("my_playlist_label") or my_playlist_name).strip()
         friend_playlist_name: str = (body.get("friend_playlist_name") or "").strip()
+        friend_playlist_label: str = (body.get("friend_playlist_label") or friend_playlist_name).strip()
         friend_name: str = (body.get("friend_display_name") or "Friend").strip()
         friend_tracks: list[dict] = body.get("friend_tracks") or []
         target_user_id: str = (body.get("target_user_id") or "").strip()
@@ -1228,11 +1270,13 @@ async def merge_friend_playlist(request: Request) -> JSONResponse:
     seen_ids: set[str] = set()
     for p in map_data.get("points", []):
         tid = p.get("id")
-        if tid and tid not in seen_ids and my_playlist_name in (p.get("playlists") or []):
+        p_keys = {str(ref.get("id") or ref.get("name")) for ref in (p.get("playlist_refs") or []) if ref.get("id") or ref.get("name")}
+        p_keys.update(str(pl) for pl in (p.get("playlists") or []))
+        if tid and tid not in seen_ids and my_playlist_name in p_keys:
             seen_ids.add(tid)
             own_ids.append(tid)
     if not own_ids:
-        raise HTTPException(status_code=400, detail=f"No tracks found in your playlist: {my_playlist_name}")
+        raise HTTPException(status_code=400, detail=f"No tracks found in your playlist: {my_playlist_label}")
 
     h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     friend_uris = _resolve_to_spotify_uris(friend_tracks, h)
@@ -1243,7 +1287,7 @@ async def merge_friend_playlist(request: Request) -> JSONResponse:
             seen_uris.add(uri)
             uris.append(uri)
 
-    new_name = f"{my_playlist_name} + {friend_playlist_name}"
+    new_name = f"{my_playlist_label} + {friend_playlist_label}"
     create_resp = _requests.post(
         "https://api.spotify.com/v1/me/playlists",
         headers=h,
