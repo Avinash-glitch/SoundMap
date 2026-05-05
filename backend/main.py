@@ -1531,7 +1531,7 @@ async def create_mood_playlists(request: Request) -> JSONResponse:
 async def merge_playlists(request: Request) -> JSONResponse:
     """
     Merge tracks from selected playlists into a new Spotify playlist.
-    Body: {"source_playlists": ["name1", "name2"], "new_name": "My Merged Playlist"}
+    Body: {"source_playlists": ["name-or-id"], "new_name": "My Merged Playlist"}
     Duplicate tracks are removed; order is preserved by play_score (highest first).
     """
     token = request.session.get("access_token")
@@ -1561,7 +1561,9 @@ async def merge_playlists(request: Request) -> JSONResponse:
 
     for p in map_data.get("points", []):
         tid = p.get("id")
-        if tid and tid not in seen and any(pl in source_set for pl in p.get("playlists", [])):
+        p_keys = {str(ref.get("id")) for ref in (p.get("playlist_refs") or []) if ref.get("id")}
+        p_keys.update(str(pl) for pl in (p.get("playlists") or []))
+        if tid and tid not in seen and p_keys & source_set:
             seen.add(tid)
             scored.append((p.get("play_score", 1), tid))
 

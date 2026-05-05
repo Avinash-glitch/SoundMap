@@ -1810,16 +1810,55 @@ function buildMoodColors(moods) {
 function buildPlaylistColors(playlists) {
   playlists.forEach((pl, i) => {
     const hue = Math.round((i / Math.max(playlists.length, 1)) * 360);
-    playlistColors[pl.name] = `hsl(${hue}, 70%, 62%)`;
+    playlistColors[_playlistKeyFromMeta(pl)] = `hsl(${hue}, 70%, 62%)`;
+    playlistColors[pl.name] = playlistColors[_playlistKeyFromMeta(pl)];
   });
 }
 
 function pointColor(p) {
   if (mapMode === 'playlists') {
-    const pl = (p.playlists || [])[0];
+    const pl = _pointPlaylistKeys(p)[0] || (p.playlists || [])[0];
     return playlistColors[pl] || COLOR_UNTAGGED;
   }
   return moodColors[p.mood] || COLOR_UNTAGGED;
+}
+
+function _playlistKeyFromMeta(pl) {
+  if (!pl) return '';
+  return String(pl.id || pl.name || pl);
+}
+
+function _playlistLabelFromMeta(pl, seen = null) {
+  const name = String(pl?.name || pl || '');
+  if (!seen) return name;
+  const count = seen.get(name) || 0;
+  seen.set(name, count + 1);
+  return count ? `${name} (${count + 1})` : name;
+}
+
+function _pointPlaylistKeys(p) {
+  const refs = p.playlist_refs || [];
+  if (refs.length) return refs.map(_playlistKeyFromMeta).filter(Boolean);
+  return p.playlists || [];
+}
+
+function _pointInPlaylist(p, key) {
+  return _pointPlaylistKeys(p).includes(key) || (p.playlists || []).includes(key);
+}
+
+function _playlistMetaItems(md, pts) {
+  const raw = md?.playlists || [];
+  const seenLabels = new Map();
+  return raw.map(pl => {
+    const key = _playlistKeyFromMeta(pl);
+    const name = String(pl?.name || pl || key);
+    return {
+      ...((typeof pl === 'object' && pl) ? pl : {}),
+      key,
+      name,
+      label: _playlistLabelFromMeta({ name }, seenLabels),
+    };
+  }).filter(pl => pl.key && pts.some(p => _pointInPlaylist(p, pl.key)));
 }
 
 function pointRadius(p, base) {
@@ -2260,12 +2299,12 @@ function _brainInPolySVG(x, y) {
 }
 
 function _computeSVGBrainDataFor(pts, md) {
-  const sortedNames = (md.playlists||[])
-    .map(p=>p.name)
-    .filter(name=>pts.some(p=>(p.playlists||[]).includes(name)))
-    .sort((a,b)=>pts.filter(p=>(p.playlists||[]).includes(b)).length - pts.filter(p=>(p.playlists||[]).includes(a)).length);
-  const plNames = sortedNames.slice(0, 10);
-  const otherNames = sortedNames.slice(10);
+  const sortedPlaylists = _playlistMetaItems(md, pts)
+    .sort((a,b)=>pts.filter(p=>_pointInPlaylist(p,b.key)).length - pts.filter(p=>_pointInPlaylist(p,a.key)).length);
+  const plItems = sortedPlaylists.slice(0, 10);
+  const plNames = plItems.map(pl => pl.key);
+  const plLabels = plItems.map(pl => pl.label);
+  const otherNames = sortedPlaylists.slice(10).map(pl => pl.key);
   if (!plNames.length) return null;
   const N = plNames.length;
 
@@ -2301,7 +2340,7 @@ function _computeSVGBrainDataFor(pts, md) {
   const vor = del.voronoi([-500,-500,1500,1200]);
   const brainPath = _crPath(BRAIN_PTS_SVG, true);
   const fissuePath = _crPath([[500,52],[499,175],[500,344],[501,515],[500,637]],false);
-  return { seeds, conns, plNames, del, vor, brainPath, fissuePath, N, otherNames };
+  return { seeds, conns, plNames, plLabels, del, vor, brainPath, fissuePath, N, otherNames };
 }
 
 function _computeSVGBrainData() {
@@ -2309,7 +2348,7 @@ function _computeSVGBrainData() {
 }
 
 function _buildBrainSVGMarkupFor(cache, pColors, pfx) {
-  const {seeds,conns,plNames,vor,brainPath,fissuePath,N} = cache;
+  const {seeds,conns,plNames,plLabels=[],vor,brainPath,fissuePath,N} = cache;
 
   let defs = `<defs>
     <clipPath id="${pfx}bcp"><path d="${brainPath}"/></clipPath>
@@ -2343,7 +2382,7 @@ function _buildBrainSVGMarkupFor(cache, pColors, pfx) {
     const dp = 'M'+cell.map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('L')+'Z';
     cells += `<path d="${dp}" fill="url(#${pfx}rg${i})" filter="url(#${pfx}gl${i})"
       stroke="rgba(0,0,0,0.5)" stroke-width="2.5"
-      class="bv-cell" data-idx="${i}" data-name="${_esc(plNames[i])}"
+      class="bv-cell" data-idx="${i}" data-name="${_esc(plNames[i])}" data-label="${_esc(plLabels[i] || plNames[i])}"
       style="cursor:pointer"/>`;
   }
   cells += '</g>';
@@ -2429,7 +2468,7 @@ function _showBrainOverlay() {
   overlay.style.display = 'block';
   canvas.style.opacity = '0';
 
-  const dataKey = (mapData?.points?.length||0)+'';
+  const dataKey = `${mapData?.points?.length || 0}:${(mapData?.playlists || []).map(_playlistKeyFromMeta).join('|')}`;
   if (!svgEl.dataset.built || svgEl.dataset.built !== dataKey) {
     svgEl.innerHTML = _buildBrainSVGMarkup();
     svgEl.dataset.built = dataKey;
@@ -2459,18 +2498,19 @@ function _closeBrainInfoPanel() {
 
 function _showBrainInfoPanel(idx, name) {
   const panel = document.getElementById('brain-info-panel');
-  const { conns, plNames, N } = _svgBrainCache;
+  const { conns, plNames, plLabels = [], N } = _svgBrainCache;
   const col = playlistColors[name]||COLOR_UNTAGGED;
-  const trackCount = points.filter(p=>(p.playlists||[]).includes(name)).length;
+  const label = plLabels[idx] || name;
+  const trackCount = points.filter(p=>_pointInPlaylist(p, name)).length;
   const connIdxs = conns.filter(([a,b])=>a===idx||b===idx).map(([a,b])=>a===idx?b:a);
-  const pl = (mapData.playlists||[]).find(p=>p.name===name);
+  const pl = (mapData.playlists||[]).find(p=>_playlistKeyFromMeta(p)===name || p.name===name);
   const desc = pl?.description||'';
   const side = idx < Math.ceil(N/2) ? 'LEFT' : 'RIGHT';
 
   panel.innerHTML = `<button class="bpi-sheet-handle" type="button" aria-label="Close lobe details"></button><div class="bpi-inner">
     <div>
       <div style="font-size:9px;color:var(--text-dim);letter-spacing:.14em;text-transform:uppercase;margin-bottom:5px">${side} HEMISPHERE</div>
-      <div style="font-family:Syne,sans-serif;font-weight:700;font-size:20px;line-height:1.2;color:${col};text-shadow:0 0 28px ${col}40">${_esc(name)}</div>
+      <div style="font-family:Syne,sans-serif;font-weight:700;font-size:20px;line-height:1.2;color:${col};text-shadow:0 0 28px ${col}40">${_esc(label)}</div>
     </div>
     <div style="width:44px;height:3px;border-radius:2px;background:${col};opacity:.5"></div>
     ${desc?`<div style="font-size:11.5px;color:var(--text-dim);line-height:1.75">${_esc(desc)}</div>`:''}
@@ -2489,11 +2529,12 @@ function _showBrainInfoPanel(idx, name) {
         <div style="font-size:9px;color:var(--text-dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Connected Lobes</div>
         ${connIdxs.map(j=>{
           const cn=plNames[j],cc=playlistColors[cn]||COLOR_UNTAGGED;
-          const ct=points.filter(p=>(p.playlists||[]).includes(cn)).length;
+          const cl=plLabels[j] || cn;
+          const ct=points.filter(p=>_pointInPlaylist(p, cn)).length;
           return `<div class="bpi-conn-item" data-idx="${j}" style="border-left:3px solid ${cc}55">
             <div style="width:7px;height:7px;border-radius:50%;background:${cc};box-shadow:0 0 6px ${cc};flex-shrink:0"></div>
             <div>
-              <div style="font-size:11px;color:var(--text)">${_esc(cn)}</div>
+              <div style="font-size:11px;color:var(--text)">${_esc(cl)}</div>
               <div style="font-size:9px;color:var(--text-dim);margin-top:1px">${ct} tracks</div>
             </div>
           </div>`;
@@ -2534,7 +2575,8 @@ function _buildPlaylistColorsFor(playlists) {
   const map = {};
   (playlists || []).forEach((pl, i) => {
     const hue = Math.round((i / Math.max(playlists.length, 1)) * 360);
-    map[pl.name || pl] = `hsl(${hue}, 70%, 62%)`;
+    map[_playlistKeyFromMeta(pl)] = `hsl(${hue}, 70%, 62%)`;
+    if (pl.name) map[pl.name] = map[_playlistKeyFromMeta(pl)];
   });
   return map;
 }
@@ -2542,7 +2584,7 @@ function _buildPlaylistColorsFor(playlists) {
 function _wireBrainSVGEventsOn(svgEl, cache, pColors, pfx, isFriend) {
   const labelLayer = svgEl.querySelector(`#${pfx}bv-labels`);
   const hintEl = svgEl.querySelector('#bv-hint');
-  const { seeds, conns, plNames } = cache;
+  const { seeds, conns, plNames, plLabels = [] } = cache;
   const selectedTracker = isFriend ? {
     get v() { return _svgFriendBrainSelected; },
     set v(next) { _svgFriendBrainSelected = next; }
@@ -2565,15 +2607,16 @@ function _wireBrainSVGEventsOn(svgEl, cache, pColors, pfx, isFriend) {
   svgEl.querySelectorAll('.bv-cell').forEach(cell => {
     const idx = parseInt(cell.dataset.idx);
     const name = cell.dataset.name;
+    const displayName = cell.dataset.label || plLabels[idx] || name;
     const col = pColors[name]||COLOR_UNTAGGED;
 
     cell.addEventListener('mouseenter', () => {
       svgEl.querySelector(`#${pfx}gl${idx}gb`)?.setAttribute('stdDeviation','15');
       applyDim(idx);
       const [sx,sy]=seeds[idx];
-      const label = name.length>20 ? name.slice(0,18)+'…' : name;
+      const label = displayName.length>20 ? displayName.slice(0,18)+'…' : displayName;
       const srcPts = isFriend ? comparePoints : points;
-      const trackCount = srcPts.filter(p=>(p.playlists||[]).includes(name)).length;
+      const trackCount = srcPts.filter(p=>_pointInPlaylist(p, name)).length;
       if (labelLayer) labelLayer.innerHTML = `
         <rect x="${sx-68}" y="${sy-38}" width="136" height="22" rx="4" fill="rgba(5,5,12,0.85)"/>
         <text x="${sx}" y="${sy-22}" text-anchor="middle" fill="${col}"
@@ -2647,11 +2690,13 @@ function _wireBrainSVGEventsOn(svgEl, cache, pColors, pfx, isFriend) {
 function _buildCmpLegend(containerId, plNames, pColors) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = plNames.map(name => {
+  const cache = containerId.includes('friend') ? _svgFriendBrainCache : _svgBrainCache;
+  const labels = cache?.plLabels || [];
+  el.innerHTML = plNames.map((name, i) => {
     const col = pColors[name] || COLOR_UNTAGGED;
     return `<div style="display:flex;align-items:center;gap:5px;flex-shrink:0;font-size:9px;color:var(--text-dim);white-space:nowrap">
       <div style="width:6px;height:6px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col}80;flex-shrink:0"></div>
-      ${_esc(name)}</div>`;
+      ${_esc(labels[i] || name)}</div>`;
   }).join('');
 }
 
@@ -2690,11 +2735,12 @@ function _buildCmpCenter(d) {
 
 function _showFriendLobePanel(idx, name, cache, pColors) {
   const panel = document.getElementById('brain-info-panel');
-  const { N, otherNames = [] } = cache;
+  const { N, otherNames = [], plLabels = [] } = cache;
+  const label = plLabels[idx] || name;
   const col = name === 'Others' ? COLOR_OTHERS : (pColors[name] || COLOR_UNTAGGED);
   const matchedPts = name === 'Others'
-    ? comparePoints.filter(p=>(p.playlists||[]).some(pl=>otherNames.includes(pl)))
-    : comparePoints.filter(p => (p.playlists || []).includes(name));
+    ? comparePoints.filter(p=>_pointPlaylistKeys(p).some(pl=>otherNames.includes(pl)))
+    : comparePoints.filter(p => _pointInPlaylist(p, name));
   const trackMeta = matchedPts.filter(p=>p.id).map(p=>({id:p.id,name:p.name||'',artist:p.artist||'',isrc:p.isrc||null}));
   const trackCount = trackMeta.length;
   const side = idx < Math.ceil(N / 2) ? 'LEFT' : 'RIGHT';
@@ -2705,7 +2751,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
         ${_esc(compareDisplayName)}'s ${side} LOBE
       </div>
       <div style="font-family:Syne,sans-serif;font-weight:700;font-size:20px;line-height:1.2;color:${col};text-shadow:0 0 28px ${col}40">
-        ${_esc(name)}
+        ${_esc(label)}
       </div>
     </div>
     <div style="width:44px;height:3px;border-radius:2px;background:${col};opacity:.5"></div>
@@ -2745,6 +2791,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           playlist_name: name,
+          playlist_display_name: label,
           tracks: trackMeta,
           friend_display_name: compareDisplayName,
           ...(isAppleUser ? _appleMusicSessionPayload() : targetPayload),
@@ -2854,8 +2901,8 @@ function _showCompareBrainView() {
 
 function _selectBrainLobeByName(name) {
   if (!_svgBrainCache) return;
-  const { plNames } = _svgBrainCache;
-  const idx = plNames.indexOf(name);
+  const { plNames, plLabels = [] } = _svgBrainCache;
+  const idx = plNames.indexOf(name) >= 0 ? plNames.indexOf(name) : plLabels.indexOf(name);
   if (idx < 0) return;
   const svgEl = document.getElementById('brain-svg');
   // clear previous selection visuals
@@ -2885,14 +2932,14 @@ function _clearBrainLobeHighlight() {
 
 function _buildBrainLegendStrip() {
   if (!_svgBrainCache) return;
-  const { plNames } = _svgBrainCache;
+  const { plNames, plLabels = [] } = _svgBrainCache;
   const strip = document.getElementById('brain-legend-strip');
-  strip.innerHTML = plNames.map(name=>{
+  strip.innerHTML = plNames.map((name, i)=>{
     const col=playlistColors[name]||COLOR_UNTAGGED;
     return `<div class="brain-legend-chip" data-name="${_esc(name)}"
       style="color:var(--text-dim)">
       <div style="width:7px;height:7px;border-radius:50%;background:${col};box-shadow:0 0 7px ${col}90;flex-shrink:0"></div>
-      ${_esc(name)}
+      ${_esc(plLabels[i] || name)}
     </div>`;
   }).join('');
   strip.querySelectorAll('.brain-legend-chip').forEach(chip=>{
@@ -3096,7 +3143,7 @@ function _brainHitTest(mx, my) {
 // ---------------------------------------------------------------------------
 
 function _openDrillDown(playlistName) {
-  const tracks = points.filter(p => (p.playlists || []).includes(playlistName));
+  const tracks = points.filter(p => _pointInPlaylist(p, playlistName));
   if (!tracks.length) return;
   drilldownTracks = tracks;
   drilldownHovered = null;
@@ -4418,22 +4465,23 @@ document.getElementById('btn-merge').addEventListener('click', () => {
   // Compute track counts per playlist
   const counts = {};
   for (const p of points) {
-    for (const pl of (p.playlists || [])) {
+    for (const pl of _pointPlaylistKeys(p)) {
       counts[pl] = (counts[pl] || 0) + 1;
     }
   }
 
-  const sorted = [...playlists].sort((a, b) => (counts[b.name] || 0) - (counts[a.name] || 0));
+  const items = _playlistMetaItems(mapData, points);
+  const sorted = [...items].sort((a, b) => (counts[b.key] || 0) - (counts[a.key] || 0));
   const container = document.getElementById('merge-checkboxes');
   container.innerHTML = sorted.map(pl => {
-    const color = playlistColors[pl.name] || COLOR_UNTAGGED;
-    const ct = counts[pl.name] || 0;
-    const safe = pl.name.replace(/"/g, '&quot;');
+    const color = playlistColors[pl.key] || COLOR_UNTAGGED;
+    const ct = counts[pl.key] || 0;
+    const safe = pl.key.replace(/"/g, '&quot;');
     return `
       <label class="mood-check-item" data-name="${safe}">
         <input type="checkbox" value="${safe}" />
         <div class="mood-check-dot" style="background:${color}"></div>
-        <span class="mood-check-name">${pl.name}</span>
+        <span class="mood-check-name">${pl.label}</span>
         <span class="mood-check-count">${ct} tracks</span>
       </label>`;
   }).join('');
@@ -4891,12 +4939,22 @@ function _renderCompareResults(d) {
 function _renderFriendPlaylists() {
   if (!comparePoints.length) return;
 
-  // Group comparePoints by playlist name → unique track IDs
+  // Group comparePoints by playlist identity, falling back to name for old maps.
   const playlistMap = {};
+  const playlistLabels = {};
   for (const p of comparePoints) {
-    for (const plName of (p.playlists || [])) {
-      if (!playlistMap[plName]) playlistMap[plName] = [];
-      if (!playlistMap[plName].includes(p.id)) playlistMap[plName].push(p.id);
+    const refs = p.playlist_refs || [];
+    const keys = refs.length ? refs.map(ref => {
+      const key = _playlistKeyFromMeta(ref);
+      playlistLabels[key] = ref.name || key;
+      return key;
+    }) : (p.playlists || []).map(name => {
+      playlistLabels[name] = name;
+      return name;
+    });
+    for (const plKey of keys) {
+      if (!playlistMap[plKey]) playlistMap[plKey] = [];
+      if (!playlistMap[plKey].includes(p.id)) playlistMap[plKey].push(p.id);
     }
   }
 
@@ -4911,11 +4969,12 @@ function _renderFriendPlaylists() {
       <div style="max-height:180px;overflow-y:auto;scrollbar-width:thin;margin-bottom:.6rem">`;
 
   for (const [name, trackIds] of playlists) {
+    const label = playlistLabels[name] || name;
     html += `
       <label style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;cursor:pointer;font-size:.72rem;border-bottom:1px solid rgba(255,255,255,.04)">
         <input type="checkbox" class="friend-pl-check" data-name="${_esc(name)}"
           style="accent-color:var(--accent2);cursor:pointer;flex-shrink:0">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" title="${_esc(name)}">${_esc(name)}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" title="${_esc(label)}">${_esc(label)}</span>
         <span style="color:var(--text-dim);flex-shrink:0;font-size:.68rem">${trackIds.length} tracks</span>
       </label>`;
   }
@@ -5002,7 +5061,7 @@ async function _importSelectedPlaylists() {
 
 function _friendPlaylistTracks(name) {
   return comparePoints
-    .filter(p => (p.playlists || []).includes(name) && p.id)
+    .filter(p => _pointInPlaylist(p, name) && p.id)
     .map(p => ({ id: p.id, name: p.name || '', artist: p.artist || '', isrc: p.isrc || null }));
 }
 

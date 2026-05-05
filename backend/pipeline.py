@@ -111,7 +111,8 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
 
     # Step 1: fetch playlists once — builds pl_lookup and collects track objects
     pl_lookup: dict[str, list[str]] = {}
-    pl_trks, playlist_meta, pl_track_samples = _fetch_playlists_data(headers, pl_lookup, user_id=user_id)
+    pl_ref_lookup: dict[str, list[dict]] = {}
+    pl_trks, playlist_meta, pl_track_samples = _fetch_playlists_data(headers, pl_lookup, pl_ref_lookup, user_id=user_id)
 
     # Step 2: gather from each source separately so we can score per-source
     scored: dict[str, int] = {}
@@ -180,6 +181,7 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
     all_candidates = list(seen.values())
     for t in all_candidates:
         t["playlists"] = pl_lookup.get(t["id"], [])
+        t["playlist_refs"] = pl_ref_lookup.get(t["id"], [])
         t["play_score"] = max(scored.get(t["id"], 1), 1)
         t["recency_score"] = recency_scored.get(t["id"], 0)
         t["depth_score"] = depth_scored.get(t["id"], 0)
@@ -225,6 +227,7 @@ def _spotify_get(url: str, headers: dict, params: dict | None = None, retries: i
 def _fetch_playlists_data(
     headers: dict,
     pl_lookup: dict[str, list[str]],
+    pl_ref_lookup: dict[str, list[dict]],
     user_id: str = "",
 ) -> tuple[list[dict], list[dict], dict[str, list[str]]]:
     """
@@ -292,8 +295,12 @@ def _fetch_playlists_data(
                 # even if this track ends up below the play_score cut-off
                 if tid not in pl_lookup:
                     pl_lookup[tid] = []
+                if tid not in pl_ref_lookup:
+                    pl_ref_lookup[tid] = []
                 if pl_name not in pl_lookup[tid]:
                     pl_lookup[tid].append(pl_name)
+                if not any(ref.get("id") == pl_id for ref in pl_ref_lookup[tid]):
+                    pl_ref_lookup[tid].append({"id": pl_id, "name": pl_name})
                 track_objects.append(_normalise_track(t))
                 if len(pl_track_samples[pl_name]) < 15:
                     artists = t.get("artists", [])
