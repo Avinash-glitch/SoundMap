@@ -1849,9 +1849,11 @@ function _pointInPlaylist(p, key) {
 function _playlistMetaItems(md, pts) {
   const raw = md?.playlists || [];
   const seenLabels = new Map();
+  const hasPlaylistRefs = pts.some(p => (p.playlist_refs || []).length);
   return raw.map(pl => {
-    const key = _playlistKeyFromMeta(pl);
-    const name = String(pl?.name || pl || key);
+    const idKey = _playlistKeyFromMeta(pl);
+    const name = String(pl?.name || pl || idKey);
+    const key = hasPlaylistRefs && pts.some(p => _pointInPlaylist(p, idKey)) ? idKey : name;
     return {
       ...((typeof pl === 'object' && pl) ? pl : {}),
       key,
