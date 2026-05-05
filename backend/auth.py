@@ -11,6 +11,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse
 
 from .jobs import submit_job
+from .notifications import send_notification
 from . import storage
 
 SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
@@ -174,6 +175,14 @@ async def callback(
     display_name = profile.get("display_name", user_id)
 
     print(f"[auth] User logged in: {display_name} ({user_id})")
+    send_notification(
+        "Spotify login",
+        display_name=display_name,
+        user_id=user_id,
+        share_for_comparison=oauth_options.get("share_for_comparison", request.session.get("share_for_comparison", True)),
+        client_ip=getattr(request.client, "host", None),
+        user_agent=request.headers.get("user-agent"),
+    )
 
     # Store tokens in session for downstream endpoints and playlist creation
     request.session["access_token"] = access_token
@@ -196,9 +205,16 @@ async def callback(
     share_changed = existing_share is not None and existing_share != share_for_comparison
     if not force_rebuild and not share_changed and existing_map and storage.map_age_hours(user_id) < 24:
         print(f"[auth] Fresh map found for {user_id} — skipping pipeline")
+        send_notification(
+            "Fresh map served",
+            display_name=display_name,
+            user_id=user_id,
+            map_age_hours=f"{storage.map_age_hours(user_id):.1f}",
+        )
         return RedirectResponse(f"{app_url}/map.html?user={user_id}{extra}")
 
-    return RedirectResponse(f"{app_url}/loading.html?user={user_id}{extra}")
+    force_extra = "&force=1" if force_rebuild else ""
+    return RedirectResponse(f"{app_url}/loading.html?user={user_id}{extra}{force_extra}")
 
 
 async def refresh_access_token(request: Request) -> str | None:

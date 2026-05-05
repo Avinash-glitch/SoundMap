@@ -20,6 +20,7 @@ def submit_job(
     api_key: str = "",
     provider: str = "",
     share_for_comparison: bool = True,
+    force: bool = False,
 ) -> str:
     """Queue a pipeline job and return the job_id."""
     from . import pipeline  # lazy import avoids circular deps at module load
@@ -41,6 +42,7 @@ def submit_job(
         display_name=display_name,
         user_id=user_id,
         share_for_comparison=share_for_comparison,
+        force=force,
         job_id=job_id,
     )
 
@@ -65,6 +67,7 @@ def submit_job(
                 provider=provider,
                 stop_event=stop_event,
                 share_for_comparison=share_for_comparison,
+                force=force,
             )
             jobs[job_id]["status"] = "done"
             jobs[job_id]["progress"] = 100

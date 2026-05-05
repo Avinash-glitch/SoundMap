@@ -38,6 +38,7 @@ def process_user(
     provider: str = "",
     stop_event=None,
     share_for_comparison: bool = True,
+    force: bool = False,
 ) -> dict:
     """
     Full pipeline for one user.
@@ -51,7 +52,7 @@ def process_user(
 
     existing = storage.load_map(user_id) if storage.map_exists(user_id) else None
     existing_share = bool(existing.get("share_for_comparison", True)) if existing else None
-    if existing and existing_share == bool(share_for_comparison) and storage.map_age_hours(user_id) < 24:
+    if not force and existing and existing_share == bool(share_for_comparison) and storage.map_age_hours(user_id) < 24:
         progress(100, "Loaded from cache.")
         return existing
 

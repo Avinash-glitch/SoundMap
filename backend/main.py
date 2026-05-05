@@ -209,15 +209,17 @@ async def start_job(request: Request) -> JSONResponse:
 
     api_key = ""
     provider = ""
+    force = False
     share_for_comparison = bool(request.session.get("share_for_comparison", True))
     try:
         body = await request.json()
         api_key = (body.get("api_key") or "").strip()
         provider = (body.get("provider") or "").strip().lower()
+        force = bool(body.get("force") or request.session.pop("force_rebuild", False))
         if body.get("share_for_comparison") is not None:
             share_for_comparison = bool(body.get("share_for_comparison"))
     except Exception:
-        pass
+        force = bool(request.session.pop("force_rebuild", False))
 
     request.session["share_for_comparison"] = share_for_comparison
     job_id = submit_job(
@@ -227,6 +229,7 @@ async def start_job(request: Request) -> JSONResponse:
         api_key=api_key,
         provider=provider,
         share_for_comparison=share_for_comparison,
+        force=force,
     )
     return JSONResponse({"job_id": job_id, "user_id": user_id})
 

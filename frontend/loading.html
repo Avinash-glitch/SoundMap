@@ -310,6 +310,7 @@
   const preJobId = params.get('job'); // set when job was already started (e.g. Apple Music flow)
   const connectApple = params.get('connect_apple') === '1';
   const privateMap = params.get('private_map') === '1';
+  const forceRebuild = params.get('force') === '1';
 
   if (!userId) { location.href = '/'; }
 
@@ -388,6 +389,7 @@
         body: JSON.stringify({
           api_key: apiKey || undefined,
           share_for_comparison: !privateMap,
+          force: forceRebuild,
         }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
