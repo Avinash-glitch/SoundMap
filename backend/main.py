@@ -1139,9 +1139,17 @@ async def import_friend_playlist(request: Request) -> JSONResponse:
         playlist_name: str = (body.get("playlist_name") or "").strip()
         tracks: list[dict] = body.get("tracks") or []
         friend_name: str = (body.get("friend_display_name") or "Friend").strip()
+        target_user_id: str = (body.get("target_user_id") or "").strip()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
+    if not target_user_id:
+        raise HTTPException(status_code=400, detail="target_user_id required — refresh the page and try again")
+    if target_user_id != user_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Spotify session mismatch — this browser is logged in as {user_id}, not {target_user_id}",
+        )
     if not playlist_name:
         raise HTTPException(status_code=400, detail="playlist_name required")
     if not tracks:
@@ -1203,9 +1211,17 @@ async def merge_friend_playlist(request: Request) -> JSONResponse:
         friend_playlist_name: str = (body.get("friend_playlist_name") or "").strip()
         friend_name: str = (body.get("friend_display_name") or "Friend").strip()
         friend_tracks: list[dict] = body.get("friend_tracks") or []
+        target_user_id: str = (body.get("target_user_id") or "").strip()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
+    if not target_user_id:
+        raise HTTPException(status_code=400, detail="target_user_id required — refresh the page and try again")
+    if target_user_id != user_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Spotify session mismatch — this browser is logged in as {user_id}, not {target_user_id}",
+        )
     if not my_playlist_name or not friend_playlist_name:
         raise HTTPException(status_code=400, detail="my_playlist_name and friend_playlist_name required")
     if not friend_tracks:

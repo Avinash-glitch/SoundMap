@@ -1862,6 +1862,28 @@ function _appleMusicSessionPayload() {
   }
 }
 
+let _currentSessionUser = null;
+
+async function _getCurrentSessionUser() {
+  if (_currentSessionUser) return _currentSessionUser;
+  try {
+    const resp = await fetch('/me');
+    if (!resp.ok) return null;
+    _currentSessionUser = await resp.json();
+    return _currentSessionUser;
+  } catch {
+    return null;
+  }
+}
+
+async function _spotifyImportTargetPayload() {
+  const me = await _getCurrentSessionUser();
+  if (!me?.user_id) {
+    throw new Error('Log in with your own Spotify account before importing playlists.');
+  }
+  return { target_user_id: me.user_id, target_display_name: me.display_name || me.user_id };
+}
+
 // Brain map state
 let brainMode = true;          // brain SVG is the default view
 let brainHovered = null;
@@ -2716,6 +2738,8 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
     console.log('[import] playlist:', name, '| tracks:', trackMeta.length, '| friend:', compareDisplayName, '| endpoint:', endpoint);
     try {
       if (!trackMeta.length) throw new Error('No tracks found for this playlist');
+      const targetPayload = isAppleUser ? {} : await _spotifyImportTargetPayload();
+      if (!isAppleUser) status.textContent = `Adding ${trackMeta.length} tracks to ${targetPayload.target_display_name}'s Spotify…`;
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2723,7 +2747,7 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
           playlist_name: name,
           tracks: trackMeta,
           friend_display_name: compareDisplayName,
-          ...(isAppleUser ? _appleMusicSessionPayload() : {}),
+          ...(isAppleUser ? _appleMusicSessionPayload() : targetPayload),
         }),
       });
       console.log('[import] response status:', resp.status);
@@ -2741,6 +2765,15 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
         status.innerHTML = isAppleUser
           ? 'Apple Music permissions missing — reconnect Apple Music then try again'
           : 'Spotify permissions missing — <a href="/auth/login" style="color:var(--accent)">reconnect Spotify</a> then try again';
+        btn.disabled = false;
+        btn.textContent = 'Retry';
+        return;
+      }
+      if (resp.status === 409) {
+        let detail = 'Spotify session mismatch — reconnect with the Spotify account you want to import into';
+        try { detail = (await resp.json()).detail || detail; } catch {}
+        status.style.color = '#f87171';
+        status.textContent = detail;
         btn.disabled = false;
         btn.textContent = 'Retry';
         return;
@@ -4928,6 +4961,8 @@ async function _importSelectedPlaylists() {
     statusEl.textContent = `Importing ${i + 1}/${checks.length}: ${name}…`;
 
     try {
+      const targetPayload = isApple ? {} : await _spotifyImportTargetPayload();
+      if (!isApple) statusEl.textContent = `Importing ${i + 1}/${checks.length} to ${targetPayload.target_display_name}'s Spotify: ${name}…`;
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -4935,17 +4970,19 @@ async function _importSelectedPlaylists() {
           playlist_name: name,
           tracks,
           friend_display_name: compareDisplayName,
-          ...(isApple ? _appleMusicSessionPayload() : {}),
+          ...(isApple ? _appleMusicSessionPayload() : targetPayload),
         }),
       });
       if (resp.ok) {
         const d = await resp.json();
         results.push({name: d.name, count: d.track_count, url: d.url, ok: true});
       } else {
-        results.push({name, ok: false});
+        let detail = 'Import failed';
+        try { detail = (await resp.json()).detail || detail; } catch {}
+        results.push({name, ok: false, detail});
       }
-    } catch {
-      results.push({name, ok: false});
+    } catch (err) {
+      results.push({name, ok: false, detail: err.message || 'Import failed'});
     }
   }
 
@@ -4957,7 +4994,7 @@ async function _importSelectedPlaylists() {
       : _esc(r.name);
     return `${nameHtml} — ${r.count} tracks added${isApple ? ' (may take a minute to show)' : ''}`;
   }).join('<br>');
-  if (failed.length) msg += (msg ? '<br>' : '') + `<span style="color:#f87171">Failed: ${failed.map(r => _esc(r.name)).join(', ')}</span>`;
+  if (failed.length) msg += (msg ? '<br>' : '') + `<span style="color:#f87171">Failed: ${failed.map(r => `${_esc(r.name)}${r.detail ? ` (${_esc(r.detail)})` : ''}`).join(', ')}</span>`;
   statusEl.innerHTML = msg || 'Done';
   btn.disabled = false;
   btn.textContent = 'Add more';
@@ -4974,6 +5011,7 @@ async function _mergeFriendPlaylistPair(myPlaylistName, friendPlaylistName, btn)
   btn.disabled = true;
   btn.textContent = 'Merging…';
   try {
+    const targetPayload = await _spotifyImportTargetPayload();
     const friendTracks = _friendPlaylistTracks(friendPlaylistName);
     if (!friendTracks.length) throw new Error('No tracks found in that friend playlist');
     const resp = await fetch('/merge-friend-playlist', {
@@ -4984,6 +5022,7 @@ async function _mergeFriendPlaylistPair(myPlaylistName, friendPlaylistName, btn)
         friend_playlist_name: friendPlaylistName,
         friend_tracks: friendTracks,
         friend_display_name: compareDisplayName,
+        ...targetPayload,
       }),
     });
     if (!resp.ok) {
