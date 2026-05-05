@@ -200,21 +200,17 @@ async def analyze_moods(request: Request) -> JSONResponse:
 
 @app.post("/start-job")
 async def start_job(request: Request) -> JSONResponse:
-    """Start pipeline job for the logged-in user. Accepts optional api_key in JSON body."""
+    """Start pipeline job for the logged-in user."""
     token = request.session.get("access_token")
     user_id = request.session.get("user_id")
     display_name = request.session.get("display_name", user_id)
     if not token or not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
 
-    api_key = ""
-    provider = ""
     force = False
     share_for_comparison = bool(request.session.get("share_for_comparison", True))
     try:
         body = await request.json()
-        api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or "").strip().lower()
         force = bool(body.get("force") or request.session.pop("force_rebuild", False))
         if body.get("share_for_comparison") is not None:
             share_for_comparison = bool(body.get("share_for_comparison"))
@@ -226,8 +222,6 @@ async def start_job(request: Request) -> JSONResponse:
         token,
         user_id,
         display_name,
-        api_key=api_key,
-        provider=provider,
         share_for_comparison=share_for_comparison,
         force=force,
     )
@@ -988,8 +982,6 @@ async def apple_start_job(request: Request) -> JSONResponse:
         body = await request.json()
         music_user_token = (body.get("music_user_token") or "").strip()
         storefront = (body.get("storefront") or "us").strip().lower()
-        api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or "").strip().lower()
         force = bool(body.get("force"))
         share_for_comparison = bool(body.get("share_for_comparison", request.session.get("share_for_comparison", True)))
     except Exception:
@@ -1018,8 +1010,6 @@ async def apple_start_job(request: Request) -> JSONResponse:
         music_user_token,
         user_id,
         storefront,
-        api_key=api_key,
-        provider=provider,
         force=force,
         share_for_comparison=share_for_comparison,
     )

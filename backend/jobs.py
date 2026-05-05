@@ -17,8 +17,6 @@ def submit_job(
     access_token: str,
     user_id: str,
     display_name: str,
-    api_key: str = "",
-    provider: str = "",
     share_for_comparison: bool = True,
     force: bool = False,
 ) -> str:
@@ -63,8 +61,6 @@ def submit_job(
                 access_token, user_id,
                 on_progress=_on_progress,
                 display_name=display_name,
-                api_key=api_key,
-                provider=provider,
                 stop_event=stop_event,
                 share_for_comparison=share_for_comparison,
                 force=force,
@@ -99,8 +95,6 @@ def submit_apple_job(
     music_user_token: str,
     user_id: str,
     storefront: str = "us",
-    api_key: str = "",
-    provider: str = "",
     force: bool = False,
     share_for_comparison: bool = True,
 ) -> str:
@@ -143,8 +137,6 @@ def submit_apple_job(
             pipeline.process_apple_user(
                 music_user_token, user_id, storefront,
                 on_progress=_on_progress,
-                api_key=api_key,
-                provider=provider,
                 force=force,
                 share_for_comparison=share_for_comparison,
             )

@@ -5818,15 +5818,12 @@ async function _startAppleMapJob(force = false) {
     }
 
     body.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:.5rem 0">Starting Apple Music rebuild…</div>';
-    const { provider, key } = _getAiSettings();
     const resp = await fetch('/apple/start-job', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         music_user_token: instance.musicUserToken,
         storefront: instance.storefrontCountryCode || 'us',
-        api_key: key || undefined,
-        provider,
         force,
         share_for_comparison: _appleShareForComparison,
       }),

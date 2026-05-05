@@ -34,8 +34,6 @@ def process_user(
     user_id: str,
     on_progress: Callable[[int, str], None] | None = None,
     display_name: str = "",
-    api_key: str = "",
-    provider: str = "",
     stop_event=None,
     share_for_comparison: bool = True,
     force: bool = False,
@@ -65,22 +63,14 @@ def process_user(
     if not tracks:
         raise RuntimeError("No tracks found in your Spotify library.")
 
-    progress(28, "Grouping playlists into moods…")
-    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_track_samples, api_key=api_key, provider=provider or _default_provider())
+    progress(28, "Reading playlist structure…")
+    pl_to_mood, persona = {}, ""
 
     progress(30, f"Processing {len(tracks)} tracks across {len(playlist_meta)} playlists…")
 
     # ---- 3. Embeddings ----------------------------------------------------
     progress(35, "Analysing your music…")
     embeddings, track_genres = _genre_embeddings(tracks, headers, on_progress=progress)
-
-    # ---- 3b. AI genre detection (enriches map labels) --------------------
-    if api_key:
-        progress(71, "Detecting genres with AI…")
-        try:
-            track_genres = _llm_genre_detect(tracks, api_key, provider or _default_provider())
-        except Exception as _ge:
-            print(f"[pipeline] LLM genre detection failed ({_ge}) — keeping keyword genres")
 
     # ---- 4. UMAP ----------------------------------------------------------
     progress(75, "Running UMAP dimensionality reduction…")
@@ -906,8 +896,6 @@ def process_apple_user(
     user_id: str,
     storefront: str = "us",
     on_progress=None,
-    api_key: str = "",
-    provider: str = "",
     force: bool = False,
     share_for_comparison: bool = True,
 ) -> dict:
@@ -944,13 +932,6 @@ def process_apple_user(
 
     progress(58, f"Analysing {len(tracks)} tracks…")
     embeddings, track_genres = _apple_genre_embeddings(tracks)
-
-    if api_key:
-        progress(65, "Detecting genres with AI…")
-        try:
-            track_genres = _llm_genre_detect(tracks, api_key, provider or _default_provider())
-        except Exception as exc:
-            print(f"[apple-pipeline] LLM genre detection failed ({exc}) — keeping keyword genres")
 
     progress(75, "Running UMAP…")
     coords = _run_umap(embeddings)
