@@ -339,6 +339,49 @@
       max-height: calc(100vh - 100px);
       overflow-y: auto;
       scrollbar-width: thin;
+      transition: width .18s, height .18s, padding .18s, opacity .18s;
+    }
+    .legend.collapsed {
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      overflow: hidden;
+    }
+    .legend.collapsed #legend-body,
+    .legend.collapsed #legend-remaining-btn {
+      display: none !important;
+    }
+    .panel-collapse-btn {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-dim);
+      font-family: 'DM Mono', monospace;
+      font-size: .82rem;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 2;
+    }
+    .panel-collapse-btn:hover {
+      color: var(--text);
+      border-color: var(--text-dim);
+    }
+    .legend .panel-collapse-btn {
+      top: 6px;
+      right: 6px;
+    }
+    .legend:not(.collapsed) .panel-collapse-btn {
+      position: sticky;
+      float: right;
+      margin: -2px -4px 6px 8px;
     }
 
     #top-tracks-panel {
@@ -354,12 +397,28 @@
       font-size: .72rem;
       color: var(--text-dim);
       backdrop-filter: blur(8px);
+      transition: width .18s, height .18s, padding .18s;
+      max-height: calc(100vh - 78px);
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+    #top-tracks-panel.collapsed {
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      overflow: hidden;
+    }
+    #top-tracks-panel.collapsed .tt-header,
+    #top-tracks-panel.collapsed .tt-toggles,
+    #top-tracks-panel.collapsed #tt-list {
+      display: none !important;
     }
     #top-tracks-panel .tt-header {
       font-size: .63rem;
       text-transform: uppercase;
       letter-spacing: .08em;
       margin-bottom: .55rem;
+      padding-right: 1.65rem;
     }
     .tt-toggles {
       display: flex;
@@ -425,6 +484,28 @@
     }
     @media (max-width: 640px) {
       #top-tracks-panel { display: none; }
+      #top-tracks-panel.mobile-open {
+        display: block;
+        top: auto;
+        left: 10px;
+        right: 10px;
+        bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+        width: auto;
+        max-height: min(54vh, 430px);
+        z-index: 46;
+        border-radius: 14px;
+        padding: .85rem .95rem;
+      }
+      #top-tracks-panel.mobile-open.collapsed {
+        display: none;
+      }
+      #top-tracks-panel.mobile-open .tt-art {
+        width: 34px;
+        height: 34px;
+      }
+      #top-tracks-panel.mobile-open .tt-track {
+        padding: .42rem 0;
+      }
     }
 
     .legend-title {
@@ -1738,12 +1819,14 @@
 
 <!-- Legend -->
 <div class="legend" id="map-legend">
+  <button class="panel-collapse-btn" id="legend-collapse" type="button" title="Collapse playlists">−</button>
   <button id="legend-remaining-btn" style="display:none;width:100%;padding:.32rem .55rem;background:transparent;border:1px solid rgba(29,185,84,.4);color:var(--accent);border-radius:6px;font-family:'DM Mono',monospace;font-size:.67rem;cursor:pointer;margin-bottom:.6rem;transition:background .15s">✦ Organise remaining tracks</button>
   <div id="legend-body"></div>
 </div>
 
 <!-- Top Tracks panel -->
 <div id="top-tracks-panel">
+  <button class="panel-collapse-btn" id="top-tracks-collapse" type="button" title="Collapse top tracks">−</button>
   <div class="tt-header">Top Tracks</div>
   <div class="tt-toggles">
     <button class="tt-toggle active" data-range="short_term">4 Weeks</button>
@@ -1776,6 +1859,10 @@
   <button id="mobile-ai" type="button" title="AI Curator">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.1 6.3L22 9.3l-5 4.9 1.2 6.8L12 17.8 5.8 21 7 14.2 2 9.3l6.9-1L12 2z"/></svg>
     <span>AI</span>
+  </button>
+  <button id="mobile-top-tracks" type="button" title="Top tracks">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5"/><path d="M8 19V9"/><path d="M12 19V3"/><path d="M16 19v-7"/><path d="M20 19V8"/></svg>
+    <span>Top</span>
   </button>
   <button id="mobile-more" type="button" title="More">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
@@ -3848,6 +3935,63 @@ document.querySelectorAll('.tt-toggle').forEach(btn => {
   });
 });
 
+function _setMobileToolbarActive(activeId) {
+  document.querySelectorAll('.mobile-toolbar button').forEach(btn => {
+    btn.classList.toggle('active', btn.id === activeId);
+  });
+}
+
+function _setLegendCollapsed(collapsed) {
+  const panel = document.getElementById('map-legend');
+  const btn = document.getElementById('legend-collapse');
+  panel?.classList.toggle('collapsed', collapsed);
+  if (btn) {
+    btn.textContent = collapsed ? '+' : '−';
+    btn.title = collapsed ? 'Show playlists' : 'Collapse playlists';
+  }
+}
+
+function _setTopTracksCollapsed(collapsed) {
+  const panel = document.getElementById('top-tracks-panel');
+  const btn = document.getElementById('top-tracks-collapse');
+  panel?.classList.toggle('collapsed', collapsed);
+  if (btn) {
+    btn.textContent = collapsed ? '+' : '−';
+    btn.title = collapsed ? 'Show top tracks' : 'Collapse top tracks';
+  }
+}
+
+function _toggleMobileTopTracks() {
+  const panel = document.getElementById('top-tracks-panel');
+  if (!panel) return;
+  const open = !panel.classList.contains('mobile-open');
+  panel.classList.toggle('mobile-open', open);
+  if (open) {
+    _setTopTracksCollapsed(false);
+    _setMobileToolbarActive('mobile-top-tracks');
+    _loadTopTracks(_ttRange);
+  } else {
+    _setMobileToolbarActive('mobile-search');
+  }
+}
+
+document.getElementById('legend-collapse')?.addEventListener('click', e => {
+  e.stopPropagation();
+  const panel = document.getElementById('map-legend');
+  _setLegendCollapsed(!panel?.classList.contains('collapsed'));
+});
+
+document.getElementById('top-tracks-collapse')?.addEventListener('click', e => {
+  e.stopPropagation();
+  const panel = document.getElementById('top-tracks-panel');
+  if (panel?.classList.contains('mobile-open')) {
+    panel.classList.remove('mobile-open');
+    _setMobileToolbarActive('mobile-search');
+    return;
+  }
+  _setTopTracksCollapsed(!panel?.classList.contains('collapsed'));
+});
+
 // ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
@@ -4647,6 +4791,8 @@ function _clickById(id) {
 }
 
 document.getElementById('mobile-search')?.addEventListener('click', () => {
+  document.getElementById('top-tracks-panel')?.classList.remove('mobile-open');
+  _setMobileToolbarActive('mobile-search');
   const input = document.getElementById('search-input');
   if (document.activeElement === input && !input.value.trim()) {
     input.blur();
@@ -4655,14 +4801,32 @@ document.getElementById('mobile-search')?.addEventListener('click', () => {
   input?.focus();
 });
 
-document.getElementById('mobile-compare')?.addEventListener('click', () => _clickById('btn-compare'));
-document.getElementById('mobile-view')?.addEventListener('click', () => _clickById('btn-brain'));
-document.getElementById('mobile-ai')?.addEventListener('click', () => _clickById('btn-ai'));
+document.getElementById('mobile-compare')?.addEventListener('click', () => {
+  document.getElementById('top-tracks-panel')?.classList.remove('mobile-open');
+  _setMobileToolbarActive('mobile-compare');
+  _clickById('btn-compare');
+});
+document.getElementById('mobile-view')?.addEventListener('click', () => {
+  document.getElementById('top-tracks-panel')?.classList.remove('mobile-open');
+  _setMobileToolbarActive('mobile-view');
+  _clickById('btn-brain');
+});
+document.getElementById('mobile-ai')?.addEventListener('click', () => {
+  document.getElementById('top-tracks-panel')?.classList.remove('mobile-open');
+  _setMobileToolbarActive('mobile-ai');
+  _clickById('btn-ai');
+});
+document.getElementById('mobile-top-tracks')?.addEventListener('click', _toggleMobileTopTracks);
 document.getElementById('mobile-more')?.addEventListener('click', () => {
+  document.getElementById('top-tracks-panel')?.classList.remove('mobile-open');
+  _setMobileToolbarActive('mobile-more');
   document.getElementById('mobile-more-sheet')?.classList.add('open');
 });
 document.getElementById('mobile-more-sheet')?.addEventListener('click', e => {
-  if (e.target === e.currentTarget) _closeMobileMore();
+  if (e.target === e.currentTarget) {
+    _closeMobileMore();
+    _setMobileToolbarActive('mobile-search');
+  }
 });
 
 document.getElementById('mobile-more-apple')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-apple'); });
