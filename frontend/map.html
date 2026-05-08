@@ -937,6 +937,143 @@
       font-size: .78rem;
       letter-spacing: .04em;
     }
+    #brain3d-nav {
+      position: absolute;
+      left: 1.25rem;
+      top: 4.25rem;
+      z-index: 2;
+      display: none;
+      align-items: center;
+      gap: .65rem;
+      max-width: min(520px, calc(100vw - 2.5rem));
+      pointer-events: auto;
+    }
+    #brain3d-back {
+      height: 32px;
+      padding: 0 .8rem;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 999px;
+      background: rgba(22,23,28,.74);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: .68rem;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+    }
+    #brain3d-title {
+      padding: .45rem .7rem;
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px;
+      background: rgba(22,23,28,.68);
+      backdrop-filter: blur(12px);
+      min-width: 0;
+    }
+    #brain3d-title-main {
+      font-family: 'Syne', sans-serif;
+      font-size: .86rem;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #brain3d-title-sub {
+      margin-top: 2px;
+      font-size: .58rem;
+      color: var(--text-dim);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #brain3d-label-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .brain3d-label {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      padding: .24rem .44rem;
+      border-radius: 999px;
+      background: rgba(10,10,15,.58);
+      border: 1px solid rgba(255,255,255,.08);
+      color: rgba(255,255,255,.78);
+      font-size: .58rem;
+      white-space: nowrap;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      backdrop-filter: blur(10px);
+      transition: opacity .16s, transform .16s;
+    }
+    .brain3d-label.artist {
+      font-size: .64rem;
+      color: var(--text);
+      border-color: rgba(96,165,250,.22);
+    }
+    #brain3d-song-card {
+      display: none;
+      position: absolute;
+      right: 1.25rem;
+      bottom: 4.2rem;
+      z-index: 3;
+      width: min(310px, calc(100vw - 2.5rem));
+      padding: .75rem;
+      background: rgba(22,23,28,.86);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 10px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.42);
+      backdrop-filter: blur(14px);
+    }
+    .brain3d-song-row { display: flex; gap: .65rem; align-items: center; min-width: 0; }
+    .brain3d-song-art {
+      width: 46px;
+      height: 46px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: var(--surface2);
+      flex-shrink: 0;
+    }
+    .brain3d-song-name {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: .9rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .brain3d-song-artist {
+      margin-top: 3px;
+      color: var(--text-dim);
+      font-size: .68rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .brain3d-song-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: .6rem;
+      margin-top: .7rem;
+      font-size: .65rem;
+    }
+    .brain3d-song-actions a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .brain3d-song-actions button {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-family: 'DM Mono', monospace;
+      font-size: .65rem;
+    }
 
     /* ---- Brain info panel ---- */
     #brain-info-panel {
@@ -1384,6 +1521,20 @@
         gap: .4rem;
         font-size: .55rem;
       }
+      #brain3d-nav {
+        left: .75rem;
+        right: .75rem;
+        top: calc(92px + env(safe-area-inset-top, 0px));
+        max-width: none;
+      }
+      #brain3d-title { flex: 1; }
+      #brain3d-song-card {
+        left: .75rem;
+        right: .75rem;
+        bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+        width: auto;
+      }
+      .brain3d-label { font-size: .52rem; max-width: 120px; }
 
       #brain-info-panel {
         top: auto;
@@ -1522,6 +1673,15 @@
   <canvas id="brain3d-canvas"></canvas>
   <div id="brain3d-loading">Loading 3D brain...</div>
   <div id="brain3d-fallback">3D brain could not start.<br>The 2D brain view is still available.</div>
+  <div id="brain3d-label-layer"></div>
+  <div id="brain3d-nav">
+    <button id="brain3d-back" type="button">← World</button>
+    <div id="brain3d-title">
+      <div id="brain3d-title-main">Playlist World</div>
+      <div id="brain3d-title-sub">Playlist zones</div>
+    </div>
+  </div>
+  <div id="brain3d-song-card"></div>
   <div id="brain3d-hud">
     <span>Drag to rotate</span>
     <span>Scroll to zoom</span>
@@ -2752,9 +2912,22 @@ const brain3D = {
   labels: [],
   names: [],
   tracks: [],
+  mode: 'world',
+  activePlaylistIndex: -1,
+  activePlaylistName: null,
+  detailGroup: null,
+  detailSongPoints: null,
+  detailTracks: [],
+  artistMeshes: [],
+  artistData: [],
+  labelItems: [],
   hoverIndex: -1,
+  hoverArtistIndex: -1,
   hoverTrack: null,
+  selectedArtistIndex: -1,
   dataKey: '',
+  worldView: null,
+  cameraTween: null,
   yaw: 0,
   pitch: 0.1,
   distance: 4.2,
@@ -2949,6 +3122,7 @@ function _brain3DMakeTracks(THREE, data) {
   });
   const pts = new THREE.Points(geometry, material);
   pts.userData.tracks = tracks;
+  pts.visible = false; // world overview is playlist zones only; songs appear after drill-down.
   brain3D.tracks = tracks;
   return pts;
 }
@@ -2970,6 +3144,300 @@ function _brain3DMakeStars(THREE) {
     opacity: 0.22,
     depthWrite: false,
   }));
+}
+
+function _brain3DEase(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function _brain3DStartCameraTween(to, duration = 900) {
+  brain3D.cameraTween = {
+    start: performance.now(),
+    duration,
+    from: { yaw: brain3D.yaw, pitch: brain3D.pitch, distance: brain3D.distance },
+    to,
+  };
+}
+
+function _brain3DApplyCameraTween(now) {
+  const tw = brain3D.cameraTween;
+  if (!tw) return;
+  const t = Math.min(1, (now - tw.start) / tw.duration);
+  const e = _brain3DEase(t);
+  brain3D.yaw = tw.from.yaw + (tw.to.yaw - tw.from.yaw) * e;
+  brain3D.pitch = tw.from.pitch + (tw.to.pitch - tw.from.pitch) * e;
+  brain3D.distance = tw.from.distance + (tw.to.distance - tw.from.distance) * e;
+  if (t >= 1) brain3D.cameraTween = null;
+}
+
+function _brain3DSetHud(lines) {
+  const hud = document.getElementById('brain3d-hud');
+  if (!hud) return;
+  hud.innerHTML = lines.map(line => `<span>${_esc(line)}</span>`).join('');
+}
+
+function _brain3DUpdateNav() {
+  const nav = document.getElementById('brain3d-nav');
+  const main = document.getElementById('brain3d-title-main');
+  const sub = document.getElementById('brain3d-title-sub');
+  if (!nav || !main || !sub) return;
+  if (brain3D.mode === 'world') {
+    nav.style.display = 'none';
+    _brain3DSetHud(['Drag to rotate', 'Scroll to zoom', 'Click a playlist']);
+    return;
+  }
+  nav.style.display = 'flex';
+  const idx = brain3D.activePlaylistIndex;
+  const tracks = _brain3DPlaylistTracks(brain3D.activePlaylistName);
+  main.textContent = brain3D.labels[idx] || brain3D.activePlaylistName || 'Playlist';
+  sub.textContent = `${brain3D.artistData.length} artists · ${tracks.length} songs`;
+  _brain3DSetHud(['Artist districts', 'Song nodes', 'Click a song']);
+}
+
+function _brain3DTrackArtist(track) {
+  if (Array.isArray(track?.artists) && track.artists.length) return track.artists.join(', ');
+  return track?.artist || 'Unknown Artist';
+}
+
+function _brain3DPlaylistTracks(name) {
+  return name ? points.filter(p => _pointInPlaylist(p, name)) : [];
+}
+
+function _brain3DArtistClusters(name) {
+  const byArtist = new Map();
+  for (const track of _brain3DPlaylistTracks(name)) {
+    const artist = _brain3DTrackArtist(track);
+    if (!byArtist.has(artist)) byArtist.set(artist, []);
+    byArtist.get(artist).push(track);
+  }
+  return [...byArtist.entries()]
+    .map(([artist, songs]) => ({ artist, songs }))
+    .sort((a, b) => b.songs.length - a.songs.length || a.artist.localeCompare(b.artist));
+}
+
+function _brain3DSetLabels(items) {
+  const layer = document.getElementById('brain3d-label-layer');
+  if (!layer) return;
+  layer.innerHTML = '';
+  brain3D.labelItems = items.map(item => {
+    const el = document.createElement('div');
+    el.className = `brain3d-label ${item.kind || ''}`.trim();
+    el.textContent = item.text;
+    layer.appendChild(el);
+    return { ...item, el };
+  });
+}
+
+function _brain3DSetWorldLabels() {
+  const THREE = brain3D.THREE;
+  if (!THREE || !brain3D.names.length) return;
+  const items = brain3D.names.map((name, i) => ({
+    kind: 'playlist',
+    text: brain3D.labels[i] || name,
+    pos: _brain3DSurfacePos(THREE, brain3D.dirs[i], 1.34),
+  }));
+  _brain3DSetLabels(items);
+}
+
+function _brain3DUpdateLabels() {
+  if (!brain3D.ready || !brain3D.labelItems.length) return;
+  const rect = document.getElementById('brain3d-overlay').getBoundingClientRect();
+  const tmp = new brain3D.THREE.Vector3();
+  for (const item of brain3D.labelItems) {
+    tmp.copy(item.pos).project(brain3D.camera);
+    const visible = tmp.z > -1 && tmp.z < 1;
+    item.el.style.opacity = visible ? '1' : '0';
+    if (!visible) continue;
+    const x = (tmp.x * 0.5 + 0.5) * rect.width;
+    const y = (-tmp.y * 0.5 + 0.5) * rect.height;
+    item.el.style.left = `${x}px`;
+    item.el.style.top = `${y}px`;
+  }
+}
+
+function _brain3DArtistColor(THREE, i, baseName) {
+  const base = _hexToThreeColor(THREE, playlistColors[baseName] || '#60a5fa');
+  const c = new THREE.Color();
+  const hsl = {};
+  base.getHSL(hsl);
+  c.setHSL((hsl.h + i * 0.09) % 1, Math.min(0.88, hsl.s + 0.08), Math.min(0.68, hsl.l + 0.06));
+  return c;
+}
+
+function _brain3DMakePlaylistDetail(idx) {
+  const THREE = brain3D.THREE;
+  const name = brain3D.names[idx];
+  const label = brain3D.labels[idx] || name;
+  const clusters = _brain3DArtistClusters(name).slice(0, 28);
+  const group = new THREE.Group();
+  group.name = `playlist-detail-${name}`;
+
+  const baseColor = _hexToThreeColor(THREE, playlistColors[name] || '#60a5fa');
+  const base = new THREE.Mesh(
+    new THREE.CircleGeometry(1.62, 96),
+    new THREE.MeshBasicMaterial({
+      color: baseColor,
+      transparent: true,
+      opacity: 0.10,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  group.add(base);
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(1.58, 1.61, 96),
+    new THREE.MeshBasicMaterial({
+      color: baseColor,
+      transparent: true,
+      opacity: 0.38,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  group.add(ring);
+
+  const artistMeshes = [];
+  const songPositions = [];
+  const songColors = [];
+  const songTracks = [];
+  const labelItems = [];
+  const totalArtists = Math.max(clusters.length, 1);
+
+  clusters.forEach((cluster, i) => {
+    const angle = i * 2.399963229728653; // golden angle
+    const r = 0.18 + Math.sqrt((i + 0.5) / totalArtists) * 1.18;
+    const pos = new THREE.Vector3(Math.cos(angle) * r, Math.sin(angle) * r * 0.78, 0.05 + (i % 4) * 0.018);
+    const radius = 0.08 + Math.sqrt(cluster.songs.length) * 0.026;
+    const color = _brain3DArtistColor(THREE, i, name);
+    const mesh = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(radius, 2),
+      new THREE.MeshStandardMaterial({
+        color,
+        emissive: color.clone().multiplyScalar(0.22),
+        roughness: 0.55,
+        metalness: 0.05,
+        transparent: true,
+        opacity: 0.88,
+      })
+    );
+    mesh.position.copy(pos);
+    mesh.userData = { type: 'artist', index: i, artist: cluster.artist, songs: cluster.songs };
+    group.add(mesh);
+    artistMeshes.push(mesh);
+    labelItems.push({
+      kind: 'artist',
+      text: `${cluster.artist} · ${cluster.songs.length}`,
+      pos: pos.clone().add(new THREE.Vector3(0, radius + 0.08, 0.05)),
+    });
+
+    const shownSongs = cluster.songs.slice(0, 36);
+    shownSongs.forEach((song, j) => {
+      const a = j * 2.399963229728653 + i * 0.7;
+      const sr = radius + 0.075 + Math.sqrt((j + 0.5) / Math.max(shownSongs.length, 1)) * 0.16;
+      const sp = pos.clone().add(new THREE.Vector3(Math.cos(a) * sr, Math.sin(a) * sr, 0.08 + (j % 5) * 0.012));
+      songPositions.push(sp.x, sp.y, sp.z);
+      songColors.push(Math.min(color.r * 1.25, 1), Math.min(color.g * 1.25, 1), Math.min(color.b * 1.25, 1));
+      songTracks.push(song);
+    });
+  });
+
+  const songGeometry = new THREE.BufferGeometry();
+  songGeometry.setAttribute('position', new THREE.Float32BufferAttribute(songPositions, 3));
+  songGeometry.setAttribute('color', new THREE.Float32BufferAttribute(songColors, 3));
+  const songPoints = new THREE.Points(songGeometry, new THREE.PointsMaterial({
+    size: window.innerWidth < 768 ? 0.044 : 0.036,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.96,
+    sizeAttenuation: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }));
+  songPoints.userData = { type: 'detailSongs', tracks: songTracks };
+  group.add(songPoints);
+
+  const titlePos = new THREE.Vector3(0, 1.86, 0.1);
+  labelItems.unshift({ kind: 'playlist', text: label, pos: titlePos });
+
+  if (brain3D.detailGroup?.parent) brain3D.detailGroup.parent.remove(brain3D.detailGroup);
+  brain3D.detailGroup = group;
+  brain3D.detailSongPoints = songPoints;
+  brain3D.detailTracks = songTracks;
+  brain3D.artistMeshes = artistMeshes;
+  brain3D.artistData = clusters;
+  brain3D.scene.add(group);
+  _brain3DSetLabels(labelItems);
+}
+
+function _brain3DEnterPlaylist(idx) {
+  if (idx < 0 || idx >= brain3D.names.length) return;
+  brain3D.worldView = { yaw: brain3D.yaw, pitch: brain3D.pitch, distance: brain3D.distance };
+  brain3D.mode = 'playlist';
+  brain3D.activePlaylistIndex = idx;
+  brain3D.activePlaylistName = brain3D.names[idx];
+  brain3D.hoverIndex = -1;
+  brain3D.hoverArtistIndex = -1;
+  brain3D.selectedArtistIndex = -1;
+  brain3D.group.visible = false;
+  _brain3DHideSongCard();
+  _brain3DMakePlaylistDetail(idx);
+  _brain3DUpdateNav();
+  _brain3DStartCameraTween({ yaw: 0, pitch: 0.08, distance: window.innerWidth < 768 ? 3.45 : 3.0 }, 950);
+}
+
+function _brain3DReturnWorld() {
+  brain3D.mode = 'world';
+  brain3D.activePlaylistIndex = -1;
+  brain3D.activePlaylistName = null;
+  brain3D.hoverArtistIndex = -1;
+  brain3D.selectedArtistIndex = -1;
+  brain3D.group.visible = true;
+  if (brain3D.detailGroup) brain3D.detailGroup.visible = false;
+  _brain3DHideSongCard();
+  _brain3DSetWorldLabels();
+  _brain3DUpdateNav();
+  _brain3DStartCameraTween(brain3D.worldView || { yaw: 0, pitch: 0.1, distance: 4.2 }, 850);
+}
+
+function _brain3DSelectArtist(idx) {
+  brain3D.selectedArtistIndex = idx;
+  brain3D.artistMeshes.forEach((mesh, i) => {
+    const selected = i === idx;
+    mesh.scale.setScalar(selected ? 1.42 : 0.82);
+    mesh.material.opacity = selected ? 1 : 0.38;
+  });
+  const cluster = brain3D.artistData[idx];
+  const sub = document.getElementById('brain3d-title-sub');
+  if (cluster && sub) sub.textContent = `${cluster.artist} · ${cluster.songs.length} songs`;
+}
+
+function _brain3DShowSongCard(track) {
+  const card = document.getElementById('brain3d-song-card');
+  if (!card || !track) return;
+  const url = _trackServiceUrl(track);
+  card.innerHTML = `
+    <div class="brain3d-song-row">
+      ${track.album_art ? `<img class="brain3d-song-art" src="${_esc(track.album_art)}" alt="">` : '<div class="brain3d-song-art"></div>'}
+      <div style="min-width:0;flex:1">
+        <div class="brain3d-song-name">${_esc(track.name || 'Untitled')}</div>
+        <div class="brain3d-song-artist">${_esc(_brain3DTrackArtist(track))}</div>
+      </div>
+    </div>
+    <div class="brain3d-song-actions">
+      <a href="${_esc(url)}" target="_blank" rel="noopener">${_esc(_trackServiceLabel())} →</a>
+      <button id="brain3d-song-close" type="button">Close</button>
+    </div>`;
+  card.style.display = 'block';
+  card.querySelector('#brain3d-song-close')?.addEventListener('click', _brain3DHideSongCard);
+}
+
+function _brain3DHideSongCard() {
+  const card = document.getElementById('brain3d-song-card');
+  if (card) {
+    card.style.display = 'none';
+    card.innerHTML = '';
+  }
 }
 
 async function _initBrain3D() {
@@ -3028,6 +3496,15 @@ function _rebuildBrain3DScene() {
   brain3D.labels = data.labels;
   brain3D.names = data.names;
   if (brain3D.stars?.parent) brain3D.stars.parent.remove(brain3D.stars);
+  if (brain3D.detailGroup?.parent) brain3D.detailGroup.parent.remove(brain3D.detailGroup);
+  brain3D.mode = 'world';
+  brain3D.activePlaylistIndex = -1;
+  brain3D.activePlaylistName = null;
+  brain3D.detailGroup = null;
+  brain3D.detailSongPoints = null;
+  brain3D.detailTracks = [];
+  brain3D.artistMeshes = [];
+  brain3D.artistData = [];
   brain3D.group.clear();
   brain3D.brainMesh = _brain3DMakeBrain(THREE, data);
   brain3D.trackPoints = _brain3DMakeTracks(THREE, data);
@@ -3035,6 +3512,8 @@ function _rebuildBrain3DScene() {
   brain3D.group.add(brain3D.brainMesh);
   brain3D.group.add(brain3D.trackPoints);
   brain3D.scene.add(brain3D.stars);
+  _brain3DSetWorldLabels();
+  _brain3DUpdateNav();
 }
 
 function _resizeBrain3D() {
@@ -3061,13 +3540,15 @@ function _brain3DUpdateCamera() {
 function _brain3DAnimate() {
   if (!brain3D.ready || document.getElementById('brain3d-overlay').style.display === 'none') return;
   const now = performance.now();
-  if (!brain3D.dragging && now - brain3D.lastInputAt > 3500) brain3D.yaw += 0.002;
+  _brain3DApplyCameraTween(now);
+  if (brain3D.mode === 'world' && !brain3D.cameraTween && !brain3D.dragging && now - brain3D.lastInputAt > 3500) brain3D.yaw += 0.002;
   _brain3DUpdateCamera();
   if (brain3D.brainMesh?.material?.uniforms) {
     brain3D.brainMesh.material.uniforms.uCameraPos.value.copy(brain3D.camera.position);
-    brain3D.brainMesh.material.uniforms.uHoverIndex.value = brain3D.hoverIndex;
+    brain3D.brainMesh.material.uniforms.uHoverIndex.value = brain3D.mode === 'world' ? brain3D.hoverIndex : -1;
   }
   if (brain3D.stars) brain3D.stars.rotation.y += 0.0005;
+  _brain3DUpdateLabels();
   brain3D.renderer.render(brain3D.scene, brain3D.camera);
   brain3D.raf = requestAnimationFrame(_brain3DAnimate);
 }
@@ -3098,20 +3579,30 @@ function _brain3DPointerMove(e) {
   }
   _brain3DSetPointer(e);
   brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
-  const trackHits = brain3D.trackPoints ? brain3D.raycaster.intersectObject(brain3D.trackPoints) : [];
   const tooltip = document.getElementById('track-tooltip');
-  if (trackHits.length) {
-    const hit = trackHits[0];
-    const track = brain3D.tracks[hit.index];
-    brain3D.hoverTrack = track;
-    brain3D.hoverIndex = -1;
-    tooltip.style.left = `${e.clientX + 14}px`;
-    tooltip.style.top = `${e.clientY + 14}px`;
-    document.getElementById('tt-name').textContent = track?.name || 'Untitled';
-    document.getElementById('tt-artist').textContent = track?.artist || '';
-    tooltip.classList.add('visible');
+
+  if (brain3D.mode === 'playlist') {
+    const songHits = brain3D.detailSongPoints ? brain3D.raycaster.intersectObject(brain3D.detailSongPoints) : [];
+    if (songHits.length) {
+      const track = brain3D.detailTracks[songHits[0].index];
+      brain3D.hoverTrack = track;
+      brain3D.hoverArtistIndex = -1;
+      tooltip.style.left = `${e.clientX + 14}px`;
+      tooltip.style.top = `${e.clientY + 14}px`;
+      document.getElementById('tt-name').textContent = track?.name || 'Untitled';
+      document.getElementById('tt-artist').textContent = _brain3DTrackArtist(track);
+      tooltip.classList.add('visible');
+      document.getElementById('brain3d-canvas').style.cursor = 'pointer';
+      return;
+    }
+    brain3D.hoverTrack = null;
+    tooltip.classList.remove('visible');
+    const artistHits = brain3D.artistMeshes.length ? brain3D.raycaster.intersectObjects(brain3D.artistMeshes, false) : [];
+    brain3D.hoverArtistIndex = artistHits.length ? artistHits[0].object.userData.index : -1;
+    document.getElementById('brain3d-canvas').style.cursor = brain3D.hoverArtistIndex >= 0 ? 'pointer' : 'grab';
     return;
   }
+
   brain3D.hoverTrack = null;
   tooltip.classList.remove('visible');
   const brainHits = brain3D.brainMesh ? brain3D.raycaster.intersectObject(brain3D.brainMesh) : [];
@@ -3123,18 +3614,28 @@ function _brain3DClick(e) {
   if (!brain3D.ready) return;
   _brain3DSetPointer(e);
   brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
-  const trackHits = brain3D.trackPoints ? brain3D.raycaster.intersectObject(brain3D.trackPoints) : [];
-  if (trackHits.length) {
-    const track = brain3D.tracks[trackHits[0].index];
-    window.open(_trackServiceUrl(track), '_blank', 'noopener');
+
+  if (brain3D.mode === 'playlist') {
+    const songHits = brain3D.detailSongPoints ? brain3D.raycaster.intersectObject(brain3D.detailSongPoints) : [];
+    if (songHits.length) {
+      _brain3DShowSongCard(brain3D.detailTracks[songHits[0].index]);
+      return;
+    }
+    const artistHits = brain3D.artistMeshes.length ? brain3D.raycaster.intersectObjects(brain3D.artistMeshes, false) : [];
+    if (artistHits.length) {
+      _brain3DHideSongCard();
+      _brain3DSelectArtist(artistHits[0].object.userData.index);
+      return;
+    }
+    _brain3DHideSongCard();
     return;
   }
+
   const brainHits = brain3D.brainMesh ? brain3D.raycaster.intersectObject(brain3D.brainMesh) : [];
   if (!brainHits.length) return;
   const idx = _brain3DHitLobe(brainHits[0].point);
   if (idx < 0) return;
-  _svgBrainSelected = idx;
-  _showBrainInfoPanel(idx, brain3D.names[idx]);
+  _brain3DEnterPlaylist(idx);
 }
 
 function _wireBrain3DInput(el) {
@@ -3195,6 +3696,8 @@ function _showBrain3DOverlay() {
     const data = _brain3DPlaylistData();
     const nextKey = data ? `${points.length}:${data.names.join('|')}` : '';
     if (nextKey && brain3D.dataKey !== nextKey) _rebuildBrain3DScene();
+    if (brain3D.mode === 'world') _brain3DSetWorldLabels();
+    _brain3DUpdateNav();
     _resizeBrain3D();
     if (!brain3D.raf) _brain3DAnimate();
   }
@@ -3207,6 +3710,9 @@ function _hideBrain3DOverlay() {
     overlay.setAttribute('aria-hidden', 'true');
   }
   document.getElementById('track-tooltip')?.classList.remove('visible');
+  _brain3DHideSongCard();
+  const nav = document.getElementById('brain3d-nav');
+  if (nav) nav.style.display = 'none';
   if (brain3D.raf) {
     cancelAnimationFrame(brain3D.raf);
     brain3D.raf = null;
@@ -5610,6 +6116,8 @@ document.getElementById('mobile-more-moods')?.addEventListener('click', () => { 
 document.getElementById('mobile-more-remaining')?.addEventListener('click', () => { _closeMobileMore(); _openRemainingModal(); });
 document.getElementById('mobile-more-rebuild')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-refresh'); });
 document.getElementById('mobile-more-delete')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-delete-data'); });
+
+document.getElementById('brain3d-back')?.addEventListener('click', _brain3DReturnWorld);
 
 document.getElementById('btn-brain3d')?.addEventListener('click', () => {
   chartMode = false;
