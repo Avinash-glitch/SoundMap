@@ -1074,6 +1074,33 @@
       font-family: 'DM Mono', monospace;
       font-size: .65rem;
     }
+    .brain3d-song-list {
+      display: flex;
+      flex-direction: column;
+      gap: .42rem;
+      max-height: min(42vh, 360px);
+      overflow-y: auto;
+      padding-right: .2rem;
+      margin-top: .7rem;
+    }
+    .brain3d-song-list a {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+      min-width: 0;
+      color: var(--text);
+      text-decoration: none;
+      padding: .36rem;
+      border-radius: 7px;
+      background: rgba(255,255,255,.035);
+      border: 1px solid rgba(255,255,255,.04);
+    }
+    .brain3d-song-list a:hover { background: rgba(255,255,255,.07); }
+    .brain3d-song-list .brain3d-song-art {
+      width: 34px;
+      height: 34px;
+      border-radius: 5px;
+    }
 
     /* ---- Brain info panel ---- */
     #brain-info-panel {
@@ -2928,6 +2955,11 @@ const brain3D = {
   dataKey: '',
   worldView: null,
   cameraTween: null,
+  pointerDownX: 0,
+  pointerDownY: 0,
+  suppressClickUntil: 0,
+  lastWorldTapAt: 0,
+  lastWorldTapIndex: -1,
   yaw: 0,
   pitch: 0.1,
   distance: 4.2,
@@ -3014,7 +3046,7 @@ function _brain3DShaders(count) {
         float sum = 0.0;
         for (int i = 0; i < 16; i++) {
           if (i >= uCount) break;
-          weights[i] = exp((weights[i] - maxDot) / 0.18);
+          weights[i] = exp((weights[i] - maxDot) / 0.12);
           sum += weights[i];
         }
         vec3 lobe = vec3(0.0);
@@ -3026,9 +3058,11 @@ function _brain3DShaders(count) {
           lobe += uColors[i] * w;
           if (w > winnerW) { winnerW = w; winner = i; }
         }
-        if (winner == uHoverIndex && uHoverIndex >= 0) lobe *= 1.35;
-        vec3 base = vec3(0.10, 0.11, 0.18);
-        vec3 cortex = mix(base, lobe, 0.58);
+        if (winner == uHoverIndex && uHoverIndex >= 0) lobe *= 1.48;
+        vec3 base = vec3(0.075, 0.08, 0.13);
+        vec3 cortex = mix(base, lobe, 0.78);
+        float border = smoothstep(0.18, 0.30, winnerW);
+        cortex *= 0.72 + border * 0.35;
         float fissure = smoothstep(0.055, 0.0, abs(vDir.x));
         cortex *= 1.0 - fissure * 0.55;
         vec3 lightDir = normalize(vec3(0.5, 0.8, 0.6));
@@ -3183,7 +3217,7 @@ function _brain3DUpdateNav() {
   if (!nav || !main || !sub) return;
   if (brain3D.mode === 'world') {
     nav.style.display = 'none';
-    _brain3DSetHud(['Drag to rotate', 'Scroll to zoom', 'Click a playlist']);
+    _brain3DSetHud(['Drag to rotate', 'Scroll to zoom', 'Double-tap a playlist']);
     return;
   }
   nav.style.display = 'flex';
@@ -3191,7 +3225,7 @@ function _brain3DUpdateNav() {
   const tracks = _brain3DPlaylistTracks(brain3D.activePlaylistName);
   main.textContent = brain3D.labels[idx] || brain3D.activePlaylistName || 'Playlist';
   sub.textContent = `${brain3D.artistData.length} artists · ${tracks.length} songs`;
-  _brain3DSetHud(['Artist districts', 'Song nodes', 'Click a song']);
+  _brain3DSetHud(['Raised playlist section', 'Artist clusters', 'Click an artist']);
 }
 
 function _brain3DTrackArtist(track) {
@@ -3271,6 +3305,10 @@ function _brain3DMakePlaylistDetail(idx) {
   const clusters = _brain3DArtistClusters(name).slice(0, 28);
   const group = new THREE.Group();
   group.name = `playlist-detail-${name}`;
+  const lobeDir = new THREE.Vector3(...brain3D.dirs[idx]).normalize();
+  const liftPos = _brain3DSurfacePos(THREE, [lobeDir.x, lobeDir.y, lobeDir.z], 1.62);
+  group.position.copy(liftPos);
+  group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), lobeDir);
 
   const baseColor = _hexToThreeColor(THREE, playlistColors[name] || '#60a5fa');
   const base = new THREE.Mesh(
@@ -3278,7 +3316,7 @@ function _brain3DMakePlaylistDetail(idx) {
     new THREE.MeshBasicMaterial({
       color: baseColor,
       transparent: true,
-      opacity: 0.10,
+      opacity: 0.24,
       side: THREE.DoubleSide,
       depthWrite: false,
     })
@@ -3286,11 +3324,11 @@ function _brain3DMakePlaylistDetail(idx) {
   group.add(base);
 
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(1.58, 1.61, 96),
+    new THREE.RingGeometry(1.55, 1.63, 96),
     new THREE.MeshBasicMaterial({
       color: baseColor,
       transparent: true,
-      opacity: 0.38,
+      opacity: 0.72,
       side: THREE.DoubleSide,
       depthWrite: false,
     })
@@ -3359,6 +3397,7 @@ function _brain3DMakePlaylistDetail(idx) {
 
   const titlePos = new THREE.Vector3(0, 1.86, 0.1);
   labelItems.unshift({ kind: 'playlist', text: label, pos: titlePos });
+  const worldLabelItems = labelItems.map(item => ({ ...item, pos: group.localToWorld(item.pos.clone()) }));
 
   if (brain3D.detailGroup?.parent) brain3D.detailGroup.parent.remove(brain3D.detailGroup);
   brain3D.detailGroup = group;
@@ -3367,7 +3406,7 @@ function _brain3DMakePlaylistDetail(idx) {
   brain3D.artistMeshes = artistMeshes;
   brain3D.artistData = clusters;
   brain3D.scene.add(group);
-  _brain3DSetLabels(labelItems);
+  _brain3DSetLabels(worldLabelItems);
 }
 
 function _brain3DEnterPlaylist(idx) {
@@ -3376,20 +3415,26 @@ function _brain3DEnterPlaylist(idx) {
   brain3D.mode = 'playlist';
   brain3D.activePlaylistIndex = idx;
   brain3D.activePlaylistName = brain3D.names[idx];
-  brain3D.hoverIndex = -1;
+  brain3D.hoverIndex = idx;
   brain3D.hoverArtistIndex = -1;
   brain3D.selectedArtistIndex = -1;
-  brain3D.group.visible = false;
+  brain3D.group.visible = true;
   _brain3DHideSongCard();
   _brain3DMakePlaylistDetail(idx);
   _brain3DUpdateNav();
-  _brain3DStartCameraTween({ yaw: 0, pitch: 0.08, distance: window.innerWidth < 768 ? 3.45 : 3.0 }, 950);
+  const d = brain3D.dirs[idx] || [0, 0, 1];
+  _brain3DStartCameraTween({
+    yaw: Math.atan2(d[0], d[2]),
+    pitch: Math.asin(Math.max(-0.72, Math.min(0.72, d[1]))) * 0.72,
+    distance: window.innerWidth < 768 ? 3.9 : 3.55,
+  }, 950);
 }
 
 function _brain3DReturnWorld() {
   brain3D.mode = 'world';
   brain3D.activePlaylistIndex = -1;
   brain3D.activePlaylistName = null;
+  brain3D.hoverIndex = -1;
   brain3D.hoverArtistIndex = -1;
   brain3D.selectedArtistIndex = -1;
   brain3D.group.visible = true;
@@ -3410,6 +3455,34 @@ function _brain3DSelectArtist(idx) {
   const cluster = brain3D.artistData[idx];
   const sub = document.getElementById('brain3d-title-sub');
   if (cluster && sub) sub.textContent = `${cluster.artist} · ${cluster.songs.length} songs`;
+  if (cluster) _brain3DShowArtistCard(cluster);
+}
+
+function _brain3DShowArtistCard(cluster) {
+  const card = document.getElementById('brain3d-song-card');
+  if (!card || !cluster) return;
+  const songs = cluster.songs || [];
+  const rows = songs.map(track => {
+    const url = _trackServiceUrl(track);
+    return `<a href="${_esc(url)}" target="_blank" rel="noopener" title="${_esc(_trackServiceLabel())}: ${_esc(track.name || 'Untitled')}">
+      ${track.album_art ? `<img class="brain3d-song-art" src="${_esc(track.album_art)}" alt="">` : '<div class="brain3d-song-art"></div>'}
+      <span style="min-width:0;flex:1">
+        <span class="brain3d-song-name" style="display:block;font-size:.78rem">${_esc(track.name || 'Untitled')}</span>
+        <span class="brain3d-song-artist" style="display:block">${_esc(_trackServiceLabel())} →</span>
+      </span>
+    </a>`;
+  }).join('');
+  card.innerHTML = `
+    <div class="brain3d-song-row">
+      <div style="min-width:0;flex:1">
+        <div class="brain3d-song-name">${_esc(cluster.artist)}</div>
+        <div class="brain3d-song-artist">${songs.length} songs in ${_esc(brain3D.labels[brain3D.activePlaylistIndex] || brain3D.activePlaylistName || 'this playlist')}</div>
+      </div>
+      <button id="brain3d-song-close" type="button" style="background:transparent;border:none;color:var(--text-dim);cursor:pointer;font-family:'DM Mono',monospace">Close</button>
+    </div>
+    <div class="brain3d-song-list">${rows}</div>`;
+  card.style.display = 'block';
+  card.querySelector('#brain3d-song-close')?.addEventListener('click', _brain3DHideSongCard);
 }
 
 function _brain3DShowSongCard(track) {
@@ -3545,7 +3618,7 @@ function _brain3DAnimate() {
   _brain3DUpdateCamera();
   if (brain3D.brainMesh?.material?.uniforms) {
     brain3D.brainMesh.material.uniforms.uCameraPos.value.copy(brain3D.camera.position);
-    brain3D.brainMesh.material.uniforms.uHoverIndex.value = brain3D.mode === 'world' ? brain3D.hoverIndex : -1;
+    brain3D.brainMesh.material.uniforms.uHoverIndex.value = brain3D.hoverIndex;
   }
   if (brain3D.stars) brain3D.stars.rotation.y += 0.0005;
   _brain3DUpdateLabels();
@@ -3573,28 +3646,11 @@ function _brain3DHitLobe(point) {
 
 function _brain3DPointerMove(e) {
   if (!brain3D.ready) return;
-  if (brain3D.dragMoved) {
-    brain3D.dragMoved = false;
-    return;
-  }
   _brain3DSetPointer(e);
   brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
   const tooltip = document.getElementById('track-tooltip');
 
   if (brain3D.mode === 'playlist') {
-    const songHits = brain3D.detailSongPoints ? brain3D.raycaster.intersectObject(brain3D.detailSongPoints) : [];
-    if (songHits.length) {
-      const track = brain3D.detailTracks[songHits[0].index];
-      brain3D.hoverTrack = track;
-      brain3D.hoverArtistIndex = -1;
-      tooltip.style.left = `${e.clientX + 14}px`;
-      tooltip.style.top = `${e.clientY + 14}px`;
-      document.getElementById('tt-name').textContent = track?.name || 'Untitled';
-      document.getElementById('tt-artist').textContent = _brain3DTrackArtist(track);
-      tooltip.classList.add('visible');
-      document.getElementById('brain3d-canvas').style.cursor = 'pointer';
-      return;
-    }
     brain3D.hoverTrack = null;
     tooltip.classList.remove('visible');
     const artistHits = brain3D.artistMeshes.length ? brain3D.raycaster.intersectObjects(brain3D.artistMeshes, false) : [];
@@ -3612,18 +3668,13 @@ function _brain3DPointerMove(e) {
 
 function _brain3DClick(e) {
   if (!brain3D.ready) return;
+  if (performance.now() < brain3D.suppressClickUntil) return;
   _brain3DSetPointer(e);
   brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
 
   if (brain3D.mode === 'playlist') {
-    const songHits = brain3D.detailSongPoints ? brain3D.raycaster.intersectObject(brain3D.detailSongPoints) : [];
-    if (songHits.length) {
-      _brain3DShowSongCard(brain3D.detailTracks[songHits[0].index]);
-      return;
-    }
     const artistHits = brain3D.artistMeshes.length ? brain3D.raycaster.intersectObjects(brain3D.artistMeshes, false) : [];
     if (artistHits.length) {
-      _brain3DHideSongCard();
       _brain3DSelectArtist(artistHits[0].object.userData.index);
       return;
     }
@@ -3635,13 +3686,35 @@ function _brain3DClick(e) {
   if (!brainHits.length) return;
   const idx = _brain3DHitLobe(brainHits[0].point);
   if (idx < 0) return;
-  _brain3DEnterPlaylist(idx);
+  const now = performance.now();
+  if (brain3D.lastWorldTapIndex === idx && now - brain3D.lastWorldTapAt < 420) {
+    brain3D.lastWorldTapAt = 0;
+    _brain3DEnterPlaylist(idx);
+    return;
+  }
+  brain3D.hoverIndex = idx;
+  brain3D.lastWorldTapAt = now;
+  brain3D.lastWorldTapIndex = idx;
+  _brain3DSetHud(['Playlist selected', 'Double-tap again to lift it', brain3D.labels[idx] || brain3D.names[idx]]);
+}
+
+function _brain3DDoubleClick(e) {
+  if (!brain3D.ready || brain3D.mode !== 'world') return;
+  if (performance.now() < brain3D.suppressClickUntil) return;
+  _brain3DSetPointer(e);
+  brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
+  const brainHits = brain3D.brainMesh ? brain3D.raycaster.intersectObject(brain3D.brainMesh) : [];
+  if (!brainHits.length) return;
+  const idx = _brain3DHitLobe(brainHits[0].point);
+  if (idx >= 0) _brain3DEnterPlaylist(idx);
 }
 
 function _wireBrain3DInput(el) {
   el.addEventListener('pointerdown', e => {
     brain3D.dragging = true;
     brain3D.dragMoved = false;
+    brain3D.pointerDownX = e.clientX;
+    brain3D.pointerDownY = e.clientY;
     brain3D.lastInputAt = performance.now();
     brain3D.lastX = e.clientX;
     brain3D.lastY = e.clientY;
@@ -3652,7 +3725,8 @@ function _wireBrain3DInput(el) {
     if (brain3D.dragging) {
       const dx = e.clientX - brain3D.lastX;
       const dy = e.clientY - brain3D.lastY;
-      if (Math.abs(dx) + Math.abs(dy) > 3) brain3D.dragMoved = true;
+      const totalMove = Math.hypot(e.clientX - brain3D.pointerDownX, e.clientY - brain3D.pointerDownY);
+      if (totalMove > 8) brain3D.dragMoved = true;
       brain3D.yaw -= dx * 0.006;
       brain3D.pitch = Math.max(-0.9, Math.min(0.9, brain3D.pitch - dy * 0.004));
       brain3D.lastX = e.clientX;
@@ -3663,6 +3737,7 @@ function _wireBrain3DInput(el) {
     }
   });
   el.addEventListener('pointerup', e => {
+    if (brain3D.dragMoved) brain3D.suppressClickUntil = performance.now() + 260;
     brain3D.dragging = false;
     el.classList.remove('dragging');
     el.releasePointerCapture?.(e.pointerId);
@@ -3675,6 +3750,7 @@ function _wireBrain3DInput(el) {
     document.getElementById('track-tooltip').classList.remove('visible');
   });
   el.addEventListener('click', _brain3DClick);
+  el.addEventListener('dblclick', _brain3DDoubleClick);
   el.addEventListener('wheel', e => {
     e.preventDefault();
     brain3D.lastInputAt = performance.now();
