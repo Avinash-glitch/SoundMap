@@ -2322,9 +2322,15 @@ function _trackServiceUrl(track) {
   const artist = track?.artist || '';
   const query = encodeURIComponent(`${name} ${artist}`.trim());
   if (_isAppleMap()) {
+    const direct = track?.apple_music_url || track?.external_url || track?.url;
+    if (direct && /music\.apple\.com/.test(direct)) return direct;
+    const catalogId = track?.apple_catalog_id || track?.catalog_id || track?.catalogId;
+    const storefront = (mapData?.storefront || 'us').toLowerCase();
+    if (catalogId) return `https://music.apple.com/${encodeURIComponent(storefront)}/song/${encodeURIComponent(catalogId)}`;
     return query ? `https://music.apple.com/search?term=${query}` : 'https://music.apple.com/';
   }
-  return track?.external_url || (query ? `https://open.spotify.com/search/${query}` : 'https://open.spotify.com/');
+  const spotifyId = track?.spotify_id || (track?.id && !_isAppleMap() ? track.id : '');
+  return track?.external_url || track?.spotify_url || (spotifyId ? `https://open.spotify.com/track/${encodeURIComponent(spotifyId)}` : (query ? `https://open.spotify.com/search/${query}` : 'https://open.spotify.com/'));
 }
 
 function _trackServiceLabel() {
@@ -2960,6 +2966,9 @@ const brain3D = {
   suppressClickUntil: 0,
   lastWorldTapAt: 0,
   lastWorldTapIndex: -1,
+  pinching: false,
+  pinchStartDist: 0,
+  pinchStartDistance: 4.2,
   yaw: 0,
   pitch: 0.1,
   distance: 4.2,
@@ -3610,6 +3619,14 @@ function _brain3DUpdateCamera() {
   brain3D.camera.lookAt(new THREE.Vector3(0, 0, 0));
 }
 
+function _brain3DZoom(factor) {
+  if (!brain3D.ready) return false;
+  brain3D.cameraTween = null;
+  brain3D.lastInputAt = performance.now();
+  brain3D.distance = Math.max(2.15, Math.min(8.5, brain3D.distance / factor));
+  return true;
+}
+
 function _brain3DAnimate() {
   if (!brain3D.ready || document.getElementById('brain3d-overlay').style.display === 'none') return;
   const now = performance.now();
@@ -3711,6 +3728,7 @@ function _brain3DDoubleClick(e) {
 
 function _wireBrain3DInput(el) {
   el.addEventListener('pointerdown', e => {
+    if (brain3D.pinching) return;
     brain3D.dragging = true;
     brain3D.dragMoved = false;
     brain3D.pointerDownX = e.clientX;
@@ -3722,6 +3740,7 @@ function _wireBrain3DInput(el) {
     el.setPointerCapture?.(e.pointerId);
   });
   el.addEventListener('pointermove', e => {
+    if (brain3D.pinching) return;
     if (brain3D.dragging) {
       const dx = e.clientX - brain3D.lastX;
       const dy = e.clientY - brain3D.lastY;
@@ -3737,12 +3756,14 @@ function _wireBrain3DInput(el) {
     }
   });
   el.addEventListener('pointerup', e => {
+    if (brain3D.pinching) return;
     if (brain3D.dragMoved) brain3D.suppressClickUntil = performance.now() + 260;
     brain3D.dragging = false;
     el.classList.remove('dragging');
     el.releasePointerCapture?.(e.pointerId);
   });
   el.addEventListener('pointerleave', () => {
+    if (brain3D.pinching) return;
     brain3D.dragging = false;
     brain3D.hoverIndex = -1;
     brain3D.hoverTrack = null;
@@ -3753,9 +3774,41 @@ function _wireBrain3DInput(el) {
   el.addEventListener('dblclick', _brain3DDoubleClick);
   el.addEventListener('wheel', e => {
     e.preventDefault();
-    brain3D.lastInputAt = performance.now();
-    brain3D.distance = Math.max(2.6, Math.min(7, brain3D.distance + Math.sign(e.deltaY) * 0.28));
+    _brain3DZoom(e.deltaY > 0 ? 0.9 : 1.12);
   }, { passive: false });
+  el.addEventListener('touchstart', e => {
+    if (e.touches.length !== 2) return;
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    brain3D.pinching = true;
+    brain3D.dragging = false;
+    brain3D.dragMoved = false;
+    brain3D.pinchStartDist = Math.hypot(dx, dy) || 1;
+    brain3D.pinchStartDistance = brain3D.distance;
+    brain3D.cameraTween = null;
+    brain3D.lastInputAt = performance.now();
+    e.preventDefault();
+  }, { passive: false });
+  el.addEventListener('touchmove', e => {
+    if (!brain3D.pinching || e.touches.length !== 2) return;
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.hypot(dx, dy) || brain3D.pinchStartDist || 1;
+    const factor = dist / Math.max(brain3D.pinchStartDist, 1);
+    brain3D.distance = Math.max(2.15, Math.min(8.5, brain3D.pinchStartDistance / factor));
+    brain3D.lastInputAt = performance.now();
+    e.preventDefault();
+  }, { passive: false });
+  el.addEventListener('touchend', e => {
+    if (e.touches.length < 2) {
+      brain3D.pinching = false;
+      brain3D.suppressClickUntil = performance.now() + 260;
+    }
+  }, { passive: true });
+  el.addEventListener('touchcancel', () => {
+    brain3D.pinching = false;
+    brain3D.dragging = false;
+  });
 }
 
 function _showBrain3DOverlay() {
@@ -5024,6 +5077,9 @@ canvas.addEventListener('touchend', e => {
 // Zoom buttons
 // ---------------------------------------------------------------------------
 function zoomAround(factor) {
+  const brain3dEl = document.getElementById('brain3d-overlay');
+  const brain3dOpen = brain3dEl && getComputedStyle(brain3dEl).display !== 'none';
+  if (brain3dOpen && brain3DMode && _brain3DZoom(factor)) return;
   const cx = W / 2, cy = H / 2;
   const nx = (cx - transform.x) / transform.scale;
   const ny = (cy - transform.y) / transform.scale;

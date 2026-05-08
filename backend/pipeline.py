@@ -833,6 +833,14 @@ def _fetch_apple_library(
         genre_names: list[str] = attrs.get("genreNames") or []
         artwork = attrs.get("artwork") or {}
         art_url = artwork.get("url", "").replace("{w}", "60").replace("{h}", "60")
+        play_params = attrs.get("playParams") or {}
+        apple_catalog_id = play_params.get("catalogId") or (
+            tid if str(tid).isdigit() else None
+        )
+        apple_url = attrs.get("url") or (
+            f"https://music.apple.com/{storefront}/song/{apple_catalog_id}"
+            if apple_catalog_id else ""
+        )
         rd = attrs.get("releaseDate") or ""
         release_year = int(rd[:4]) if len(rd) >= 4 and rd[:4].isdigit() else None
         date_added = attrs.get("dateAdded") or attrs.get("addedDate") or ""
@@ -863,7 +871,10 @@ def _fetch_apple_library(
             "album": attrs.get("albumName") or "",
             "album_art": art_url,
             "preview_url": None,
-            "external_url": "",
+            "external_url": apple_url,
+            "apple_music_url": apple_url,
+            "apple_catalog_id": apple_catalog_id,
+            "apple_library_id": tid,
             "duration_ms": attrs.get("durationInMillis") or 0,
             "popularity": 50,
             "release_year": release_year,
@@ -940,7 +951,9 @@ def process_apple_user(
     playlist_track_ids = {t["id"] for t in tracks if t.get("playlists")}
     remaining_slim = [
         {"id": t["id"], "name": t["name"], "artist": t["artist"],
-         "album_art": t["album_art"], "liked_at": t.get("liked_at") or "", "release_year": t.get("release_year")}
+         "album_art": t["album_art"], "liked_at": t.get("liked_at") or "", "release_year": t.get("release_year"),
+         "external_url": t.get("external_url") or "", "apple_music_url": t.get("apple_music_url") or "",
+         "apple_catalog_id": t.get("apple_catalog_id")}
         for t in tracks if t["id"] not in playlist_track_ids
     ]
 
@@ -952,6 +965,7 @@ def process_apple_user(
         remaining=remaining_slim,
     )
     map_data["source"] = "apple"
+    map_data["storefront"] = storefront
     map_data["share_for_comparison"] = bool(share_for_comparison)
 
     storage.save_map(apple_id, map_data)
