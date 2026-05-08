@@ -1210,6 +1210,7 @@
       #btn-brain,
       #btn-taste-chart,
       #btn-merge,
+      #btn-export-pdf,
       #btn-apple,
       #btn-save-moods,
       #btn-ai,
@@ -1529,6 +1530,14 @@
       </svg>
       Merge
     </button>
+    <button class="btn-icon" id="btn-export-pdf" title="Export playlists to PDF" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.4rem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <path d="M14 2v6h6"/>
+        <path d="M8 13h8"/><path d="M8 17h5"/>
+      </svg>
+      Export PDF
+    </button>
     <button class="btn-icon" id="btn-save-moods" title="Save mood playlists to Spotify" style="font-size:.72rem;width:auto;padding:0 .75rem;gap:.4rem">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0">
         <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
@@ -1644,6 +1653,24 @@
     <div class="modal-actions">
       <button class="btn-secondary" id="merge-cancel">Cancel</button>
       <button class="btn-primary" id="merge-confirm" disabled>Select 2+ playlists</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export playlists modal -->
+<div class="modal-backdrop" id="export-modal">
+  <div class="modal" style="width:min(520px,92vw)">
+    <div class="modal-title">Export playlists to PDF</div>
+    <div class="modal-sub">Select playlists to include. The export lists playlist names and track items for now.</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+      <span style="font-size:.72rem;color:var(--text-dim)" id="export-hint">Select playlists</span>
+      <button class="btn-secondary" id="export-toggle-all" style="padding:.3rem .75rem;font-size:.72rem">Select all</button>
+    </div>
+    <div id="export-checkboxes" style="display:flex;flex-direction:column;gap:.4rem;max-height:260px;overflow-y:auto;margin-bottom:1rem;scrollbar-width:thin"></div>
+    <div id="export-error" style="font-size:.72rem;color:#f87171;display:none;margin-bottom:.75rem"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="export-cancel">Cancel</button>
+      <button class="btn-primary" id="export-confirm" disabled>Export PDF</button>
     </div>
   </div>
 </div>
@@ -1876,6 +1903,7 @@
     <button class="mobile-more-action apple" id="mobile-more-apple" type="button">Connect Apple Music</button>
     <button class="mobile-more-action" id="mobile-more-chart" type="button">Taste era chart</button>
     <button class="mobile-more-action" id="mobile-more-merge" type="button">Merge playlists</button>
+    <button class="mobile-more-action" id="mobile-more-export" type="button">Export playlists PDF</button>
     <button class="mobile-more-action" id="mobile-more-moods" type="button">Save mood playlists</button>
     <button class="mobile-more-action" id="mobile-more-remaining" type="button">Organise remaining tracks</button>
     <button class="mobile-more-action" id="mobile-more-rebuild" type="button">Rebuild map</button>
@@ -4747,6 +4775,160 @@ document.getElementById('merge-confirm').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Export playlists to printable PDF
+// ---------------------------------------------------------------------------
+function _playlistTracksForExport(key) {
+  return points
+    .filter(p => _pointInPlaylist(p, key))
+    .sort((a, b) => {
+      const aName = `${a.artist || ''} ${a.name || ''}`.toLowerCase();
+      const bName = `${b.artist || ''} ${b.name || ''}`.toLowerCase();
+      return aName.localeCompare(bName);
+    });
+}
+
+function _selectedExportItems() {
+  return [...document.querySelectorAll('#export-checkboxes input:checked')].map(cb => ({
+    key: cb.value,
+    label: cb.dataset.label || cb.value,
+  }));
+}
+
+function _updateExportBtn() {
+  const selected = _selectedExportItems();
+  const btn = document.getElementById('export-confirm');
+  const hint = document.getElementById('export-hint');
+  btn.disabled = selected.length === 0;
+  btn.textContent = selected.length ? `Export ${selected.length} playlist${selected.length !== 1 ? 's' : ''}` : 'Export PDF';
+  hint.textContent = selected.length ? `${selected.length} selected` : 'Select playlists';
+}
+
+function _openExportModal() {
+  const items = _playlistMetaItems(mapData, points)
+    .map(pl => ({ ...pl, count: _playlistTracksForExport(pl.key).length }))
+    .filter(pl => pl.count > 0)
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  if (!items.length) {
+    alert('No playlists found in your map data.');
+    return;
+  }
+
+  const container = document.getElementById('export-checkboxes');
+  container.innerHTML = items.map(pl => {
+    const color = playlistColors[pl.key] || COLOR_UNTAGGED;
+    return `
+      <label class="mood-check-item" data-name="${_esc(pl.key)}">
+        <input type="checkbox" value="${_esc(pl.key)}" data-label="${_esc(pl.label)}" />
+        <div class="mood-check-dot" style="background:${color}"></div>
+        <span class="mood-check-name">${_esc(pl.label)}</span>
+        <span class="mood-check-count">${pl.count} tracks</span>
+      </label>`;
+  }).join('');
+
+  container.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('.mood-check-item').classList.toggle('selected', cb.checked);
+      _updateExportBtn();
+    });
+  });
+
+  document.getElementById('export-error').style.display = 'none';
+  document.getElementById('export-toggle-all').textContent = 'Select all';
+  _updateExportBtn();
+  document.getElementById('export-modal').classList.add('open');
+}
+
+function _toggleAllExportPlaylists() {
+  const checks = [...document.querySelectorAll('#export-checkboxes input[type=checkbox]')];
+  const shouldSelect = checks.some(cb => !cb.checked);
+  checks.forEach(cb => {
+    cb.checked = shouldSelect;
+    cb.closest('.mood-check-item').classList.toggle('selected', shouldSelect);
+  });
+  document.getElementById('export-toggle-all').textContent = shouldSelect ? 'Deselect all' : 'Select all';
+  _updateExportBtn();
+}
+
+function _exportSelectedPlaylistsPdf() {
+  const selected = _selectedExportItems();
+  const errEl = document.getElementById('export-error');
+  errEl.style.display = 'none';
+  if (!selected.length) {
+    errEl.textContent = 'Select at least one playlist.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const exportedAt = new Date().toLocaleString();
+  const owner = mapData?.display_name || userId;
+  const sections = selected.map(item => {
+    const tracks = _playlistTracksForExport(item.key);
+    return `
+      <section class="playlist">
+        <h2>${_esc(item.label)}</h2>
+        <div class="count">${tracks.length} track${tracks.length !== 1 ? 's' : ''}</div>
+        <ol>
+          ${tracks.map(t => `
+            <li>
+              <span class="track">${_esc(t.name || 'Untitled')}</span>
+              <span class="artist">${_esc(t.artist || '')}</span>
+            </li>`).join('')}
+        </ol>
+      </section>`;
+  }).join('');
+
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    errEl.textContent = 'Popup blocked. Allow popups for this site, then try again.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  printWindow.document.write(`<!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>SoundMap Playlists - ${_esc(owner)}</title>
+      <style>
+        @page { margin: 18mm; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111; line-height: 1.45; }
+        header { border-bottom: 1px solid #ddd; padding-bottom: 14px; margin-bottom: 22px; }
+        h1 { margin: 0 0 6px; font-size: 26px; }
+        .meta { color: #666; font-size: 12px; }
+        .playlist { break-inside: avoid; page-break-inside: avoid; margin: 0 0 26px; }
+        h2 { margin: 0; font-size: 18px; }
+        .count { color: #666; font-size: 12px; margin: 2px 0 10px; }
+        ol { margin: 0; padding-left: 22px; }
+        li { padding: 4px 0; border-bottom: 1px solid #eee; }
+        .track { font-weight: 600; }
+        .artist { color: #666; }
+        .artist::before { content: " - "; color: #999; }
+      </style>
+    </head>
+    <body>
+      <header>
+        <h1>SoundMap playlists</h1>
+        <div class="meta">${_esc(owner)} · ${selected.length} playlist${selected.length !== 1 ? 's' : ''} · Exported ${_esc(exportedAt)}</div>
+      </header>
+      ${sections}
+      <script>window.addEventListener('load', () => { window.print(); });<\/script>
+    </body>
+    </html>`);
+  printWindow.document.close();
+}
+
+document.getElementById('btn-export-pdf').addEventListener('click', _openExportModal);
+document.getElementById('export-toggle-all').addEventListener('click', _toggleAllExportPlaylists);
+document.getElementById('export-cancel').addEventListener('click', () => {
+  document.getElementById('export-modal').classList.remove('open');
+});
+document.getElementById('export-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+document.getElementById('export-confirm').addEventListener('click', _exportSelectedPlaylistsPdf);
+
+// ---------------------------------------------------------------------------
 // Refresh button
 // ---------------------------------------------------------------------------
 document.getElementById('btn-refresh').addEventListener('click', () => {
@@ -4832,6 +5014,7 @@ document.getElementById('mobile-more-sheet')?.addEventListener('click', e => {
 document.getElementById('mobile-more-apple')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-apple'); });
 document.getElementById('mobile-more-chart')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-taste-chart'); });
 document.getElementById('mobile-more-merge')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-merge'); });
+document.getElementById('mobile-more-export')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-export-pdf'); });
 document.getElementById('mobile-more-moods')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-save-moods'); });
 document.getElementById('mobile-more-remaining')?.addEventListener('click', () => { _closeMobileMore(); _openRemainingModal(); });
 document.getElementById('mobile-more-rebuild')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-refresh'); });
