@@ -1159,6 +1159,14 @@
       position: absolute; left: 0; right: 0; top: 0; bottom: 44px;
       width: 100%; height: calc(100% - 44px);
     }
+    .cmp-3d-canvas {
+      display: none;
+      position: absolute; left: 0; right: 0; top: 0; bottom: 44px;
+      width: 100%; height: calc(100% - 44px);
+      background: var(--bg);
+    }
+    .cmp-half.is-3d svg { display: none; }
+    .cmp-half.is-3d .cmp-3d-canvas { display: block; }
     .cmp-half-legend {
       position: absolute; bottom: 0; left: 0; right: 0; height: 44px;
       display: flex; align-items: center; padding: 0 10px; gap: 8px;
@@ -1735,11 +1743,13 @@
     <div class="cmp-main">
     <div class="cmp-half" id="cmp-half-me" data-mobile-title="Your Mind Map">
       <svg id="cmp-svg-me" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
+      <canvas class="cmp-3d-canvas" id="cmp-3d-me"></canvas>
       <div class="cmp-half-legend" id="cmp-legend-me"></div>
     </div>
     <div class="cmp-center" id="cmp-center"></div>
     <div class="cmp-half" id="cmp-half-friend" data-mobile-title="Friend's Mind Map">
       <svg id="cmp-svg-friend" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
+      <canvas class="cmp-3d-canvas" id="cmp-3d-friend"></canvas>
       <div class="cmp-half-legend" id="cmp-legend-friend"></div>
     </div>
   </div>
@@ -2402,6 +2412,7 @@ window.addEventListener('resize', () => {
   _brainCache = null;
   _svgBrainCache = null;
   if (brain3D.ready) _resizeBrain3D();
+  if (cmp3D.views.length) cmp3D.views.forEach(_resizeCompare3DView);
   resize();
   if (drilldownTracks) {
     const dc = document.getElementById('drilldown-canvas');
@@ -2980,6 +2991,15 @@ const brain3D = {
   lastInputAt: 0,
 };
 
+const cmp3D = {
+  ready: false,
+  loading: false,
+  raf: null,
+  key: '',
+  THREE: null,
+  views: [],
+};
+
 function _hexToThreeColor(THREE, color) {
   const c = new THREE.Color();
   c.setStyle(color || COLOR_UNTAGGED);
@@ -3001,12 +3021,17 @@ function _brain3DNormalize(v) {
 function _brain3DPlaylistData() {
   if (!_svgBrainCache) _svgBrainCache = _computeSVGBrainData();
   if (!_svgBrainCache) return null;
-  const names = _svgBrainCache.plNames || [];
-  const labels = _svgBrainCache.plLabels || names;
+  return _brain3DPlaylistDataFor(points, _svgBrainCache);
+}
+
+function _brain3DPlaylistDataFor(pts, cache) {
+  if (!cache) return null;
+  const names = cache.plNames || [];
+  const labels = cache.plLabels || names;
   const dirs = names.map(name => {
-    const pts = points.filter(p => _pointInPlaylist(p, name));
-    const sx = pts.reduce((sum, p) => sum + (p.nx ?? 0.5), 0) / Math.max(pts.length, 1);
-    const sy = pts.reduce((sum, p) => sum + (p.ny ?? 0.5), 0) / Math.max(pts.length, 1);
+    const lobePts = pts.filter(p => _pointInPlaylist(p, name));
+    const sx = lobePts.reduce((sum, p) => sum + (p.nx ?? 0.5), 0) / Math.max(lobePts.length, 1);
+    const sy = lobePts.reduce((sum, p) => sum + (p.ny ?? 0.5), 0) / Math.max(lobePts.length, 1);
     return _brain3DNormalize(_brain3DDirFromPoint(sx, sy));
   });
   return { names, labels, dirs };
@@ -3016,8 +3041,8 @@ function _brain3DSurfacePos(THREE, dir, lift = 1) {
   return new THREE.Vector3(dir[0] * 1.25 * lift, dir[1] * 0.95 * lift, dir[2] * 1.15 * lift);
 }
 
-function _brain3DColorArray(THREE, names) {
-  return names.map(name => _hexToThreeColor(THREE, playlistColors[name] || COLOR_UNTAGGED));
+function _brain3DColorArray(THREE, names, pColors = playlistColors) {
+  return names.map(name => _hexToThreeColor(THREE, pColors[name] || COLOR_UNTAGGED));
 }
 
 function _brain3DShaders(count) {
@@ -3087,7 +3112,7 @@ function _brain3DShaders(count) {
   };
 }
 
-function _brain3DMakeBrain(THREE, data) {
+function _brain3DMakeBrain(THREE, data, pColors = playlistColors) {
   const geometry = new THREE.SphereGeometry(1, 112, 112);
   const pos = geometry.attributes.position;
   const v = new THREE.Vector3();
@@ -3105,7 +3130,7 @@ function _brain3DMakeBrain(THREE, data) {
   const shaders = _brain3DShaders(data.names.length);
   const dirs = data.dirs.slice(0, 32).map(d => new THREE.Vector3(d[0], d[1], d[2]));
   while (dirs.length < 32) dirs.push(new THREE.Vector3());
-  const colors = _brain3DColorArray(THREE, data.names).slice(0, 32);
+  const colors = _brain3DColorArray(THREE, data.names, pColors).slice(0, 32);
   while (colors.length < 32) colors.push(new THREE.Color(0, 0, 0));
   const material = new THREE.ShaderMaterial({
     uniforms: {
@@ -3499,7 +3524,7 @@ function _brain3DMakePlaylistDetail(idx) {
     fromPos: startPos,
     toPos: liftPos,
     fromScale: 0.44,
-    toScale: window.innerWidth < 768 ? 1.18 : 1.34,
+    toScale: window.innerWidth < 768 ? 0.98 : 1.08,
   };
   _brain3DSetLabels(labelItems);
 }
@@ -3521,7 +3546,7 @@ function _brain3DEnterPlaylist(idx) {
   _brain3DStartCameraTween({
     yaw: Math.atan2(d[0], d[2]),
     pitch: Math.asin(Math.max(-0.72, Math.min(0.72, d[1]))) * 0.72,
-    distance: window.innerWidth < 768 ? 3.9 : 3.55,
+    distance: window.innerWidth < 768 ? 4.3 : 4.15,
   }, 950);
 }
 
@@ -3750,6 +3775,38 @@ function _brain3DHitLobe(point) {
   return best;
 }
 
+function _brain3DHandleTapAt(clientX, clientY, forceOpen = false, ignoreSuppress = false) {
+  if (!brain3D.ready) return;
+  if (!ignoreSuppress && performance.now() < brain3D.suppressClickUntil && !forceOpen) return;
+  _brain3DSetPointer({ clientX, clientY });
+  brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
+
+  if (brain3D.mode === 'playlist') {
+    const artistHits = brain3D.artistMeshes.length ? brain3D.raycaster.intersectObjects(brain3D.artistMeshes, false) : [];
+    if (artistHits.length) {
+      _brain3DSelectArtist(artistHits[0].object.userData.index);
+      return;
+    }
+    _brain3DHideSongCard();
+    return;
+  }
+
+  const brainHits = brain3D.brainMesh ? brain3D.raycaster.intersectObject(brain3D.brainMesh) : [];
+  if (!brainHits.length) return;
+  const idx = _brain3DHitLobe(brainHits[0].point);
+  if (idx < 0) return;
+  const now = performance.now();
+  if (forceOpen || (brain3D.lastWorldTapIndex === idx && now - brain3D.lastWorldTapAt < 520)) {
+    brain3D.lastWorldTapAt = 0;
+    _brain3DEnterPlaylist(idx);
+    return;
+  }
+  brain3D.hoverIndex = idx;
+  brain3D.lastWorldTapAt = now;
+  brain3D.lastWorldTapIndex = idx;
+  _brain3DSetHud(['Playlist selected', 'Tap again to lift it', brain3D.labels[idx] || brain3D.names[idx]]);
+}
+
 function _brain3DPointerMove(e) {
   if (!brain3D.ready) return;
   _brain3DSetPointer(e);
@@ -3773,46 +3830,12 @@ function _brain3DPointerMove(e) {
 }
 
 function _brain3DClick(e) {
-  if (!brain3D.ready) return;
-  if (performance.now() < brain3D.suppressClickUntil) return;
-  _brain3DSetPointer(e);
-  brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
-
-  if (brain3D.mode === 'playlist') {
-    const artistHits = brain3D.artistMeshes.length ? brain3D.raycaster.intersectObjects(brain3D.artistMeshes, false) : [];
-    if (artistHits.length) {
-      _brain3DSelectArtist(artistHits[0].object.userData.index);
-      return;
-    }
-    _brain3DHideSongCard();
-    return;
-  }
-
-  const brainHits = brain3D.brainMesh ? brain3D.raycaster.intersectObject(brain3D.brainMesh) : [];
-  if (!brainHits.length) return;
-  const idx = _brain3DHitLobe(brainHits[0].point);
-  if (idx < 0) return;
-  const now = performance.now();
-  if (brain3D.lastWorldTapIndex === idx && now - brain3D.lastWorldTapAt < 420) {
-    brain3D.lastWorldTapAt = 0;
-    _brain3DEnterPlaylist(idx);
-    return;
-  }
-  brain3D.hoverIndex = idx;
-  brain3D.lastWorldTapAt = now;
-  brain3D.lastWorldTapIndex = idx;
-  _brain3DSetHud(['Playlist selected', 'Double-tap again to lift it', brain3D.labels[idx] || brain3D.names[idx]]);
+  _brain3DHandleTapAt(e.clientX, e.clientY);
 }
 
 function _brain3DDoubleClick(e) {
-  if (!brain3D.ready || brain3D.mode !== 'world') return;
-  if (performance.now() < brain3D.suppressClickUntil) return;
-  _brain3DSetPointer(e);
-  brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
-  const brainHits = brain3D.brainMesh ? brain3D.raycaster.intersectObject(brain3D.brainMesh) : [];
-  if (!brainHits.length) return;
-  const idx = _brain3DHitLobe(brainHits[0].point);
-  if (idx >= 0) _brain3DEnterPlaylist(idx);
+  if (brain3D.mode !== 'world') return;
+  _brain3DHandleTapAt(e.clientX, e.clientY, true);
 }
 
 function _wireBrain3DInput(el) {
@@ -3846,7 +3869,14 @@ function _wireBrain3DInput(el) {
   });
   el.addEventListener('pointerup', e => {
     if (brain3D.pinching) return;
-    if (brain3D.dragMoved) brain3D.suppressClickUntil = performance.now() + 260;
+    const totalMove = Math.hypot(e.clientX - brain3D.pointerDownX, e.clientY - brain3D.pointerDownY);
+    const wasTap = !brain3D.dragMoved && totalMove <= 8;
+    if (e.pointerType === 'touch' && wasTap) {
+      _brain3DHandleTapAt(e.clientX, e.clientY, false, true);
+      brain3D.suppressClickUntil = performance.now() + 320;
+    } else if (brain3D.dragMoved) {
+      brain3D.suppressClickUntil = performance.now() + 260;
+    }
     brain3D.dragging = false;
     el.classList.remove('dragging');
     el.releasePointerCapture?.(e.pointerId);
@@ -4316,7 +4346,136 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
   });
 }
 
+function _stopCompare3DBrains() {
+  if (cmp3D.raf) {
+    cancelAnimationFrame(cmp3D.raf);
+    cmp3D.raf = null;
+  }
+  for (const view of cmp3D.views) {
+    try { view.renderer?.dispose?.(); } catch {}
+  }
+  cmp3D.views = [];
+  cmp3D.key = '';
+  document.getElementById('cmp-half-me')?.classList.remove('is-3d');
+  document.getElementById('cmp-half-friend')?.classList.remove('is-3d');
+}
+
+function _resizeCompare3DView(view) {
+  const rect = view.canvas.getBoundingClientRect();
+  const w = Math.max(1, rect.width || view.canvas.clientWidth || 1);
+  const h = Math.max(1, rect.height || view.canvas.clientHeight || 1);
+  view.camera.aspect = w / h;
+  view.camera.updateProjectionMatrix();
+  view.renderer.setSize(w, h, false);
+}
+
+function _renderCompare3DView(view, now) {
+  const cp = Math.cos(view.pitch);
+  const yaw = view.yaw + Math.sin(now * 0.00018 + view.offset) * 0.05;
+  view.group.rotation.y += 0.0012 * view.dir;
+  view.camera.position.set(
+    Math.sin(yaw) * cp * view.distance,
+    Math.sin(view.pitch) * view.distance + 0.08,
+    Math.cos(yaw) * cp * view.distance
+  );
+  view.camera.lookAt(0, 0, 0);
+  if (view.brain?.material?.uniforms) {
+    view.brain.material.uniforms.uCameraPos.value.copy(view.camera.position);
+  }
+  view.renderer.render(view.scene, view.camera);
+}
+
+function _animateCompare3DBrains() {
+  if (!cmp3D.views.length || document.getElementById('cmp-brain-view').style.display === 'none' || !brain3DMode) {
+    cmp3D.raf = null;
+    return;
+  }
+  const now = performance.now();
+  for (const view of cmp3D.views) _renderCompare3DView(view, now);
+  cmp3D.raf = requestAnimationFrame(_animateCompare3DBrains);
+}
+
+function _makeCompare3DView(THREE, canvasEl, pts, cache, pColors, dir = 1) {
+  const data = _brain3DPlaylistDataFor(pts, cache);
+  if (!data) return null;
+  const renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 768 ? 1.35 : 1.8));
+  renderer.setClearColor(0x0a0a0f, 1);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 100);
+  const group = new THREE.Group();
+  scene.add(group);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.38));
+  const key = new THREE.DirectionalLight(0xdbeafe, 1.12);
+  key.position.set(4 * dir, 7, 6);
+  scene.add(key);
+  const rim = new THREE.DirectionalLight(0xf472b6, 0.5);
+  rim.position.set(-5 * dir, 2, -4);
+  scene.add(rim);
+  const stars = _brain3DMakeStars(THREE);
+  stars.material.opacity = 0.14;
+  scene.add(stars);
+  const brain = _brain3DMakeBrain(THREE, data, pColors);
+  group.add(brain);
+  const view = {
+    canvas: canvasEl,
+    renderer,
+    scene,
+    camera,
+    group,
+    brain,
+    yaw: dir > 0 ? -0.22 : 0.22,
+    pitch: 0.12,
+    distance: window.innerWidth < 768 ? 4.2 : 3.7,
+    dir,
+    offset: Math.random() * 10,
+  };
+  _resizeCompare3DView(view);
+  return view;
+}
+
+async function _showCompare3DBrains() {
+  const meHalf = document.getElementById('cmp-half-me');
+  const friendHalf = document.getElementById('cmp-half-friend');
+  meHalf?.classList.add('is-3d');
+  friendHalf?.classList.add('is-3d');
+
+  if (!_svgBrainCache) _svgBrainCache = _computeSVGBrainData();
+  if (!_svgFriendBrainCache && _friendMapData) {
+    _svgFriendBrainCache = _computeSVGBrainDataFor(comparePoints, _friendMapData);
+  }
+  if (!_friendColorsMap || !Object.keys(_friendColorsMap).length) {
+    _friendColorsMap = _buildPlaylistColorsFor(_friendMapData?.playlists || []);
+  }
+  if (_svgBrainCache) _buildCmpLegend('cmp-legend-me', _svgBrainCache.plNames, playlistColors);
+  if (_svgFriendBrainCache) _buildCmpLegend('cmp-legend-friend', _svgFriendBrainCache.plNames, _friendColorsMap);
+
+  const key = `${points.length}:${comparePoints.length}:${(_svgBrainCache?.plNames || []).join('|')}:${(_svgFriendBrainCache?.plNames || []).join('|')}`;
+  if (cmp3D.key === key && cmp3D.views.length) {
+    cmp3D.views.forEach(_resizeCompare3DView);
+    if (!cmp3D.raf) cmp3D.raf = requestAnimationFrame(_animateCompare3DBrains);
+    return;
+  }
+
+  _stopCompare3DBrains();
+  meHalf?.classList.add('is-3d');
+  friendHalf?.classList.add('is-3d');
+  cmp3D.key = key;
+  try {
+    const THREE = brain3D.THREE || await import(THREE_CDN);
+    cmp3D.THREE = THREE;
+    const me = _makeCompare3DView(THREE, document.getElementById('cmp-3d-me'), points, _svgBrainCache, playlistColors, 1);
+    const friend = _makeCompare3DView(THREE, document.getElementById('cmp-3d-friend'), comparePoints, _svgFriendBrainCache, _friendColorsMap, -1);
+    cmp3D.views = [me, friend].filter(Boolean);
+    if (cmp3D.views.length && !cmp3D.raf) cmp3D.raf = requestAnimationFrame(_animateCompare3DBrains);
+  } catch (err) {
+    console.warn('Compare 3D failed', err);
+    _stopCompare3DBrains();
+  }
+}
+
 function _hideCompareBrainView() {
+  _stopCompare3DBrains();
   document.getElementById('cmp-brain-view').style.display = 'none';
   document.body.classList.remove('compare-brain-open');
 }
@@ -4334,6 +4493,13 @@ function _showCompareBrainView() {
   document.getElementById('cmp-half-me').dataset.mobileTitle = `${myName}'s Mind Map`;
   document.getElementById('cmp-half-friend').dataset.mobileTitle = `${friendName}'s Mind Map`;
 
+  if (brain3DMode) {
+    _showCompare3DBrains();
+    if (_cmpData) _buildCmpCenter(_cmpData);
+    return;
+  }
+
+  _stopCompare3DBrains();
   const svgMe = document.getElementById('cmp-svg-me');
   const myKey = 'cm' + (points.length || 0);
   if (svgMe.dataset.built !== myKey) {
