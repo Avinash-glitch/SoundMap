@@ -898,6 +898,12 @@
       cursor: grab;
       touch-action: none;
     }
+    @media (min-width: 769px) {
+      body.brain3d-panel-open #brain3d-canvas {
+        right: min(480px, 32vw);
+        width: auto;
+      }
+    }
     #brain3d-canvas.dragging { cursor: grabbing; }
     #brain3d-fallback {
       display: none;
@@ -1154,6 +1160,16 @@
       display: block;
       transform: translateX(0);
     }
+    .brain3d-panel-handle {
+      display: none;
+      width: 54px;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.28);
+      margin: 0 auto .8rem;
+      cursor: grab;
+    }
+    .brain3d-panel-handle:active { cursor: grabbing; }
     .brain3d-panel-close {
       position: absolute;
       top: 1.2rem;
@@ -1888,6 +1904,7 @@
         transform: translateY(100%);
       }
       #brain3d-detail-panel.open { transform: translateY(0); }
+      .brain3d-panel-handle { display: block; }
       .brain3d-panel-head {
         grid-template-columns: 64px 1fr;
         gap: .85rem;
@@ -3753,6 +3770,7 @@ function _brain3DShowPlaylistPanel(idx) {
 
   panel.style.setProperty('--orb-color', color);
   panel.innerHTML = `
+    <div class="brain3d-panel-handle" id="brain3d-panel-handle" aria-label="Drag down to close playlist detail"></div>
     <button class="brain3d-panel-close" id="brain3d-panel-close" type="button" aria-label="Close playlist detail">×</button>
     <div class="brain3d-panel-head">
       <div class="brain3d-panel-orb"></div>
@@ -3774,8 +3792,10 @@ function _brain3DShowPlaylistPanel(idx) {
 
   panel.classList.add('open');
   document.body.classList.add('brain3d-panel-open');
+  requestAnimationFrame(_resizeBrain3D);
   _brain3DRenderInsight(idx, color);
   panel.querySelector('#brain3d-panel-close')?.addEventListener('click', _brain3DReturnWorld);
+  _wireBrain3DPanelDrag(panel);
   panel.querySelectorAll('[data-artist-idx]').forEach(btn => {
     btn.addEventListener('click', () => _brain3DSelectArtist(Number(btn.dataset.artistIdx)));
   });
@@ -3787,6 +3807,42 @@ function _brain3DHidePlaylistPanel() {
   panel.classList.remove('open');
   document.body.classList.remove('brain3d-panel-open');
   panel.innerHTML = '';
+  requestAnimationFrame(_resizeBrain3D);
+}
+
+function _wireBrain3DPanelDrag(panel) {
+  const handle = panel.querySelector('#brain3d-panel-handle');
+  if (!handle || handle.dataset.wired) return;
+  handle.dataset.wired = '1';
+  let startY = 0;
+  let dragging = false;
+  const finish = dy => {
+    dragging = false;
+    panel.style.transition = '';
+    panel.style.transform = '';
+    if (dy > 84) _brain3DReturnWorld();
+  };
+  handle.addEventListener('pointerdown', event => {
+    if (window.innerWidth > 768) return;
+    dragging = true;
+    startY = event.clientY;
+    panel.style.transition = 'none';
+    handle.setPointerCapture?.(event.pointerId);
+  });
+  handle.addEventListener('pointermove', event => {
+    if (!dragging) return;
+    const dy = Math.max(0, event.clientY - startY);
+    panel.style.transform = `translateY(${dy}px)`;
+  });
+  handle.addEventListener('pointerup', event => {
+    if (!dragging) return;
+    handle.releasePointerCapture?.(event.pointerId);
+    finish(Math.max(0, event.clientY - startY));
+  });
+  handle.addEventListener('pointercancel', () => {
+    if (!dragging) return;
+    finish(0);
+  });
 }
 
 function _brain3DSetLabels(items) {
@@ -3830,7 +3886,7 @@ function _brain3DSetWorldLabels() {
 
 function _brain3DUpdateLabels() {
   if (!brain3D.ready || !brain3D.labelItems.length) return;
-  const rect = document.getElementById('brain3d-overlay').getBoundingClientRect();
+  const rect = brain3D.renderer.domElement.getBoundingClientRect();
   const tmp = new brain3D.THREE.Vector3();
   for (const item of brain3D.labelItems) {
     if (item.obj && item.localPos) {
@@ -3843,8 +3899,8 @@ function _brain3DUpdateLabels() {
     const visible = tmp.z > -1 && tmp.z < 1;
     item.el.style.opacity = visible ? '1' : '0';
     if (!visible) continue;
-    const x = (tmp.x * 0.5 + 0.5) * rect.width;
-    const y = (-tmp.y * 0.5 + 0.5) * rect.height;
+    const x = rect.left + (tmp.x * 0.5 + 0.5) * rect.width;
+    const y = rect.top + (-tmp.y * 0.5 + 0.5) * rect.height;
     item.el.style.left = `${x}px`;
     item.el.style.top = `${y}px`;
   }
@@ -3856,6 +3912,15 @@ function _brain3DArtistColor(THREE, i, baseName) {
   const hsl = {};
   base.getHSL(hsl);
   c.setHSL((hsl.h + i * 0.09) % 1, Math.min(0.88, hsl.s + 0.08), Math.min(0.68, hsl.l + 0.06));
+  return c;
+}
+
+function _brain3DMutedLobeColor(THREE, baseName) {
+  const base = _hexToThreeColor(THREE, playlistColors[baseName] || '#fb7185');
+  const hsl = {};
+  base.getHSL(hsl);
+  const c = new THREE.Color();
+  c.setHSL(hsl.h, Math.min(0.38, hsl.s * 0.52), Math.max(0.28, Math.min(0.48, hsl.l * 0.72)));
   return c;
 }
 
@@ -3922,13 +3987,13 @@ function _brain3DMakePlaylistDetail(idx) {
   group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), lobeDir);
   group.scale.setScalar(0.44);
 
-  const baseColor = _hexToThreeColor(THREE, playlistColors[name] || '#60a5fa');
+  const baseColor = _brain3DMutedLobeColor(THREE, name);
   const base = new THREE.Mesh(
     new THREE.ShapeGeometry(_brain3DMakeLobeShape(THREE, 1.0), 10),
     new THREE.MeshBasicMaterial({
       color: baseColor,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.14,
       side: THREE.DoubleSide,
       depthWrite: false,
     })
@@ -3943,7 +4008,7 @@ function _brain3DMakePlaylistDetail(idx) {
   }
   const edge = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints(edgePts),
-    new THREE.LineBasicMaterial({ color: baseColor, transparent: true, opacity: 0.9 })
+    new THREE.LineBasicMaterial({ color: baseColor, transparent: true, opacity: 0.55 })
   );
   group.add(edge);
 
@@ -4225,7 +4290,7 @@ function _rebuildBrain3DScene() {
 
 function _resizeBrain3D() {
   if (!brain3D.ready) return;
-  const rect = document.getElementById('brain3d-overlay').getBoundingClientRect();
+  const rect = brain3D.renderer.domElement.getBoundingClientRect();
   const w = Math.max(1, rect.width || window.innerWidth);
   const h = Math.max(1, rect.height || window.innerHeight);
   brain3D.camera.aspect = w / h;
