@@ -937,6 +937,30 @@
       font-size: .78rem;
       letter-spacing: .04em;
     }
+    #brain3d-brand {
+      position: absolute;
+      left: 1.25rem;
+      top: 1.1rem;
+      z-index: 2;
+      max-width: min(620px, 42vw);
+      pointer-events: none;
+      color: rgba(255,255,255,.52);
+      font-family: 'Syne', sans-serif;
+      font-size: 1.18rem;
+      font-weight: 800;
+      line-height: 1.15;
+    }
+    #brain3d-brand strong { color: #fff; }
+    #brain3d-brand small {
+      display: block;
+      margin-top: .65rem;
+      color: rgba(255,255,255,.52);
+      font-family: 'Inter', sans-serif;
+      font-size: .78rem;
+      font-weight: 650;
+      line-height: 1.35;
+      max-width: 520px;
+    }
     #brain3d-nav {
       position: absolute;
       left: 1.25rem;
@@ -1102,6 +1126,257 @@
       width: 34px;
       height: 34px;
       border-radius: 5px;
+    }
+    #brain3d-detail-panel {
+      display: none;
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 4;
+      width: min(560px, 38vw);
+      padding: 2.15rem 1.85rem 2.6rem;
+      overflow-y: auto;
+      color: #f8f4f1;
+      background:
+        radial-gradient(circle at 18% 4%, rgba(255,132,107,.22), transparent 26%),
+        linear-gradient(180deg, rgba(76,25,18,.97), rgba(12,10,14,.985) 56%, rgba(8,9,14,.99));
+      border-left: 1px solid rgba(255,255,255,.1);
+      box-shadow: -28px 0 90px rgba(0,0,0,.5);
+      transform: translateX(100%);
+      transition: transform .34s ease;
+    }
+    #brain3d-detail-panel.open {
+      display: block;
+      transform: translateX(0);
+    }
+    .brain3d-panel-close {
+      position: absolute;
+      top: 1.2rem;
+      right: 1.2rem;
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(255,255,255,.035);
+      color: rgba(255,255,255,.7);
+      font-size: 1.35rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .brain3d-panel-head {
+      display: grid;
+      grid-template-columns: 96px 1fr;
+      gap: 1.35rem;
+      align-items: center;
+      padding-right: 2.6rem;
+    }
+    .brain3d-panel-orb {
+      width: 92px;
+      height: 92px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 30% 22%, rgba(255,255,255,.55), transparent 24%),
+        radial-gradient(circle at 70% 78%, rgba(0,0,0,.34), transparent 45%),
+        var(--orb-color, #fb7185);
+      box-shadow: 0 18px 54px rgba(0,0,0,.36), 0 0 46px color-mix(in srgb, var(--orb-color, #fb7185) 38%, transparent);
+    }
+    .brain3d-panel-eyebrow {
+      font-size: .63rem;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,.48);
+      font-weight: 700;
+    }
+    .brain3d-panel-title {
+      margin-top: .45rem;
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(1.65rem, 3vw, 2.45rem);
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: 0;
+      color: #fff;
+    }
+    .brain3d-panel-meta {
+      margin-top: .7rem;
+      color: rgba(255,255,255,.72);
+      font-size: .88rem;
+      font-weight: 650;
+    }
+    .brain3d-ai-area {
+      margin-top: 2rem;
+      border: 1px solid rgba(255,255,255,.11);
+      border-radius: 14px;
+      background: rgba(255,255,255,.035);
+      padding: .9rem;
+    }
+    .brain3d-ai-button {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      color: #fff;
+      font-family: 'DM Mono', monospace;
+      font-weight: 700;
+      font-size: .72rem;
+      cursor: pointer;
+    }
+    .brain3d-ai-note {
+      margin-top: .55rem;
+      color: rgba(255,255,255,.44);
+      font-size: .64rem;
+      line-height: 1.45;
+    }
+    .brain3d-metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .8rem;
+      margin-top: 1.1rem;
+    }
+    .brain3d-metric-card {
+      padding: .95rem .95rem .85rem;
+      border: 1px solid rgba(255,255,255,.13);
+      border-radius: 12px;
+      background: rgba(255,255,255,.04);
+    }
+    .brain3d-metric-top {
+      display: flex;
+      justify-content: space-between;
+      gap: .75rem;
+      color: rgba(255,255,255,.72);
+      font-size: .72rem;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .brain3d-metric-value {
+      color: #fff;
+      letter-spacing: 0;
+      white-space: nowrap;
+      text-transform: none;
+    }
+    .brain3d-meter {
+      height: 7px;
+      margin-top: .85rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,.13);
+      overflow: hidden;
+    }
+    .brain3d-meter span {
+      display: block;
+      height: 100%;
+      width: var(--v, 50%);
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--orb-color, #fb7185), rgba(255,255,255,.94));
+    }
+    .brain3d-panel-section {
+      margin-top: 2.35rem;
+    }
+    .brain3d-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .brain3d-section-title {
+      font-size: .72rem;
+      letter-spacing: .24em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,.48);
+      font-weight: 800;
+    }
+    .brain3d-open-service {
+      color: rgba(255,255,255,.68);
+      text-decoration: none;
+      font-weight: 800;
+      font-size: .82rem;
+      white-space: nowrap;
+    }
+    .brain3d-artist-block {
+      padding: .7rem 0 1.05rem;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    .brain3d-artist-title {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+      width: 100%;
+      padding: 0;
+      border: none;
+      background: transparent;
+      text-align: left;
+      margin-bottom: .7rem;
+      color: var(--orb-color, #fb7185);
+      font-family: 'Syne', sans-serif;
+      font-size: 1rem;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .brain3d-artist-title::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 16px currentColor;
+      flex-shrink: 0;
+    }
+    .brain3d-artist-count {
+      color: rgba(255,255,255,.48);
+      font-family: 'DM Mono', monospace;
+      font-size: .72rem;
+      font-weight: 700;
+    }
+    .brain3d-track-row {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto;
+      gap: .8rem;
+      align-items: center;
+      padding: .45rem 0;
+      color: #fff;
+      text-decoration: none;
+    }
+    .brain3d-track-row:hover .brain3d-track-title { color: var(--orb-color, #fb7185); }
+    .brain3d-track-num,
+    .brain3d-track-duration {
+      color: rgba(255,255,255,.42);
+      font-family: 'DM Mono', monospace;
+      font-size: .78rem;
+      white-space: nowrap;
+    }
+    .brain3d-track-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: 'Syne', sans-serif;
+      font-size: .94rem;
+      font-weight: 760;
+    }
+    .brain3d-panel-chips {
+      position: sticky;
+      bottom: -2.6rem;
+      display: flex;
+      gap: .5rem;
+      padding: .8rem 0 0;
+      overflow-x: auto;
+      background: linear-gradient(180deg, transparent, rgba(8,9,14,.98) 24%);
+      scrollbar-width: none;
+    }
+    .brain3d-panel-chips::-webkit-scrollbar { display: none; }
+    .brain3d-chip {
+      flex-shrink: 0;
+      border: 1px solid rgba(255,255,255,.28);
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      color: #fff;
+      padding: .45rem .8rem;
+      font-family: 'DM Mono', monospace;
+      font-size: .68rem;
+      font-weight: 700;
+      cursor: pointer;
     }
 
     /* ---- Brain info panel ---- */
@@ -1574,6 +1849,13 @@
         gap: .4rem;
         font-size: .55rem;
       }
+      #brain3d-brand {
+        left: .75rem;
+        top: calc(.65rem + env(safe-area-inset-top, 0px));
+        max-width: calc(100vw - 1.5rem);
+        font-size: .92rem;
+      }
+      #brain3d-brand small { display: none; }
       #brain3d-nav {
         left: .75rem;
         right: .75rem;
@@ -1588,6 +1870,30 @@
         width: auto;
       }
       .brain3d-label { font-size: .52rem; max-width: 120px; }
+      #brain3d-detail-panel {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+        width: 100%;
+        max-height: min(67vh, 660px);
+        padding: 1.15rem 1rem 1.65rem;
+        border-left: none;
+        border-top: 1px solid rgba(255,255,255,.12);
+        border-radius: 18px 18px 0 0;
+        transform: translateY(100%);
+      }
+      #brain3d-detail-panel.open { transform: translateY(0); }
+      .brain3d-panel-head {
+        grid-template-columns: 64px 1fr;
+        gap: .85rem;
+        padding-right: 2.4rem;
+      }
+      .brain3d-panel-orb { width: 58px; height: 58px; }
+      .brain3d-metric-grid { grid-template-columns: 1fr 1fr; gap: .55rem; }
+      .brain3d-metric-card { padding: .72rem; }
+      .brain3d-track-row { grid-template-columns: 30px minmax(0, 1fr) auto; gap: .55rem; }
+      .brain3d-panel-chips { bottom: -1.65rem; }
 
       #brain-info-panel {
         top: auto;
@@ -1726,6 +2032,7 @@
   <canvas id="brain3d-canvas"></canvas>
   <div id="brain3d-loading">Loading 3D brain...</div>
   <div id="brain3d-fallback">3D brain could not start.<br>The 2D brain view is still available.</div>
+  <div id="brain3d-brand"><strong>SoundMap</strong> / 3D Brain<small>Each colored region is a playlist. Drag to rotate, pinch or scroll to zoom, then open a lobe to explore songs grouped by artist.</small></div>
   <div id="brain3d-label-layer"></div>
   <div id="brain3d-nav">
     <button id="brain3d-back" type="button">← World</button>
@@ -1735,6 +2042,7 @@
     </div>
   </div>
   <div id="brain3d-song-card"></div>
+  <aside id="brain3d-detail-panel" aria-live="polite"></aside>
   <div id="brain3d-hud">
     <span>Drag to rotate</span>
     <span>Scroll to zoom</span>
@@ -2990,6 +3298,7 @@ const brain3D = {
   hoverArtistIndex: -1,
   hoverTrack: null,
   selectedArtistIndex: -1,
+  insights: {},
   dataKey: '',
   worldView: null,
   cameraTween: null,
@@ -3113,11 +3422,13 @@ function _brain3DShaders(count) {
           lobe += uColors[i] * w;
           if (w > winnerW) { winnerW = w; winner = i; }
         }
-        if (winner == uHoverIndex && uHoverIndex >= 0) lobe *= 1.48;
+        bool hovered = winner == uHoverIndex && uHoverIndex >= 0;
+        if (hovered) lobe = mix(lobe * 0.68, vec3(0.16, 0.07, 0.06), 0.34);
         vec3 base = vec3(0.075, 0.08, 0.13);
         vec3 cortex = mix(base, lobe, 0.78);
         float border = smoothstep(0.18, 0.30, winnerW);
         cortex *= 0.72 + border * 0.35;
+        if (hovered) cortex += vec3(0.24, 0.09, 0.07) * border;
         float fissure = smoothstep(0.055, 0.0, abs(vDir.x));
         cortex *= 1.0 - fissure * 0.55;
         vec3 lightDir = normalize(vec3(0.5, 0.8, 0.6));
@@ -3314,6 +3625,162 @@ function _brain3DArtistClusters(name) {
   return [...byArtist.entries()]
     .map(([artist, songs]) => ({ artist, songs }))
     .sort((a, b) => b.songs.length - a.songs.length || a.artist.localeCompare(b.artist));
+}
+
+function _brain3DTrackDuration(track) {
+  const ms = Number(track?.duration_ms || track?.durationMs || 0);
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const total = Math.round(ms / 1000);
+  const min = Math.floor(total / 60);
+  const sec = String(total % 60).padStart(2, '0');
+  return `${min}:${sec}`;
+}
+
+function _brain3DPlaylistLabel(idx) {
+  return brain3D.labels[idx] || brain3D.names[idx] || 'Playlist';
+}
+
+function _brain3DInsightMetric(label, value, meterPct = null) {
+  const meter = meterPct === null ? '' : `<div class="brain3d-meter"><span style="--v:${Math.max(0, Math.min(100, Number(meterPct) || 0))}%"></span></div>`;
+  return `<div class="brain3d-metric-card">
+    <div class="brain3d-metric-top"><span>${_esc(label)}</span><span class="brain3d-metric-value">${_esc(String(value))}</span></div>
+    ${meter}
+  </div>`;
+}
+
+function _brain3DRenderInsight(idx, color) {
+  const area = document.getElementById('brain3d-ai-area');
+  if (!area) return;
+  const name = brain3D.names[idx];
+  const insight = brain3D.insights[name];
+  if (!insight) {
+    area.innerHTML = `
+      <button class="brain3d-ai-button" id="brain3d-ai-generate" type="button">Generate AI playlist profile</button>
+      <div class="brain3d-ai-note">Optional: sends this playlist's song titles and artists to your selected AI provider to infer energy, dance feel, average tempo, and mood.</div>`;
+    area.querySelector('#brain3d-ai-generate')?.addEventListener('click', () => _brain3DGenerateInsight(idx));
+    return;
+  }
+  if (insight.loading) {
+    area.innerHTML = `<button class="brain3d-ai-button" type="button" disabled>Generating profile...</button>
+      <div class="brain3d-ai-note">Reading song titles, artists, and durations. No audio is sent.</div>`;
+    return;
+  }
+  if (insight.error) {
+    area.innerHTML = `<button class="brain3d-ai-button" id="brain3d-ai-generate" type="button">Retry AI profile</button>
+      <div class="brain3d-ai-note" style="color:#fca5a5">${_esc(insight.error)}</div>`;
+    area.querySelector('#brain3d-ai-generate')?.addEventListener('click', () => _brain3DGenerateInsight(idx));
+    return;
+  }
+  const energy = Math.round(Number(insight.energy || 0));
+  const dance = Math.round(Number(insight.dance || 0));
+  const tempo = Math.round(Number(insight.tempo_bpm || 0));
+  const mood = insight.mood || 'Textured';
+  area.innerHTML = `
+    <div class="brain3d-metric-grid" style="--orb-color:${_esc(color)}">
+      ${_brain3DInsightMetric('Energy', `${energy}%`, energy)}
+      ${_brain3DInsightMetric('Mood', mood, null)}
+      ${_brain3DInsightMetric('Dance', `${dance}%`, dance)}
+      ${_brain3DInsightMetric('Tempo', tempo ? `${tempo} BPM` : 'Unknown', tempo ? Math.min(100, Math.max(18, (tempo / 180) * 100)) : 0)}
+    </div>
+    ${insight.rationale ? `<div class="brain3d-ai-note">${_esc(insight.rationale)}</div>` : ''}`;
+}
+
+async function _brain3DGenerateInsight(idx) {
+  const name = brain3D.names[idx];
+  const tracks = _brain3DPlaylistTracks(name).slice(0, 120);
+  const { provider, key } = _getAiSettings();
+  brain3D.insights[name] = { loading: true };
+  _brain3DRenderInsight(idx, playlistColors[name] || '#fb7185');
+  try {
+    const resp = await fetch('/playlist-insight', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider,
+        api_key: key,
+        playlist_name: _brain3DPlaylistLabel(idx),
+        tracks: tracks.map(t => ({
+          name: t.name || '',
+          artist: _brain3DTrackArtist(t),
+          artists: Array.isArray(t.artists) ? t.artists : undefined,
+          duration_ms: t.duration_ms || t.durationMs || 0,
+          release_year: t.release_year || t.year || '',
+          album: t.album || t.album_name || '',
+          genre: t.genre || t.mood || '',
+        })),
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || 'AI profile failed');
+    brain3D.insights[name] = data;
+  } catch (err) {
+    brain3D.insights[name] = { error: err?.message || 'AI profile failed' };
+  }
+  _brain3DRenderInsight(idx, playlistColors[name] || '#fb7185');
+}
+
+function _brain3DShowPlaylistPanel(idx) {
+  const panel = document.getElementById('brain3d-detail-panel');
+  if (!panel) return;
+  const name = brain3D.names[idx];
+  const label = _brain3DPlaylistLabel(idx);
+  const color = playlistColors[name] || '#fb7185';
+  const tracks = _brain3DPlaylistTracks(name);
+  const clusters = _brain3DArtistClusters(name);
+  const serviceUrl = tracks.length ? _trackServiceUrl(tracks[0]) : (_isAppleMap() ? 'https://music.apple.com/' : 'https://open.spotify.com/');
+  const rows = clusters.map((cluster, artistIdx) => {
+    const songRows = cluster.songs.map((track, i) => {
+      const duration = _brain3DTrackDuration(track);
+      return `<a class="brain3d-track-row" href="${_esc(_trackServiceUrl(track))}" target="_blank" rel="noopener" title="${_esc(_trackServiceLabel())}: ${_esc(track.name || 'Untitled')}">
+        <span class="brain3d-track-num">${String(i + 1).padStart(2, '0')}</span>
+        <span class="brain3d-track-title">${_esc(track.name || 'Untitled')}</span>
+        <span class="brain3d-track-duration">${_esc(duration)}</span>
+      </a>`;
+    }).join('');
+    return `<section class="brain3d-artist-block">
+      <button class="brain3d-artist-title" type="button" data-artist-idx="${artistIdx}">
+        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(cluster.artist)}</span>
+        <span class="brain3d-artist-count">${cluster.songs.length} tracks</span>
+      </button>
+      ${songRows}
+    </section>`;
+  }).join('');
+  const chips = clusters.slice(0, 10).map((cluster, i) => `<button class="brain3d-chip" type="button" data-artist-idx="${i}">${_esc(cluster.artist)}</button>`).join('');
+
+  panel.style.setProperty('--orb-color', color);
+  panel.innerHTML = `
+    <button class="brain3d-panel-close" id="brain3d-panel-close" type="button" aria-label="Close playlist detail">×</button>
+    <div class="brain3d-panel-head">
+      <div class="brain3d-panel-orb"></div>
+      <div style="min-width:0">
+        <div class="brain3d-panel-eyebrow">Playlist Lobe</div>
+        <div class="brain3d-panel-title">${_esc(label)}</div>
+        <div class="brain3d-panel-meta">${tracks.length} tracks · ${clusters.length} artists</div>
+      </div>
+    </div>
+    <div class="brain3d-ai-area" id="brain3d-ai-area"></div>
+    <div class="brain3d-panel-section">
+      <div class="brain3d-section-head">
+        <div class="brain3d-section-title">Grouped by Artist</div>
+        <a class="brain3d-open-service" href="${_esc(serviceUrl)}" target="_blank" rel="noopener">${_esc(_trackServiceLabel())} ↗</a>
+      </div>
+      ${rows || '<div class="brain3d-ai-note">No tracks found for this playlist.</div>'}
+    </div>
+    ${chips ? `<div class="brain3d-panel-chips">${chips}</div>` : ''}`;
+
+  panel.classList.add('open');
+  _brain3DRenderInsight(idx, color);
+  panel.querySelector('#brain3d-panel-close')?.addEventListener('click', _brain3DReturnWorld);
+  panel.querySelectorAll('[data-artist-idx]').forEach(btn => {
+    btn.addEventListener('click', () => _brain3DSelectArtist(Number(btn.dataset.artistIdx)));
+  });
+}
+
+function _brain3DHidePlaylistPanel() {
+  const panel = document.getElementById('brain3d-detail-panel');
+  if (!panel) return;
+  panel.classList.remove('open');
+  panel.innerHTML = '';
 }
 
 function _brain3DSetLabels(items) {
@@ -3577,6 +4044,7 @@ function _brain3DEnterPlaylist(idx) {
   brain3D.group.visible = true;
   _brain3DHideSongCard();
   _brain3DMakePlaylistDetail(idx);
+  _brain3DShowPlaylistPanel(idx);
   _brain3DUpdateNav();
   const d = brain3D.dirs[idx] || [0, 0, 1];
   _brain3DStartCameraTween({
@@ -3597,6 +4065,7 @@ function _brain3DReturnWorld() {
   if (brain3D.detailGroup) brain3D.detailGroup.visible = false;
   brain3D.detailTween = null;
   _brain3DHideSongCard();
+  _brain3DHidePlaylistPanel();
   _brain3DSetWorldLabels();
   _brain3DUpdateNav();
   _brain3DStartCameraTween(brain3D.worldView || { yaw: 0, pitch: 0.1, distance: 4.2 }, 850);
@@ -3727,6 +4196,7 @@ function _rebuildBrain3DScene() {
   brain3D.names = data.names;
   if (brain3D.stars?.parent) brain3D.stars.parent.remove(brain3D.stars);
   if (brain3D.detailGroup?.parent) brain3D.detailGroup.parent.remove(brain3D.detailGroup);
+  _brain3DHidePlaylistPanel();
   brain3D.mode = 'world';
   brain3D.activePlaylistIndex = -1;
   brain3D.activePlaylistName = null;
@@ -3995,6 +4465,7 @@ function _hideBrain3DOverlay() {
   }
   document.getElementById('track-tooltip')?.classList.remove('visible');
   _brain3DHideSongCard();
+  _brain3DHidePlaylistPanel();
   const nav = document.getElementById('brain3d-nav');
   if (nav) nav.style.display = 'none';
   if (brain3D.raf) {

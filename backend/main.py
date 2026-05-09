@@ -198,6 +198,96 @@ async def analyze_moods(request: Request) -> JSONResponse:
     return JSONResponse({"points": points, "persona": persona})
 
 
+@app.post("/playlist-insight")
+async def playlist_insight(request: Request) -> JSONResponse:
+    """Infer opt-in playlist profile values from song metadata for the 3D lobe panel."""
+    try:
+        body = await request.json()
+        user_api_key = (body.get("api_key") or "").strip()
+        provider = (body.get("provider") or _default_provider()).strip().lower()
+        playlist_name = (body.get("playlist_name") or "Playlist").strip()[:120]
+        tracks = body.get("tracks") or []
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    if provider not in ("anthropic", "openai", "nvidia"):
+        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
+
+    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
+    if not api_key:
+        labels = {"anthropic": "Anthropic", "openai": "OpenAI", "nvidia": "NVIDIA"}
+        raise HTTPException(status_code=400, detail=f"No {labels[provider]} API key configured")
+
+    if not isinstance(tracks, list) or not tracks:
+        raise HTTPException(status_code=400, detail="tracks required")
+
+    rows: list[str] = []
+    for i, track in enumerate(tracks[:120], start=1):
+        if not isinstance(track, dict):
+            continue
+        name = str(track.get("name") or "Untitled")[:120]
+        artist = str(track.get("artist") or "Unknown Artist")[:160]
+        duration_ms = int(track.get("duration_ms") or 0)
+        duration = f"{round(duration_ms / 1000)}s" if duration_ms > 0 else "unknown duration"
+        year = str(track.get("release_year") or "").strip()
+        album = str(track.get("album") or "").strip()[:100]
+        genre = str(track.get("genre") or "").strip()[:80]
+        details = ", ".join(part for part in (year, album, genre, duration) if part)
+        rows.append(f"{i}. {name} — {artist}" + (f" ({details})" if details else ""))
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No valid tracks supplied")
+
+    system_msg = (
+        "You are a concise music analyst. Infer playlist-level listening characteristics "
+        "from song titles, artist names, albums, years, and durations. Do not claim exact "
+        "audio analysis or play counts. Return strict JSON only."
+    )
+    user_msg = (
+        f"Playlist: {playlist_name}\n"
+        f"Tracks:\n" + "\n".join(rows) + "\n\n"
+        "Return JSON with exactly these keys:\n"
+        "{"
+        "\"energy\": integer 0-100, "
+        "\"dance\": integer 0-100, "
+        "\"tempo_bpm\": integer estimated average BPM, "
+        "\"mood\": short 1-3 word feeling, "
+        "\"rationale\": one short sentence"
+        "}\n"
+        "Mood must be a feeling phrase, not a percentage."
+    )
+
+    from .pipeline import _call_llm_chat
+
+    try:
+        loop = asyncio.get_running_loop()
+        raw = await loop.run_in_executor(
+            None,
+            lambda: _call_llm_chat(system_msg, user_msg, api_key=api_key, provider=provider, max_tokens=700),
+        )
+        data = _parse_llm_json(raw)
+    except Exception as exc:
+        print(f"[playlist-insight] LLM error: {exc}")
+        raise HTTPException(status_code=502, detail=f"AI profile failed: {exc}")
+
+    def _clamp_int(value: object, lo: int, hi: int, fallback: int) -> int:
+        try:
+            n = int(round(float(value)))
+        except Exception:
+            n = fallback
+        return max(lo, min(hi, n))
+
+    mood = str(data.get("mood") or "Textured")[:40].strip() or "Textured"
+    rationale = str(data.get("rationale") or "")[:220].strip()
+    return JSONResponse({
+        "energy": _clamp_int(data.get("energy"), 0, 100, 50),
+        "dance": _clamp_int(data.get("dance"), 0, 100, 50),
+        "tempo_bpm": _clamp_int(data.get("tempo_bpm"), 40, 220, 110),
+        "mood": mood,
+        "rationale": rationale,
+    })
+
+
 @app.post("/start-job")
 async def start_job(request: Request) -> JSONResponse:
     """Start pipeline job for the logged-in user."""
