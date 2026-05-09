@@ -1167,6 +1167,22 @@
     }
     .cmp-half.is-3d svg { display: none; }
     .cmp-half.is-3d .cmp-3d-canvas { display: block; }
+    .cmp-3d-fallback {
+      display: none;
+      position: absolute;
+      inset: 42px 14px 58px;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--text-dim);
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      background: rgba(17,17,24,.78);
+      pointer-events: none;
+    }
+    .cmp-half.has-3d-fallback .cmp-3d-fallback { display: flex; }
     .cmp-half-legend {
       position: absolute; bottom: 0; left: 0; right: 0; height: 44px;
       display: flex; align-items: center; padding: 0 10px; gap: 8px;
@@ -1744,12 +1760,14 @@
     <div class="cmp-half" id="cmp-half-me" data-mobile-title="Your Mind Map">
       <svg id="cmp-svg-me" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
       <canvas class="cmp-3d-canvas" id="cmp-3d-me"></canvas>
+      <div class="cmp-3d-fallback"></div>
       <div class="cmp-half-legend" id="cmp-legend-me"></div>
     </div>
     <div class="cmp-center" id="cmp-center"></div>
     <div class="cmp-half" id="cmp-half-friend" data-mobile-title="Friend's Mind Map">
       <svg id="cmp-svg-friend" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
       <canvas class="cmp-3d-canvas" id="cmp-3d-friend"></canvas>
+      <div class="cmp-3d-fallback"></div>
       <div class="cmp-half-legend" id="cmp-legend-friend"></div>
     </div>
   </div>
@@ -4209,6 +4227,9 @@ function _buildCmpCenter(d) {
       <div class="cmp-pl-score">${Math.round(p.score * 100)}%</div>
       <div class="cmp-pl-name r" title="${_esc(p.playlist_b)}">${_esc(p.playlist_b)}</div>
     </div>`).join('');
+  const fullUrl = d.user_a?.id && d.user_b?.id
+    ? `/compare.html?a=${encodeURIComponent(d.user_a.id)}&b=${encodeURIComponent(d.user_b.id)}`
+    : '';
 
   el.innerHTML = `
     <div class="cmp-ring-wrap">
@@ -4224,6 +4245,7 @@ function _buildCmpCenter(d) {
     </div>
     <div style="font-size:10px;color:var(--accent);text-align:center">${d.shared_count} shared tracks</div>
     ${pairsHtml ? `<div class="cmp-section-title">Similar Playlists</div><div style="width:100%">${pairsHtml}</div>` : ''}
+    ${fullUrl ? `<a href="${fullUrl}" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent2);text-align:center;text-decoration:none;border:1px solid rgba(124,106,247,.35);border-radius:999px;padding:7px 10px;width:100%;box-sizing:border-box">Open full comparison →</a>` : ''}
     <div style="font-size:8px;color:rgba(255,255,255,.2);text-align:center;line-height:1.4;margin-top:4px">Click a lobe on the right<br>to copy your friend's playlist</div>
   `;
 }
@@ -4358,6 +4380,18 @@ function _stopCompare3DBrains() {
   cmp3D.key = '';
   document.getElementById('cmp-half-me')?.classList.remove('is-3d');
   document.getElementById('cmp-half-friend')?.classList.remove('is-3d');
+  document.getElementById('cmp-half-me')?.classList.remove('has-3d-fallback');
+  document.getElementById('cmp-half-friend')?.classList.remove('has-3d-fallback');
+}
+
+function _setCompare3DFallback(message) {
+  for (const id of ['cmp-half-me', 'cmp-half-friend']) {
+    const half = document.getElementById(id);
+    half?.classList.remove('is-3d');
+    half?.classList.add('has-3d-fallback');
+    const fb = half?.querySelector('.cmp-3d-fallback');
+    if (fb) fb.innerHTML = message;
+  }
 }
 
 function _resizeCompare3DView(view) {
@@ -4439,6 +4473,8 @@ async function _showCompare3DBrains() {
   const friendHalf = document.getElementById('cmp-half-friend');
   meHalf?.classList.add('is-3d');
   friendHalf?.classList.add('is-3d');
+  meHalf?.classList.remove('has-3d-fallback');
+  friendHalf?.classList.remove('has-3d-fallback');
 
   if (!_svgBrainCache) _svgBrainCache = _computeSVGBrainData();
   if (!_svgFriendBrainCache && _friendMapData) {
@@ -4449,6 +4485,10 @@ async function _showCompare3DBrains() {
   }
   if (_svgBrainCache) _buildCmpLegend('cmp-legend-me', _svgBrainCache.plNames, playlistColors);
   if (_svgFriendBrainCache) _buildCmpLegend('cmp-legend-friend', _svgFriendBrainCache.plNames, _friendColorsMap);
+  if (!_svgBrainCache || !_svgFriendBrainCache) {
+    _setCompare3DFallback('Not enough playlist data<br>to render both 3D brains yet.');
+    return;
+  }
 
   const key = `${points.length}:${comparePoints.length}:${(_svgBrainCache?.plNames || []).join('|')}:${(_svgFriendBrainCache?.plNames || []).join('|')}`;
   if (cmp3D.key === key && cmp3D.views.length) {
@@ -4467,10 +4507,16 @@ async function _showCompare3DBrains() {
     const me = _makeCompare3DView(THREE, document.getElementById('cmp-3d-me'), points, _svgBrainCache, playlistColors, 1);
     const friend = _makeCompare3DView(THREE, document.getElementById('cmp-3d-friend'), comparePoints, _svgFriendBrainCache, _friendColorsMap, -1);
     cmp3D.views = [me, friend].filter(Boolean);
+    if (cmp3D.views.length < 2) {
+      _stopCompare3DBrains();
+      _setCompare3DFallback('3D comparison needs both maps<br>to have playlist lobes.');
+      return;
+    }
     if (cmp3D.views.length && !cmp3D.raf) cmp3D.raf = requestAnimationFrame(_animateCompare3DBrains);
   } catch (err) {
     console.warn('Compare 3D failed', err);
     _stopCompare3DBrains();
+    _setCompare3DFallback(`3D comparison could not start.<br><span style="opacity:.65">${_esc(err?.message || 'WebGL unavailable')}</span>`);
   }
 }
 
@@ -4480,26 +4526,7 @@ function _hideCompareBrainView() {
   document.body.classList.remove('compare-brain-open');
 }
 
-function _showCompareBrainView() {
-  const view = document.getElementById('cmp-brain-view');
-  view.style.display = 'flex';
-  document.body.classList.add('compare-brain-open');
-  canvas.style.opacity = '0';
-
-  const myName = mapData?.display_name || userId;
-  const friendName = compareDisplayName || 'Friend';
-  document.querySelector('#cmp-name-me span').textContent = myName;
-  document.querySelector('#cmp-name-friend span').textContent = friendName;
-  document.getElementById('cmp-half-me').dataset.mobileTitle = `${myName}'s Mind Map`;
-  document.getElementById('cmp-half-friend').dataset.mobileTitle = `${friendName}'s Mind Map`;
-
-  if (brain3DMode) {
-    _showCompare3DBrains();
-    if (_cmpData) _buildCmpCenter(_cmpData);
-    return;
-  }
-
-  _stopCompare3DBrains();
+function _buildCompareSVGBrains() {
   const svgMe = document.getElementById('cmp-svg-me');
   const myKey = 'cm' + (points.length || 0);
   if (svgMe.dataset.built !== myKey) {
@@ -4526,7 +4553,29 @@ function _showCompareBrainView() {
       _buildCmpLegend('cmp-legend-friend', _svgFriendBrainCache.plNames, _friendColorsMap);
     }
   }
+}
 
+function _showCompareBrainView() {
+  const view = document.getElementById('cmp-brain-view');
+  view.style.display = 'flex';
+  document.body.classList.add('compare-brain-open');
+  canvas.style.opacity = '0';
+
+  const myName = mapData?.display_name || userId;
+  const friendName = compareDisplayName || 'Friend';
+  document.querySelector('#cmp-name-me span').textContent = myName;
+  document.querySelector('#cmp-name-friend span').textContent = friendName;
+  document.getElementById('cmp-half-me').dataset.mobileTitle = `${myName}'s Mind Map`;
+  document.getElementById('cmp-half-friend').dataset.mobileTitle = `${friendName}'s Mind Map`;
+  _buildCompareSVGBrains();
+
+  if (brain3DMode) {
+    _showCompare3DBrains();
+    if (_cmpData) _buildCmpCenter(_cmpData);
+    return;
+  }
+
+  _stopCompare3DBrains();
   if (_cmpData) _buildCmpCenter(_cmpData);
 }
 
@@ -6653,18 +6702,26 @@ function hitTestAll(cx, cy) {
 }
 
 function normaliseComparePoints(raw) {
+  if (!Array.isArray(raw) || !raw.length) return [];
   // Reuse the same normalisation space as the primary map so coordinates align
-  const allPts = [...points, ...raw];
-  const xs = allPts.map(p => p.x ?? p.nx);
-  const ys = allPts.map(p => p.y ?? p.ny);
-  // primary points are already normalised (nx/ny). raw compare points have x/y
-  const xMin = Math.min(...raw.map(p => p.x));
-  const xMax = Math.max(...raw.map(p => p.x));
-  const yMin = Math.min(...raw.map(p => p.y));
-  const yMax = Math.max(...raw.map(p => p.y));
+  const xs = raw.map(p => Number.isFinite(p.x) ? p.x : p.nx).filter(Number.isFinite);
+  const ys = raw.map(p => Number.isFinite(p.y) ? p.y : p.ny).filter(Number.isFinite);
+  if (!xs.length || !ys.length) return raw.map(p => ({ ...p, nx: 0.5, ny: 0.5 }));
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
   const xRange = xMax - xMin || 1;
   const yRange = yMax - yMin || 1;
-  return raw.map(p => ({ ...p, nx: (p.x - xMin) / xRange, ny: (p.y - yMin) / yRange }));
+  return raw.map(p => {
+    const x = Number.isFinite(p.x) ? p.x : p.nx;
+    const y = Number.isFinite(p.y) ? p.y : p.ny;
+    return {
+      ...p,
+      nx: Number.isFinite(x) ? (x - xMin) / xRange : 0.5,
+      ny: Number.isFinite(y) ? (y - yMin) / yRange : 0.5,
+    };
+  });
 }
 
 async function loadCompare(friendId) {
