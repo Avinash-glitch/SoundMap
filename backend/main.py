@@ -730,27 +730,6 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
     pts_a = map_a.get("points", [])
     pts_b = map_b.get("points", [])
 
-    ids_a = {p["id"]: p for p in pts_a if p.get("id")}
-    ids_b = {p["id"]: p for p in pts_b if p.get("id")}
-    shared_ids = set(ids_a) & set(ids_b)
-
-    shared_tracks = sorted(
-        [
-            {
-                "id": tid,
-                "name": ids_a[tid].get("name", ""),
-                "artist": ids_a[tid].get("artist", ""),
-                "album_art": ids_a[tid].get("album_art", ""),
-                "external_url": ids_a[tid].get("external_url", ""),
-                "playlists_a": ids_a[tid].get("playlists") or [],
-                "playlists_b": ids_b[tid].get("playlists") or [],
-            }
-            for tid in shared_ids
-        ],
-        key=lambda t: (ids_a[t["id"]].get("play_score", 0) + ids_b[t["id"]].get("play_score", 0)),
-        reverse=True,
-    )
-
     def clean_key(value: str) -> str:
         return _re.sub(r"\s+", " ", (value or "").strip().lower())
 
@@ -759,6 +738,17 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
         if isrc:
             return f"isrc:{isrc}"
         return f"name:{clean_key(track.get('name') or '')}|artist:{clean_key(track.get('artist') or '')}"
+
+    def track_keys(track: dict) -> set[str]:
+        keys: set[str] = set()
+        isrc = clean_key(track.get("isrc") or "")
+        name = clean_key(track.get("name") or "")
+        artist = clean_key(track.get("artist") or "")
+        if isrc:
+            keys.add(f"isrc:{isrc}")
+        if name and artist:
+            keys.add(f"name:{name}|artist:{artist}")
+        return keys
 
     def track_score(track: dict) -> float:
         return float(track.get("current_taste_score") or track.get("play_score") or 1)
@@ -775,8 +765,49 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
             "score": round(score if score is not None else track_score(track), 3),
         }
 
+    def keyed_tracks(pts: list[dict]) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for p in pts:
+            for key in track_keys(p):
+                current = out.get(key)
+                if current is None or track_score(p) > track_score(current):
+                    out[key] = p
+        return out
+
+    tracks_a = keyed_tracks(pts_a)
+    tracks_b = keyed_tracks(pts_b)
+    shared_track_keys = set(tracks_a) & set(tracks_b)
+    shared_track_pairs: dict[str, tuple[dict, dict]] = {}
+    for key in shared_track_keys:
+        a_track = tracks_a[key]
+        b_track = tracks_b[key]
+        primary_key = track_key(a_track)
+        if primary_key not in shared_track_pairs:
+            shared_track_pairs[primary_key] = (a_track, b_track)
+
+    shared_tracks = sorted(
+        [
+            {
+                "id": a_track.get("id", ""),
+                "name": a_track.get("name", ""),
+                "artist": a_track.get("artist", ""),
+                "album_art": a_track.get("album_art", ""),
+                "external_url": a_track.get("external_url", ""),
+                "isrc": a_track.get("isrc") or b_track.get("isrc"),
+                "playlists_a": a_track.get("playlists") or [],
+                "playlists_b": b_track.get("playlists") or [],
+                "_score": track_score(a_track) + track_score(b_track),
+            }
+            for a_track, b_track in shared_track_pairs.values()
+        ],
+        key=lambda t: t["_score"],
+        reverse=True,
+    )
+    for track in shared_tracks:
+        track.pop("_score", None)
+
     def build_artist_profile(pts: list[dict]) -> tuple[dict[str, dict], set[str]]:
-        owned_keys = {track_key(p) for p in pts if p.get("name") and p.get("artist")}
+        owned_keys = {key for p in pts for key in track_keys(p)}
         artists: dict[str, dict] = {}
         for p in pts:
             names = p.get("artists") or [p.get("artist")]
@@ -869,6 +900,9 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
             tk = track_key(p)
             if not tk:
                 continue
+            keys = track_keys(p)
+            if not keys:
+                continue
             artist_keys = {clean_key(a) for a in (p.get("artists") or [p.get("artist")]) if clean_key(a)}
             for pl_key, pl_name in playlist_refs_for(p):
                 entry = profiles.setdefault(pl_key, {
@@ -877,7 +911,7 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
                     "track_keys": set(),
                     "artist_keys": set(),
                 })
-                entry["track_keys"].add(tk)
+                entry["track_keys"].update(keys)
                 entry["artist_keys"].update(artist_keys)
         return profiles
 
@@ -944,7 +978,7 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
             "track_count": len(pts_b),
         },
         "shared_tracks": shared_tracks[:50],
-        "shared_count": len(shared_ids),
+        "shared_count": len(shared_track_pairs),
         "similar_playlists": pairs[:20],
         "artist_similarity": {
             "shared_artists": shared_artists[:30],

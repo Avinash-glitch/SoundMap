@@ -6821,9 +6821,9 @@ function _renderCompareResults(d) {
       <div id="cmp-playlist-tab" class="cmp-tab-panel">
     `;
 
-  if (d.similar_playlists.length) {
+  if ((d.similar_playlists || []).length) {
     html += `<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">Most similar playlists</div>`;
-    html += d.similar_playlists.slice(0, 6).map(p => `
+    html += (d.similar_playlists || []).slice(0, 6).map(p => `
       <div style="display:grid;grid-template-columns:1fr auto 1fr auto;gap:.4rem;align-items:center;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05)">
         <div style="font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_esc(p.playlist_a)}">${_esc(p.playlist_a)}</div>
         <div style="font-size:.6rem;color:var(--accent2);background:rgba(124,106,247,.15);border-radius:4px;padding:.1rem .35rem;white-space:nowrap" title="${p.shared_track_count || 0} shared tracks · ${p.shared_artist_count || 0} shared artists">${Math.round(p.score*100)}%</div>
@@ -6833,10 +6833,10 @@ function _renderCompareResults(d) {
       </div>`).join('');
   }
 
-  if (d.shared_tracks.length) {
+  if ((d.shared_tracks || []).length) {
     html += `<div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin:.9rem 0 .5rem">Shared tracks</div>
       <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto;scrollbar-width:thin">
-        ${d.shared_tracks.slice(0, 24).map(t => t.album_art
+        ${(d.shared_tracks || []).slice(0, 24).map(t => t.album_art
           ? `<a href="${_esc(_trackServiceUrl(t))}" target="_blank" rel="noopener" title="${_esc(_trackServiceLabel())}: ${_esc(t.name)} - ${_esc(t.artist)}"><img src="${_esc(t.album_art)}" style="width:36px;height:36px;border-radius:3px;object-fit:cover;display:block" loading="lazy"></a>`
           : `<a href="${_esc(_trackServiceUrl(t))}" target="_blank" rel="noopener" style="width:36px;height:36px;border-radius:3px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:.5rem;color:var(--text-dim);text-decoration:none" title="${_esc(_trackServiceLabel())}: ${_esc(t.name)}">♪</a>`
         ).join('')}
