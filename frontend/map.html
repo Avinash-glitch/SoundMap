@@ -3145,7 +3145,7 @@ function _brain3DMakeBrain(THREE, data, pColors = playlistColors) {
     pos.setXYZ(i, v.x * r * 1.25, v.y * r * 0.95, v.z * r * 1.15);
   }
   geometry.computeVertexNormals();
-  const shaders = _brain3DShaders(data.names.length);
+  const shaders = _brain3DShaders(Math.min(32, data.names.length));
   const dirs = data.dirs.slice(0, 32).map(d => new THREE.Vector3(d[0], d[1], d[2]));
   while (dirs.length < 32) dirs.push(new THREE.Vector3());
   const colors = _brain3DColorArray(THREE, data.names, pColors).slice(0, 32);
@@ -4250,6 +4250,28 @@ function _buildCmpCenter(d) {
   `;
 }
 
+function _buildCmpCenterLoading(friendName = 'friend') {
+  const el = document.getElementById('cmp-center');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="cmp-section-title">Similarity</div>
+    <div style="font-size:11px;color:var(--text-dim);line-height:1.5;text-align:center">
+      Calculating compatibility with ${_esc(friendName)}…
+    </div>
+  `;
+}
+
+function _buildCmpCenterError(message) {
+  const el = document.getElementById('cmp-center');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="cmp-section-title">Similarity</div>
+    <div style="font-size:11px;color:#f87171;line-height:1.5;text-align:center">
+      ${_esc(message || 'Could not load comparison.')}
+    </div>
+  `;
+}
+
 function _showFriendLobePanel(idx, name, cache, pColors) {
   const panel = document.getElementById('brain-info-panel');
   const { N, otherNames = [], plLabels = [] } = cache;
@@ -4394,6 +4416,11 @@ function _setCompare3DFallback(message) {
   }
 }
 
+function _clearCompare3DFallback() {
+  document.getElementById('cmp-half-me')?.classList.remove('has-3d-fallback');
+  document.getElementById('cmp-half-friend')?.classList.remove('has-3d-fallback');
+}
+
 function _resizeCompare3DView(view) {
   const rect = view.canvas.getBoundingClientRect();
   const w = Math.max(1, rect.width || view.canvas.clientWidth || 1);
@@ -4473,8 +4500,7 @@ async function _showCompare3DBrains() {
   const friendHalf = document.getElementById('cmp-half-friend');
   meHalf?.classList.add('is-3d');
   friendHalf?.classList.add('is-3d');
-  meHalf?.classList.remove('has-3d-fallback');
-  friendHalf?.classList.remove('has-3d-fallback');
+  _clearCompare3DFallback();
 
   if (!_svgBrainCache) _svgBrainCache = _computeSVGBrainData();
   if (!_svgFriendBrainCache && _friendMapData) {
@@ -4492,6 +4518,9 @@ async function _showCompare3DBrains() {
 
   const key = `${points.length}:${comparePoints.length}:${(_svgBrainCache?.plNames || []).join('|')}:${(_svgFriendBrainCache?.plNames || []).join('|')}`;
   if (cmp3D.key === key && cmp3D.views.length) {
+    meHalf?.classList.add('is-3d');
+    friendHalf?.classList.add('is-3d');
+    _clearCompare3DFallback();
     cmp3D.views.forEach(_resizeCompare3DView);
     if (!cmp3D.raf) cmp3D.raf = requestAnimationFrame(_animateCompare3DBrains);
     return;
@@ -4568,15 +4597,15 @@ function _showCompareBrainView() {
   document.getElementById('cmp-half-me').dataset.mobileTitle = `${myName}'s Mind Map`;
   document.getElementById('cmp-half-friend').dataset.mobileTitle = `${friendName}'s Mind Map`;
   _buildCompareSVGBrains();
+  if (_cmpData) _buildCmpCenter(_cmpData);
+  else _buildCmpCenterLoading(friendName);
 
   if (brain3DMode) {
     _showCompare3DBrains();
-    if (_cmpData) _buildCmpCenter(_cmpData);
     return;
   }
 
   _stopCompare3DBrains();
-  if (_cmpData) _buildCmpCenter(_cmpData);
 }
 
 function _selectBrainLobeByName(name) {
@@ -5436,7 +5465,7 @@ async function _loadTopTracks(range) {
   const renderLocalTaste = () => {
     const localTracks = _currentTasteTracks().slice(0, 7);
     if (!localTracks.length) {
-      listEl.innerHTML = '<div style="font-size:.65rem;color:var(--text-dim)">No current-taste tracks in this map yet</div>';
+      listEl.innerHTML = `<div style="font-size:.65rem;color:var(--text-dim)">${_isAppleMap() ? 'No Heavy Rotation tracks in this map yet' : 'No current-taste tracks in this map yet'}</div>`;
       return true;
     }
     listEl.innerHTML = `
@@ -5457,7 +5486,7 @@ async function _loadTopTracks(range) {
   };
 
   if (_isAppleMap()) {
-    header.textContent = 'Current Taste';
+    header.textContent = 'Heavy Rotation';
     toggles.style.display = 'none';
     renderLocalTaste();
     return;
@@ -6759,6 +6788,8 @@ async function loadCompare(friendId) {
       if (document.getElementById('cmp-brain-view').style.display !== 'none') {
         _buildCmpCenter(_cmpData);
       }
+    } else if (document.getElementById('cmp-brain-view').style.display !== 'none') {
+      _buildCmpCenterError(`Comparison unavailable (${cResp.status})`);
     }
 
     _renderFriendPlaylists();
