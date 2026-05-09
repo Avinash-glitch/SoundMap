@@ -2223,8 +2223,8 @@ function buildMoodColors(moods) {
 
 function buildPlaylistColors(playlists) {
   playlists.forEach((pl, i) => {
-    const hue = Math.round((i / Math.max(playlists.length, 1)) * 360);
-    playlistColors[_playlistKeyFromMeta(pl)] = `hsl(${hue}, 70%, 62%)`;
+    const hue = Math.round((i * 137.508) % 360);
+    playlistColors[_playlistKeyFromMeta(pl)] = `hsl(${hue}, 82%, 61%)`;
     playlistColors[pl.name] = playlistColors[_playlistKeyFromMeta(pl)];
   });
 }
@@ -2951,6 +2951,7 @@ const brain3D = {
   detailGroup: null,
   detailSongPoints: null,
   detailTracks: [],
+  detailTween: null,
   artistMeshes: [],
   artistData: [],
   labelItems: [],
@@ -3020,7 +3021,7 @@ function _brain3DColorArray(THREE, names) {
 }
 
 function _brain3DShaders(count) {
-  const maxCount = Math.max(1, Math.min(16, count));
+  const maxCount = Math.max(1, Math.min(32, count));
   return {
     vertex: `
       varying vec3 vDir;
@@ -3038,22 +3039,22 @@ function _brain3DShaders(count) {
       varying vec3 vDir;
       varying vec3 vNormalW;
       varying vec3 vWorldPos;
-      uniform vec3 uDirs[16];
-      uniform vec3 uColors[16];
+      uniform vec3 uDirs[32];
+      uniform vec3 uColors[32];
       uniform int uCount;
       uniform int uHoverIndex;
       uniform vec3 uCameraPos;
       void main() {
-        float weights[16];
+        float weights[32];
         float maxDot = -10.0;
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 32; i++) {
           if (i >= uCount) break;
           float d = dot(normalize(vDir), normalize(uDirs[i]));
           weights[i] = d;
           if (d > maxDot) maxDot = d;
         }
         float sum = 0.0;
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 32; i++) {
           if (i >= uCount) break;
           weights[i] = exp((weights[i] - maxDot) / 0.12);
           sum += weights[i];
@@ -3061,7 +3062,7 @@ function _brain3DShaders(count) {
         vec3 lobe = vec3(0.0);
         int winner = 0;
         float winnerW = 0.0;
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 32; i++) {
           if (i >= uCount) break;
           float w = weights[i] / sum;
           lobe += uColors[i] * w;
@@ -3102,15 +3103,15 @@ function _brain3DMakeBrain(THREE, data) {
   }
   geometry.computeVertexNormals();
   const shaders = _brain3DShaders(data.names.length);
-  const dirs = data.dirs.slice(0, 16).map(d => new THREE.Vector3(d[0], d[1], d[2]));
-  while (dirs.length < 16) dirs.push(new THREE.Vector3());
-  const colors = _brain3DColorArray(THREE, data.names).slice(0, 16);
-  while (colors.length < 16) colors.push(new THREE.Color(0, 0, 0));
+  const dirs = data.dirs.slice(0, 32).map(d => new THREE.Vector3(d[0], d[1], d[2]));
+  while (dirs.length < 32) dirs.push(new THREE.Vector3());
+  const colors = _brain3DColorArray(THREE, data.names).slice(0, 32);
+  while (colors.length < 32) colors.push(new THREE.Color(0, 0, 0));
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uDirs: { value: dirs },
       uColors: { value: colors },
-      uCount: { value: Math.min(16, data.names.length) },
+      uCount: { value: Math.min(32, data.names.length) },
       uHoverIndex: { value: -1 },
       uCameraPos: { value: new THREE.Vector3() },
     },
@@ -3213,6 +3214,18 @@ function _brain3DApplyCameraTween(now) {
   if (t >= 1) brain3D.cameraTween = null;
 }
 
+function _brain3DApplyDetailTween(now) {
+  const tw = brain3D.detailTween;
+  const group = brain3D.detailGroup;
+  if (!tw || !group) return;
+  const t = Math.min(1, (now - tw.start) / tw.duration);
+  const e = _brain3DEase(t);
+  group.position.lerpVectors(tw.fromPos, tw.toPos, e);
+  group.scale.setScalar(tw.fromScale + (tw.toScale - tw.fromScale) * e);
+  _brain3DSetMaterialOpacity(group, Math.min(1, e * 1.18));
+  if (t >= 1) brain3D.detailTween = null;
+}
+
 function _brain3DSetHud(lines) {
   const hud = document.getElementById('brain3d-hud');
   if (!hud) return;
@@ -3287,7 +3300,13 @@ function _brain3DUpdateLabels() {
   const rect = document.getElementById('brain3d-overlay').getBoundingClientRect();
   const tmp = new brain3D.THREE.Vector3();
   for (const item of brain3D.labelItems) {
-    tmp.copy(item.pos).project(brain3D.camera);
+    if (item.obj && item.localPos) {
+      tmp.copy(item.localPos);
+      item.obj.localToWorld(tmp);
+    } else {
+      tmp.copy(item.pos);
+    }
+    tmp.project(brain3D.camera);
     const visible = tmp.z > -1 && tmp.z < 1;
     item.el.style.opacity = visible ? '1' : '0';
     if (!visible) continue;
@@ -3307,42 +3326,93 @@ function _brain3DArtistColor(THREE, i, baseName) {
   return c;
 }
 
+function _brain3DLobeRadiusAt(a) {
+  const r = 0.93
+    + Math.sin(a * 2.0 - 0.55) * 0.10
+    + Math.sin(a * 3.0 + 1.1) * 0.06
+    + Math.cos(a * 5.0) * 0.035;
+  return Math.max(0.68, Math.min(1.08, r));
+}
+
+function _brain3DMakeLobeShape(THREE, scale = 1) {
+  const shape = new THREE.Shape();
+  const steps = 84;
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    const rr = _brain3DLobeRadiusAt(a) * scale;
+    const x = Math.cos(a) * rr * 1.03;
+    const y = Math.sin(a) * rr * 0.78;
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  shape.closePath();
+  return shape;
+}
+
+function _brain3DPointInLobe(x, y, pad = 0.12) {
+  const a = Math.atan2(y / 0.78, x / 1.03);
+  const r = Math.hypot(x / 1.03, y / 0.78);
+  return r <= _brain3DLobeRadiusAt(a) - pad;
+}
+
+function _brain3DClampToLobe(pos, pad = 0.16) {
+  const a = Math.atan2(pos.y / 0.78, pos.x / 1.03);
+  const maxR = Math.max(0.1, _brain3DLobeRadiusAt(a) - pad);
+  const r = Math.hypot(pos.x / 1.03, pos.y / 0.78);
+  if (r > maxR) {
+    const k = maxR / r;
+    pos.x *= k;
+    pos.y *= k;
+  }
+  return pos;
+}
+
+function _brain3DSetMaterialOpacity(obj, opacity) {
+  obj.traverse(child => {
+    if (!child.material) return;
+    child.material.transparent = true;
+    child.material.opacity = opacity;
+  });
+}
+
 function _brain3DMakePlaylistDetail(idx) {
   const THREE = brain3D.THREE;
   const name = brain3D.names[idx];
   const label = brain3D.labels[idx] || name;
-  const clusters = _brain3DArtistClusters(name).slice(0, 28);
+  const clusters = _brain3DArtistClusters(name).slice(0, window.innerWidth < 768 ? 18 : 30);
   const group = new THREE.Group();
   group.name = `playlist-detail-${name}`;
   const lobeDir = new THREE.Vector3(...brain3D.dirs[idx]).normalize();
-  const liftPos = _brain3DSurfacePos(THREE, [lobeDir.x, lobeDir.y, lobeDir.z], 1.62);
-  group.position.copy(liftPos);
+  const startPos = _brain3DSurfacePos(THREE, [lobeDir.x, lobeDir.y, lobeDir.z], 1.08);
+  const liftPos = _brain3DSurfacePos(THREE, [lobeDir.x, lobeDir.y, lobeDir.z], 1.68);
+  group.position.copy(startPos);
   group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), lobeDir);
+  group.scale.setScalar(0.44);
 
   const baseColor = _hexToThreeColor(THREE, playlistColors[name] || '#60a5fa');
   const base = new THREE.Mesh(
-    new THREE.CircleGeometry(1.62, 96),
+    new THREE.ShapeGeometry(_brain3DMakeLobeShape(THREE, 1.12), 10),
     new THREE.MeshBasicMaterial({
       color: baseColor,
       transparent: true,
-      opacity: 0.24,
+      opacity: 0.34,
       side: THREE.DoubleSide,
       depthWrite: false,
     })
   );
   group.add(base);
 
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(1.55, 1.63, 96),
-    new THREE.MeshBasicMaterial({
-      color: baseColor,
-      transparent: true,
-      opacity: 0.72,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    })
+  const edgePts = [];
+  for (let i = 0; i <= 96; i++) {
+    const a = (i / 96) * Math.PI * 2;
+    const rr = _brain3DLobeRadiusAt(a) * 1.12;
+    edgePts.push(new THREE.Vector3(Math.cos(a) * rr * 1.03, Math.sin(a) * rr * 0.78, 0.018));
+  }
+  const edge = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(edgePts),
+    new THREE.LineBasicMaterial({ color: baseColor, transparent: true, opacity: 0.9 })
   );
-  group.add(ring);
+  group.add(edge);
 
   const artistMeshes = [];
   const songPositions = [];
@@ -3353,9 +3423,12 @@ function _brain3DMakePlaylistDetail(idx) {
 
   clusters.forEach((cluster, i) => {
     const angle = i * 2.399963229728653; // golden angle
-    const r = 0.18 + Math.sqrt((i + 0.5) / totalArtists) * 1.18;
-    const pos = new THREE.Vector3(Math.cos(angle) * r, Math.sin(angle) * r * 0.78, 0.05 + (i % 4) * 0.018);
-    const radius = 0.08 + Math.sqrt(cluster.songs.length) * 0.026;
+    const r = Math.sqrt((i + 0.5) / totalArtists) * 0.78;
+    const pos = _brain3DClampToLobe(
+      new THREE.Vector3(Math.cos(angle) * r * 0.98, Math.sin(angle) * r * 0.72, 0.06 + (i % 4) * 0.012),
+      0.20
+    );
+    const radius = Math.min(0.17, 0.055 + Math.sqrt(cluster.songs.length) * 0.018);
     const color = _brain3DArtistColor(THREE, i, name);
     const mesh = new THREE.Mesh(
       new THREE.IcosahedronGeometry(radius, 2),
@@ -3372,17 +3445,23 @@ function _brain3DMakePlaylistDetail(idx) {
     mesh.userData = { type: 'artist', index: i, artist: cluster.artist, songs: cluster.songs };
     group.add(mesh);
     artistMeshes.push(mesh);
-    labelItems.push({
-      kind: 'artist',
-      text: `${cluster.artist} · ${cluster.songs.length}`,
-      pos: pos.clone().add(new THREE.Vector3(0, radius + 0.08, 0.05)),
-    });
+    if (i < (window.innerWidth < 768 ? 8 : 14)) {
+      labelItems.push({
+        kind: 'artist',
+        text: `${cluster.artist} · ${cluster.songs.length}`,
+        obj: group,
+        localPos: pos.clone().add(new THREE.Vector3(0, radius + 0.065, 0.08)),
+      });
+    }
 
     const shownSongs = cluster.songs.slice(0, 36);
     shownSongs.forEach((song, j) => {
       const a = j * 2.399963229728653 + i * 0.7;
-      const sr = radius + 0.075 + Math.sqrt((j + 0.5) / Math.max(shownSongs.length, 1)) * 0.16;
-      const sp = pos.clone().add(new THREE.Vector3(Math.cos(a) * sr, Math.sin(a) * sr, 0.08 + (j % 5) * 0.012));
+      const sr = radius + 0.035 + Math.sqrt((j + 0.5) / Math.max(shownSongs.length, 1)) * 0.105;
+      const sp = _brain3DClampToLobe(
+        pos.clone().add(new THREE.Vector3(Math.cos(a) * sr, Math.sin(a) * sr * 0.86, 0.08 + (j % 5) * 0.008)),
+        0.08
+      );
       songPositions.push(sp.x, sp.y, sp.z);
       songColors.push(Math.min(color.r * 1.25, 1), Math.min(color.g * 1.25, 1), Math.min(color.b * 1.25, 1));
       songTracks.push(song);
@@ -3404,9 +3483,7 @@ function _brain3DMakePlaylistDetail(idx) {
   songPoints.userData = { type: 'detailSongs', tracks: songTracks };
   group.add(songPoints);
 
-  const titlePos = new THREE.Vector3(0, 1.86, 0.1);
-  labelItems.unshift({ kind: 'playlist', text: label, pos: titlePos });
-  const worldLabelItems = labelItems.map(item => ({ ...item, pos: group.localToWorld(item.pos.clone()) }));
+  labelItems.unshift({ kind: 'playlist', text: label, obj: group, localPos: new THREE.Vector3(0, 0.94, 0.16) });
 
   if (brain3D.detailGroup?.parent) brain3D.detailGroup.parent.remove(brain3D.detailGroup);
   brain3D.detailGroup = group;
@@ -3415,7 +3492,16 @@ function _brain3DMakePlaylistDetail(idx) {
   brain3D.artistMeshes = artistMeshes;
   brain3D.artistData = clusters;
   brain3D.scene.add(group);
-  _brain3DSetLabels(worldLabelItems);
+  _brain3DSetMaterialOpacity(group, 0);
+  brain3D.detailTween = {
+    start: performance.now(),
+    duration: 900,
+    fromPos: startPos,
+    toPos: liftPos,
+    fromScale: 0.44,
+    toScale: window.innerWidth < 768 ? 1.18 : 1.34,
+  };
+  _brain3DSetLabels(labelItems);
 }
 
 function _brain3DEnterPlaylist(idx) {
@@ -3448,6 +3534,7 @@ function _brain3DReturnWorld() {
   brain3D.selectedArtistIndex = -1;
   brain3D.group.visible = true;
   if (brain3D.detailGroup) brain3D.detailGroup.visible = false;
+  brain3D.detailTween = null;
   _brain3DHideSongCard();
   _brain3DSetWorldLabels();
   _brain3DUpdateNav();
@@ -3583,6 +3670,7 @@ function _rebuildBrain3DScene() {
   brain3D.activePlaylistIndex = -1;
   brain3D.activePlaylistName = null;
   brain3D.detailGroup = null;
+  brain3D.detailTween = null;
   brain3D.detailSongPoints = null;
   brain3D.detailTracks = [];
   brain3D.artistMeshes = [];
@@ -3631,6 +3719,7 @@ function _brain3DAnimate() {
   if (!brain3D.ready || document.getElementById('brain3d-overlay').style.display === 'none') return;
   const now = performance.now();
   _brain3DApplyCameraTween(now);
+  _brain3DApplyDetailTween(now);
   if (brain3D.mode === 'world' && !brain3D.cameraTween && !brain3D.dragging && now - brain3D.lastInputAt > 3500) brain3D.yaw += 0.002;
   _brain3DUpdateCamera();
   if (brain3D.brainMesh?.material?.uniforms) {
