@@ -35,6 +35,18 @@ _oauth_options: dict[str, dict] = {}
 _spotify_client_secrets_by_user: dict[str, str] = {}
 
 
+def _request_origin(request: Request) -> str:
+    """Return the public origin for the current request, respecting Railway proxy headers."""
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}".rstrip("/")
+
+
+def _callback_url(request: Request) -> str:
+    """Build the Spotify callback URL for the domain the user actually opened."""
+    return f"{_request_origin(request)}/auth/callback"
+
+
 def _generate_pkce_pair() -> tuple[str, str]:
     """Return (code_verifier, code_challenge)."""
     code_verifier = secrets.token_urlsafe(64)
@@ -77,7 +89,7 @@ def _start_login(
 ) -> RedirectResponse:
     spotify_client_id = (client_id or "").strip() or os.environ["SPOTIFY_CLIENT_ID"]
     spotify_client_secret = (client_secret or "").strip()
-    redirect_uri = os.environ["SPOTIFY_REDIRECT_URI"]
+    redirect_uri = _callback_url(request)
 
     code_verifier, code_challenge = _generate_pkce_pair()
     state = secrets.token_urlsafe(24)
@@ -119,7 +131,7 @@ async def callback(
     state: str | None = None,
 ) -> RedirectResponse:
     """Handle Spotify OAuth callback, exchange code for token, start pipeline job."""
-    app_url = os.environ.get("APP_URL", "http://localhost:8000")
+    app_url = _request_origin(request)
 
     if error or not code:
         return RedirectResponse(f"{app_url}/?error=spotify_denied")
@@ -134,7 +146,7 @@ async def callback(
     oauth_options = _oauth_options.pop(state, {})
     client_id = oauth_options.get("client_id") or request.session.get("spotify_client_id") or os.environ["SPOTIFY_CLIENT_ID"]
     client_secret = oauth_options.get("client_secret") or ""
-    redirect_uri = os.environ["SPOTIFY_REDIRECT_URI"]
+    redirect_uri = _callback_url(request)
 
     token_payload = {
         "grant_type": "authorization_code",
