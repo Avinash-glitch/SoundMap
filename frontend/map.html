@@ -982,6 +982,63 @@
       max-width: min(520px, calc(100vw - 2.5rem));
       pointer-events: auto;
     }
+    #brain3d-torch-toggle {
+      position: absolute;
+      left: 1.25rem;
+      top: 8.15rem;
+      z-index: 3;
+      width: 44px;
+      height: 44px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(15,16,22,.78);
+      color: rgba(255,255,255,.72);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.05rem;
+      box-shadow: 0 16px 46px rgba(0,0,0,.32);
+      backdrop-filter: blur(14px);
+      transition: border-color .16s, color .16s, background .16s, box-shadow .16s;
+      pointer-events: auto;
+    }
+    #brain3d-torch-toggle.active {
+      color: #fde68a;
+      border-color: rgba(253,230,138,.55);
+      background: rgba(34,28,16,.78);
+      box-shadow: 0 0 34px rgba(253,230,138,.16), 0 16px 46px rgba(0,0,0,.32);
+    }
+    #brain3d-torch-hint {
+      display: none;
+      position: absolute;
+      z-index: 4;
+      transform: translate(-50%, calc(-100% - 16px));
+      width: max-content;
+      max-width: min(280px, calc(100vw - 2rem));
+      padding: .55rem .7rem;
+      border-radius: 10px;
+      border: 1px solid rgba(253,230,138,.22);
+      background: rgba(8,8,12,.82);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: .66rem;
+      line-height: 1.35;
+      box-shadow: 0 16px 48px rgba(0,0,0,.42);
+      backdrop-filter: blur(14px);
+      pointer-events: none;
+    }
+    #brain3d-torch-hint strong {
+      display: block;
+      color: #fde68a;
+      font-family: 'Syne', sans-serif;
+      font-size: .78rem;
+      margin-bottom: .12rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #brain3d-torch-hint span { color: rgba(255,255,255,.58); }
     #brain3d-back {
       height: 32px;
       padding: 0 .8rem;
@@ -1876,6 +1933,12 @@
         font-size: .92rem;
       }
       #brain3d-brand small { display: none; }
+      #brain3d-torch-toggle {
+        left: .75rem;
+        top: calc(4.65rem + env(safe-area-inset-top, 0px));
+        width: 40px;
+        height: 40px;
+      }
       #brain3d-nav {
         left: .75rem;
         right: .75rem;
@@ -2062,6 +2125,8 @@
       <div id="brain3d-title-sub">Playlist zones</div>
     </div>
   </div>
+  <button id="brain3d-torch-toggle" type="button" title="Toggle playlist torch" aria-pressed="false">T</button>
+  <div id="brain3d-torch-hint"></div>
   <div id="brain3d-song-card"></div>
   <aside id="brain3d-detail-panel" aria-live="polite"></aside>
   <div id="brain3d-hud">
@@ -3311,6 +3376,12 @@ const brain3D = {
   detailGroup: null,
   detailSongPoints: null,
   detailTracks: [],
+  torchOn: false,
+  torchSongPoints: null,
+  torchSongTracks: [],
+  torchLastIndex: -1,
+  torchPointerX: 0,
+  torchPointerY: 0,
   detailTween: null,
   artistMeshes: [],
   artistData: [],
@@ -3548,6 +3619,108 @@ function _brain3DMakeTracks(THREE, data) {
   return pts;
 }
 
+function _brain3DUpdateTorchButton() {
+  const btn = document.getElementById('brain3d-torch-toggle');
+  if (!btn) return;
+  btn.classList.toggle('active', !!brain3D.torchOn);
+  btn.setAttribute('aria-pressed', brain3D.torchOn ? 'true' : 'false');
+  btn.title = brain3D.torchOn ? 'Turn playlist torch off' : 'Turn playlist torch on';
+}
+
+function _brain3DHideTorchHint() {
+  const hint = document.getElementById('brain3d-torch-hint');
+  if (hint) hint.style.display = 'none';
+}
+
+function _brain3DShowTorchHint(idx, clientX = brain3D.torchPointerX, clientY = brain3D.torchPointerY) {
+  const hint = document.getElementById('brain3d-torch-hint');
+  if (!hint || idx < 0) return;
+  const name = brain3D.names[idx];
+  const label = brain3D.labels[idx] || name || 'Playlist';
+  const count = _brain3DPlaylistTracks(name).length;
+  hint.innerHTML = `<strong>${_esc(label)}</strong><span>${count} songs revealed · double-click to inspect</span>`;
+  hint.style.left = `${Math.max(16, Math.min(window.innerWidth - 16, clientX || window.innerWidth / 2))}px`;
+  hint.style.top = `${Math.max(88, Math.min(window.innerHeight - 12, clientY || window.innerHeight / 2))}px`;
+  hint.style.display = 'block';
+}
+
+function _brain3DClearTorchSongs() {
+  if (brain3D.torchSongPoints?.parent) brain3D.torchSongPoints.parent.remove(brain3D.torchSongPoints);
+  brain3D.torchSongPoints = null;
+  brain3D.torchSongTracks = [];
+  brain3D.torchLastIndex = -1;
+  _brain3DHideTorchHint();
+}
+
+function _brain3DUpdateTorchSongs(idx) {
+  if (!brain3D.torchOn || brain3D.mode !== 'world' || idx < 0 || idx >= brain3D.names.length) {
+    _brain3DClearTorchSongs();
+    return;
+  }
+  if (brain3D.torchLastIndex === idx && brain3D.torchSongPoints) return;
+  _brain3DClearTorchSongs();
+
+  const THREE = brain3D.THREE;
+  const name = brain3D.names[idx];
+  const tracks = _brain3DPlaylistTracks(name).slice(0, window.innerWidth < 768 ? 220 : 420);
+  const dir = new THREE.Vector3(...brain3D.dirs[idx]).normalize();
+  const basisA = new THREE.Vector3(0, 1, 0).cross(dir);
+  if (basisA.lengthSq() < 0.01) basisA.set(1, 0, 0);
+  basisA.normalize();
+  const basisB = dir.clone().cross(basisA).normalize();
+  const baseColor = _hexToThreeColor(THREE, playlistColors[name] || '#fde68a');
+  const positions = [];
+  const colors = [];
+
+  tracks.forEach((track, i) => {
+    const angle = i * 2.399963229728653;
+    const ring = Math.sqrt((i + 0.5) / Math.max(tracks.length, 1));
+    const spread = 0.055 + ring * 0.38;
+    const jitter = basisA.clone().multiplyScalar(Math.cos(angle) * spread)
+      .add(basisB.clone().multiplyScalar(Math.sin(angle) * spread * 0.82));
+    const pd = dir.clone().add(jitter).normalize();
+    const surface = _brain3DSurfacePos(THREE, [pd.x, pd.y, pd.z], 1.055 + (i % 5) * 0.006);
+    positions.push(surface.x, surface.y, surface.z);
+    const hueShift = (i % 9) / 9;
+    const c = baseColor.clone();
+    const hsl = {};
+    c.getHSL(hsl);
+    c.setHSL((hsl.h + hueShift * 0.16) % 1, Math.min(1, hsl.s + 0.28), Math.min(0.78, hsl.l + 0.22));
+    colors.push(c.r, c.g, c.b);
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const material = new THREE.PointsMaterial({
+    size: window.innerWidth < 768 ? 0.045 : 0.035,
+    vertexColors: true,
+    transparent: true,
+    opacity: 1,
+    sizeAttenuation: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const pts = new THREE.Points(geometry, material);
+  pts.userData = { type: 'torchSongs', tracks };
+  brain3D.group.add(pts);
+  brain3D.torchSongPoints = pts;
+  brain3D.torchSongTracks = tracks;
+  brain3D.torchLastIndex = idx;
+}
+
+function _brain3DSetTorchMode(on) {
+  brain3D.torchOn = !!on;
+  _brain3DUpdateTorchButton();
+  if (!brain3D.torchOn || brain3D.mode !== 'world') {
+    _brain3DClearTorchSongs();
+    return;
+  }
+  _brain3DSetHud(['Torch on', 'Hover a playlist', 'Double-click to inspect']);
+  _brain3DUpdateTorchSongs(brain3D.hoverIndex);
+  if (brain3D.hoverIndex >= 0) _brain3DShowTorchHint(brain3D.hoverIndex);
+}
+
 function _brain3DMakeStars(THREE) {
   const positions = [];
   for (let i = 0; i < 1200; i++) {
@@ -3616,7 +3789,7 @@ function _brain3DUpdateNav() {
   if (!nav || !main || !sub) return;
   if (brain3D.mode === 'world') {
     nav.style.display = 'none';
-    _brain3DSetHud(['Drag to rotate', 'Scroll to zoom', 'Double-tap a playlist']);
+    _brain3DSetHud(brain3D.torchOn ? ['Torch on', 'Hover a playlist', 'Double-click to inspect'] : ['Drag to rotate', 'Scroll to zoom', 'Double-tap a playlist']);
     return;
   }
   nav.style.display = 'flex';
@@ -3855,6 +4028,23 @@ function _brain3DSetLabels(items) {
     el.textContent = item.text;
     if (Number.isInteger(item.index)) {
       el.dataset.index = String(item.index);
+      if (item.kind === 'playlist') {
+        el.addEventListener('pointerenter', event => {
+          if (brain3D.mode !== 'world') return;
+          brain3D.hoverIndex = item.index;
+          if (brain3D.torchOn) {
+            _brain3DUpdateTorchSongs(item.index);
+            _brain3DShowTorchHint(item.index, event.clientX, event.clientY);
+          }
+        });
+        el.addEventListener('pointermove', event => {
+          if (brain3D.mode === 'world' && brain3D.torchOn) _brain3DShowTorchHint(item.index, event.clientX, event.clientY);
+        });
+        el.addEventListener('pointerleave', () => {
+          if (brain3D.mode !== 'world') return;
+          if (brain3D.torchOn) _brain3DClearTorchSongs();
+        });
+      }
       el.addEventListener('click', event => {
         event.stopPropagation();
         event.preventDefault();
@@ -4105,6 +4295,8 @@ function _brain3DMakePlaylistDetail(idx) {
 
 function _brain3DEnterPlaylist(idx) {
   if (idx < 0 || idx >= brain3D.names.length) return;
+  _brain3DClearTorchSongs();
+  _brain3DHideTorchHint();
   brain3D.worldView = { yaw: brain3D.yaw, pitch: brain3D.pitch, distance: brain3D.distance };
   brain3D.mode = 'playlist';
   brain3D.activePlaylistIndex = idx;
@@ -4138,6 +4330,7 @@ function _brain3DReturnWorld() {
   _brain3DHideSongCard();
   _brain3DHidePlaylistPanel();
   _brain3DSetWorldLabels();
+  if (brain3D.torchOn) _brain3DUpdateTorchSongs(brain3D.hoverIndex);
   _brain3DUpdateNav();
   _brain3DStartCameraTween(brain3D.worldView || { yaw: 0, pitch: 0.1, distance: 4.2 }, 850);
 }
@@ -4267,6 +4460,7 @@ function _rebuildBrain3DScene() {
   brain3D.names = data.names;
   if (brain3D.stars?.parent) brain3D.stars.parent.remove(brain3D.stars);
   if (brain3D.detailGroup?.parent) brain3D.detailGroup.parent.remove(brain3D.detailGroup);
+  _brain3DClearTorchSongs();
   _brain3DHidePlaylistPanel();
   brain3D.mode = 'world';
   brain3D.activePlaylistIndex = -1;
@@ -4275,6 +4469,9 @@ function _rebuildBrain3DScene() {
   brain3D.detailTween = null;
   brain3D.detailSongPoints = null;
   brain3D.detailTracks = [];
+  brain3D.torchSongPoints = null;
+  brain3D.torchSongTracks = [];
+  brain3D.torchLastIndex = -1;
   brain3D.artistMeshes = [];
   brain3D.artistData = [];
   brain3D.group.clear();
@@ -4354,6 +4551,8 @@ function _brain3DHitLobe(point) {
 
 function _brain3DHandleTapAt(clientX, clientY, forceOpen = false, ignoreSuppress = false) {
   if (!brain3D.ready) return;
+  brain3D.torchPointerX = clientX;
+  brain3D.torchPointerY = clientY;
   if (!ignoreSuppress && performance.now() < brain3D.suppressClickUntil && !forceOpen) return;
   _brain3DSetPointer({ clientX, clientY });
   brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
@@ -4379,13 +4578,21 @@ function _brain3DHandleTapAt(clientX, clientY, forceOpen = false, ignoreSuppress
     return;
   }
   brain3D.hoverIndex = idx;
+  if (brain3D.torchOn) {
+    _brain3DUpdateTorchSongs(idx);
+    _brain3DShowTorchHint(idx, clientX, clientY);
+  }
   brain3D.lastWorldTapAt = now;
   brain3D.lastWorldTapIndex = idx;
-  _brain3DSetHud(['Playlist selected', 'Tap again to lift it', brain3D.labels[idx] || brain3D.names[idx]]);
+  _brain3DSetHud(brain3D.torchOn
+    ? ['Torch locked', 'Songs revealed', 'Double-click to inspect']
+    : ['Playlist selected', 'Tap again to lift it', brain3D.labels[idx] || brain3D.names[idx]]);
 }
 
 function _brain3DPointerMove(e) {
   if (!brain3D.ready) return;
+  brain3D.torchPointerX = e.clientX;
+  brain3D.torchPointerY = e.clientY;
   _brain3DSetPointer(e);
   brain3D.raycaster.setFromCamera(brain3D.pointer, brain3D.camera);
   const tooltip = document.getElementById('track-tooltip');
@@ -4403,6 +4610,11 @@ function _brain3DPointerMove(e) {
   tooltip.classList.remove('visible');
   const brainHits = brain3D.brainMesh ? brain3D.raycaster.intersectObject(brain3D.brainMesh) : [];
   brain3D.hoverIndex = brainHits.length ? _brain3DHitLobe(brainHits[0].point) : -1;
+  if (brain3D.torchOn) {
+    _brain3DUpdateTorchSongs(brain3D.hoverIndex);
+    if (brain3D.hoverIndex >= 0) _brain3DShowTorchHint(brain3D.hoverIndex, e.clientX, e.clientY);
+    else _brain3DHideTorchHint();
+  }
   document.getElementById('brain3d-canvas').style.cursor = brain3D.hoverIndex >= 0 ? 'pointer' : 'grab';
 }
 
@@ -4463,6 +4675,7 @@ function _wireBrain3DInput(el) {
     brain3D.dragging = false;
     brain3D.hoverIndex = -1;
     brain3D.hoverTrack = null;
+    if (brain3D.torchOn) _brain3DClearTorchSongs();
     el.classList.remove('dragging');
     document.getElementById('track-tooltip').classList.remove('visible');
   });
@@ -4513,6 +4726,7 @@ function _showBrain3DOverlay() {
   overlay.setAttribute('aria-hidden', 'false');
   canvas.style.opacity = '0';
   _updateBrain3DButton();
+  _brain3DUpdateTorchButton();
   if (!brain3D.ready && !brain3D.failed) _initBrain3D().then(() => {
     _resizeBrain3D();
     if (!brain3D.raf && brain3D.ready) _brain3DAnimate();
@@ -4535,6 +4749,7 @@ function _hideBrain3DOverlay() {
     overlay.setAttribute('aria-hidden', 'true');
   }
   document.getElementById('track-tooltip')?.classList.remove('visible');
+  _brain3DClearTorchSongs();
   _brain3DHideSongCard();
   _brain3DHidePlaylistPanel();
   const nav = document.getElementById('brain3d-nav');
@@ -7247,6 +7462,10 @@ document.getElementById('mobile-more-rebuild')?.addEventListener('click', () => 
 document.getElementById('mobile-more-delete')?.addEventListener('click', () => { _closeMobileMore(); _clickById('btn-delete-data'); });
 
 document.getElementById('brain3d-back')?.addEventListener('click', _brain3DReturnWorld);
+document.getElementById('brain3d-torch-toggle')?.addEventListener('click', event => {
+  event.stopPropagation();
+  _brain3DSetTorchMode(!brain3D.torchOn);
+});
 
 document.getElementById('btn-brain3d')?.addEventListener('click', () => {
   chartMode = false;
