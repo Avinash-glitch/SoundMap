@@ -10,7 +10,7 @@ import requests as _requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import forget_user_credentials, router as auth_router, refresh_access_token
@@ -49,6 +49,21 @@ def _parse_llm_json(raw: str) -> dict:
 
 
 app = FastAPI(title="SoundMap")
+
+CANONICAL_HOST = os.environ.get("CANONICAL_HOST", "soundmap.avibuildsstuff.com")
+LEGACY_HOSTS = {"web-production-7b33.up.railway.app"}
+
+
+@app.middleware("http")
+async def redirect_legacy_hosts(request: Request, call_next):
+    """Send old Railway URLs to the public SoundMap domain."""
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(":")[0]
+    if CANONICAL_HOST and host in LEGACY_HOSTS:
+        target = f"https://{CANONICAL_HOST}{request.url.path}"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=308)
+    return await call_next(request)
 
 app.add_middleware(
     SessionMiddleware,
