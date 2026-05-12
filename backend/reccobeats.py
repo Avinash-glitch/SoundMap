@@ -37,7 +37,11 @@ DEFAULT_HEADERS = {
 
 def _normalise_features(data: dict) -> dict:
     """Return the numeric feature subset SoundMap currently cares about."""
-    return {key: float(data.get(key, 0)) for key in FEATURE_KEYS}
+    out = {}
+    for key in FEATURE_KEYS:
+        value = data.get(key, 0)
+        out[key] = 0.0 if value is None else float(value)
+    return out
 
 
 def _spotify_id_from_href(href: str) -> str:

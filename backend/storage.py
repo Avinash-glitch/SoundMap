@@ -138,15 +138,19 @@ def save_track_audio_features(rows: list[dict]) -> None:
 
 def load_track_audio_features(spotify_ids: list[str]) -> dict[str, dict]:
     """Return cached audio features keyed by Spotify track ID."""
-    clean_ids = [str(sid).strip() for sid in spotify_ids if str(sid or "").strip()]
+    clean_ids = list(dict.fromkeys(str(sid).strip() for sid in spotify_ids if str(sid or "").strip()))
     if not clean_ids:
         return {}
 
     sb = _get_supabase()
     if sb:
         try:
-            result = sb.table("track_audio_features").select("*").in_("spotify_id", clean_ids).execute()
-            return {row["spotify_id"]: row for row in (result.data or []) if row.get("spotify_id")}
+            rows: dict[str, dict] = {}
+            for start in range(0, len(clean_ids), 200):
+                batch = clean_ids[start:start + 200]
+                result = sb.table("track_audio_features").select("*").in_("spotify_id", batch).execute()
+                rows.update({row["spotify_id"]: row for row in (result.data or []) if row.get("spotify_id")})
+            return rows
         except Exception as e:
             print(f"[storage] Supabase audio feature load failed, falling back to file: {e}")
 
