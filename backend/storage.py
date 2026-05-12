@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 STORAGE_DIR = Path("./user_data")
+AUDIO_FEATURE_CACHE = STORAGE_DIR / "track_audio_features.json"
 
 _supabase = None
 
@@ -61,6 +62,87 @@ def delete_map(user_id: str) -> bool:
         p.unlink()
         deleted = True
     return deleted
+
+
+def save_track_audio_features(rows: list[dict]) -> None:
+    """
+    Persist per-track audio features separately from user map data.
+
+    Supabase table expected:
+      track_audio_features(spotify_id text primary key, reccobeats_id text,
+      href text, isrc text, acousticness numeric, danceability numeric,
+      energy numeric, instrumentalness numeric, liveness numeric,
+      loudness numeric, speechiness numeric, tempo numeric, valence numeric,
+      musical_key int, musical_mode int, raw jsonb, updated_at timestamptz)
+    """
+    clean_rows = []
+    for row in rows:
+        spotify_id = str(row.get("spotify_id") or "").strip()
+        if not spotify_id:
+            continue
+        clean_rows.append({
+            "spotify_id": spotify_id,
+            "reccobeats_id": row.get("reccobeats_id"),
+            "href": row.get("href"),
+            "isrc": row.get("isrc"),
+            "acousticness": row.get("acousticness"),
+            "danceability": row.get("danceability"),
+            "energy": row.get("energy"),
+            "instrumentalness": row.get("instrumentalness"),
+            "liveness": row.get("liveness"),
+            "loudness": row.get("loudness"),
+            "speechiness": row.get("speechiness"),
+            "tempo": row.get("tempo"),
+            "valence": row.get("valence"),
+            "musical_key": row.get("musical_key"),
+            "musical_mode": row.get("musical_mode"),
+            "raw": row.get("raw") or {},
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+    if not clean_rows:
+        return
+
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("track_audio_features").upsert(clean_rows, on_conflict="spotify_id").execute()
+            return
+        except Exception as e:
+            print(f"[storage] Supabase audio feature save failed, falling back to file: {e}")
+
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    existing = {}
+    if AUDIO_FEATURE_CACHE.exists():
+        try:
+            existing = json.loads(AUDIO_FEATURE_CACHE.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+    for row in clean_rows:
+        existing[row["spotify_id"]] = row
+    AUDIO_FEATURE_CACHE.write_text(json.dumps(existing), encoding="utf-8")
+
+
+def load_track_audio_features(spotify_ids: list[str]) -> dict[str, dict]:
+    """Return cached audio features keyed by Spotify track ID."""
+    clean_ids = [str(sid).strip() for sid in spotify_ids if str(sid or "").strip()]
+    if not clean_ids:
+        return {}
+
+    sb = _get_supabase()
+    if sb:
+        try:
+            result = sb.table("track_audio_features").select("*").in_("spotify_id", clean_ids).execute()
+            return {row["spotify_id"]: row for row in (result.data or []) if row.get("spotify_id")}
+        except Exception as e:
+            print(f"[storage] Supabase audio feature load failed, falling back to file: {e}")
+
+    if not AUDIO_FEATURE_CACHE.exists():
+        return {}
+    try:
+        existing = json.loads(AUDIO_FEATURE_CACHE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return {sid: existing[sid] for sid in clean_ids if sid in existing}
 
 
 def load_map(user_id: str) -> dict | None:

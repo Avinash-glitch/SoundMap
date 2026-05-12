@@ -69,6 +69,9 @@ def process_user(
     progress(30, f"Processing {len(tracks)} tracks across {len(playlist_meta)} playlists…")
 
     # ---- 3. Embeddings ----------------------------------------------------
+    progress(32, "Fetching audio characteristics…")
+    _attach_reccobeats_features(tracks, spotify_token=spotify_token, on_progress=progress)
+
     progress(35, "Analysing your music…")
     embeddings, track_genres = _genre_embeddings(tracks, headers, on_progress=progress)
 
@@ -200,6 +203,59 @@ def _collect_tracks(headers: dict, progress: Callable, user_id: str = "", stop_e
     min_score = min((t["play_score"] for t in tracks), default=1)
     print(f"[pipeline] {len(all_candidates)} total tracks (range {min_score}–{max_score}), {tagged} in playlists, {with_preview} previews, {len(remaining_slim)} remaining")
     return tracks, playlist_meta, pl_track_samples, remaining_slim
+
+
+def _attach_reccobeats_features(
+    tracks: list[dict],
+    spotify_token: str | None = None,
+    on_progress: Callable | None = None,
+) -> None:
+    """Attach ReccoBeats audio features to track dicts in-place when available."""
+    if not tracks:
+        return
+    try:
+        from .reccobeats import get_audio_features_for_tracks
+        feature_map = get_audio_features_for_tracks(tracks, spotify_token=spotify_token)
+    except Exception as exc:
+        print(f"[pipeline] ReccoBeats enrichment skipped ({exc})")
+        if on_progress:
+            on_progress(34, "Audio characteristics unavailable — continuing…")
+        return
+
+    for track in tracks:
+        enriched = feature_map.get(str(track.get("id") or ""))
+        if not enriched:
+            continue
+        track["spotify_id"] = enriched.get("spotify_id") or track.get("spotify_id") or track.get("id")
+        track["audio_feature_id"] = track["spotify_id"]
+        track["audio_feature_source"] = "reccobeats"
+        if enriched.get("key") is not None:
+            track["musical_key"] = enriched["key"]
+        if enriched.get("mode") is not None:
+            track["musical_mode"] = enriched["mode"]
+
+    feature_rows = []
+    for enriched in feature_map.values():
+        spotify_id = enriched.get("spotify_id")
+        features = enriched.get("features") or {}
+        if not spotify_id or not features:
+            continue
+        feature_rows.append({
+            "spotify_id": spotify_id,
+            "reccobeats_id": enriched.get("reccobeats_id"),
+            "href": enriched.get("href"),
+            "isrc": enriched.get("isrc"),
+            "musical_key": enriched.get("key"),
+            "musical_mode": enriched.get("mode"),
+            "raw": enriched,
+            **features,
+        })
+    storage.save_track_audio_features(feature_rows)
+
+    attached = sum(1 for t in tracks if t.get("audio_feature_id"))
+    print(f"[pipeline] ReccoBeats features attached for {attached}/{len(tracks)} tracks")
+    if on_progress:
+        on_progress(34, f"Audio characteristics attached for {attached}/{len(tracks)} tracks…")
 
 
 def _spotify_get(url: str, headers: dict, params: dict | None = None, retries: int = 3) -> requests.Response:
@@ -940,6 +996,9 @@ def process_apple_user(
     )
     if not tracks:
         raise RuntimeError("No tracks found in your Apple Music library.")
+
+    progress(56, "Matching audio characteristics…")
+    _attach_reccobeats_features(tracks, spotify_token=None, on_progress=progress)
 
     progress(58, f"Analysing {len(tracks)} tracks…")
     embeddings, track_genres = _apple_genre_embeddings(tracks)

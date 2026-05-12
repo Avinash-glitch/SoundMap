@@ -1238,6 +1238,145 @@ async def get_map(user_id: str, request: Request) -> JSONResponse:
     return JSONResponse(data)
 
 
+def _can_read_map(map_data: dict, requested_user_id: str, session_user_id: str | None) -> bool:
+    """Apply the same privacy check used by /map/{user_id}."""
+    allowed_ids = {session_user_id, f"{session_user_id}_apple" if session_user_id else None}
+    return map_data.get("share_for_comparison") is not False or requested_user_id in allowed_ids
+
+
+@app.post("/audio-features/reccobeats")
+async def reccobeats_audio_features(request: Request) -> JSONResponse:
+    """
+    Fetch or extract ReccoBeats audio features.
+
+    Body can be either:
+    - {"track_id": "..."} or {"track_ids": ["..."]} for Spotify/ReccoBeats stored features
+    - {"tracks": [{id, name, artist, isrc}, ...]} for Apple/other catalog resolution
+    - {"track_id": "...", "user_id": "..."} to include track metadata from stored map data
+    - {"preview_url": "https://p.scdn.co/..."} to run file-based extraction
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    preview_url = str(body.get("preview_url") or "").strip()
+    track_id = str(body.get("track_id") or "").strip()
+    track_ids = body.get("track_ids") or ([track_id] if track_id else [])
+    if isinstance(track_ids, str):
+        track_ids = [track_ids]
+    if not isinstance(track_ids, list):
+        raise HTTPException(status_code=400, detail="track_ids must be a list")
+    user_id = str(body.get("user_id") or "").strip()
+    track_meta: dict = {}
+    track_objects = body.get("tracks") or []
+    if track_objects and not isinstance(track_objects, list):
+        raise HTTPException(status_code=400, detail="tracks must be a list")
+
+    if track_id and user_id:
+        requested_user_id = user_id or str(request.session.get("user_id") or "")
+        map_data = storage.load_map(requested_user_id)
+        if not map_data:
+            raise HTTPException(status_code=404, detail="Map not found")
+        if not _can_read_map(map_data, requested_user_id, request.session.get("user_id")):
+            raise HTTPException(status_code=403, detail="This user has made their mind map private")
+
+        point = next((p for p in map_data.get("points", []) if p.get("id") == track_id), None)
+        if not point:
+            raise HTTPException(status_code=404, detail="Track not found in map")
+        preview_url = str(point.get("preview_url") or "").strip()
+        track_meta = {
+            "id": point.get("id"),
+            "name": point.get("name"),
+            "artist": point.get("artist"),
+            "isrc": point.get("isrc"),
+            "spotify_id": point.get("spotify_id"),
+            "preview_url": preview_url,
+        }
+        track_objects = [track_meta]
+
+    from .reccobeats import FEATURE_KEYS, extract_audio_features_from_url, get_audio_features_for_ids, get_audio_features_for_tracks
+
+    if track_objects:
+        try:
+            spotify_token = request.session.get("access_token")
+            loop = asyncio.get_running_loop()
+            feature_map = await loop.run_in_executor(None, get_audio_features_for_tracks, track_objects, spotify_token)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        if not feature_map:
+            raise HTTPException(status_code=404, detail="Audio features not found for supplied track(s)")
+        storage.save_track_audio_features([
+            {
+                "spotify_id": data.get("spotify_id"),
+                "reccobeats_id": data.get("reccobeats_id"),
+                "href": data.get("href"),
+                "isrc": data.get("isrc"),
+                "musical_key": data.get("key"),
+                "musical_mode": data.get("mode"),
+                "raw": data,
+                **(data.get("features") or {}),
+            }
+            for data in feature_map.values()
+        ])
+        return JSONResponse({
+            "source": "reccobeats",
+            "method": "spotify_search" if any(str(t.get("id") or "") != v.get("spotify_id") for t in track_objects for v in [feature_map.get(str(t.get("id") or ""), {})]) else "lookup",
+            "features": feature_map,
+            "track": track_meta,
+        })
+
+    if track_ids:
+        try:
+            loop = asyncio.get_running_loop()
+            features = await loop.run_in_executor(None, get_audio_features_for_ids, track_ids)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        if not features:
+            raise HTTPException(status_code=404, detail="Audio features not found for supplied track id(s)")
+        storage.save_track_audio_features([
+            {
+                "spotify_id": row.get("spotify_id"),
+                "reccobeats_id": row.get("id"),
+                "href": row.get("href"),
+                "isrc": row.get("isrc"),
+                "musical_key": row.get("key"),
+                "musical_mode": row.get("mode"),
+                "raw": row,
+                **{key: row.get(key) for key in FEATURE_KEYS if key in row},
+            }
+            for row in features
+        ])
+        return JSONResponse({
+            "source": "reccobeats",
+            "method": "lookup",
+            "features": features[0] if len(features) == 1 else features,
+            "track": track_meta or ({"id": track_id} if track_id else {}),
+        })
+
+    if not preview_url:
+        raise HTTPException(status_code=400, detail="preview_url or track_id required")
+
+    try:
+        loop = asyncio.get_running_loop()
+        features = await loop.run_in_executor(None, extract_audio_features_from_url, preview_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return JSONResponse({
+        "source": "reccobeats",
+        "method": "extract",
+        "features": features,
+        "track": track_meta or {"preview_url": preview_url},
+    })
+
+
 def _resolve_to_spotify_uris(tracks: list[dict], h: dict) -> list[str]:
     """
     Convert a list of track dicts to spotify:track:ID URIs.
