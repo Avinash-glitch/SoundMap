@@ -77,7 +77,9 @@ def save_track_audio_features(rows: list[dict]) -> None:
       href text, isrc text, acousticness numeric, danceability numeric,
       energy numeric, instrumentalness numeric, liveness numeric,
       loudness numeric, speechiness numeric, tempo numeric, valence numeric,
-      musical_key int, musical_mode int, raw jsonb, updated_at timestamptz)
+      musical_key int, musical_mode int, track_name text, artist text,
+      album text, playlists jsonb, playlist_names text[], raw jsonb,
+      updated_at timestamptz)
     """
     clean_rows = []
     for row in rows:
@@ -89,6 +91,11 @@ def save_track_audio_features(rows: list[dict]) -> None:
             "reccobeats_id": row.get("reccobeats_id"),
             "href": row.get("href"),
             "isrc": row.get("isrc"),
+            "track_name": row.get("track_name") or row.get("name"),
+            "artist": row.get("artist"),
+            "album": row.get("album"),
+            "playlists": row.get("playlists") or [],
+            "playlist_names": row.get("playlist_names") or row.get("playlists") or [],
             "acousticness": row.get("acousticness"),
             "danceability": row.get("danceability"),
             "energy": row.get("energy"),

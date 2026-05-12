@@ -96,6 +96,7 @@ def _normalise_track(point: dict) -> dict:
         "name": point.get("name"),
         "artist": point.get("artist"),
         "album": point.get("album"),
+        "playlists": point.get("playlists") or [],
     }
 
 
@@ -118,6 +119,7 @@ def _load_tracks_from_csv(path: str) -> list[dict]:
                 "name": _clean_csv_value(row.get("name")),
                 "artist": _clean_csv_value(row.get("artist")),
                 "album": _clean_csv_value(row.get("album")),
+                "playlists": [],
             }
             if not track["spotify_id"] and SPOTIFY_ID_RE.match(track["id"]):
                 track["spotify_id"] = track["id"]
@@ -146,12 +148,13 @@ def _collect_unique_tracks(map_rows: list[dict]) -> list[dict]:
 
 def _feature_rows(feature_map: dict[str, dict]) -> list[dict]:
     rows = []
-    for enriched in feature_map.values():
+    for source_id, enriched in feature_map.items():
         spotify_id = enriched.get("spotify_id")
         features = enriched.get("features") or {}
         if not spotify_id or not features:
             continue
         rows.append({
+            "_source_id": source_id,
             "spotify_id": spotify_id,
             "reccobeats_id": enriched.get("reccobeats_id"),
             "href": enriched.get("href"),
@@ -160,6 +163,44 @@ def _feature_rows(feature_map: dict[str, dict]) -> list[dict]:
             "musical_mode": enriched.get("mode"),
             "raw": enriched,
             **{key: features.get(key) for key in FEATURE_KEYS},
+        })
+    return rows
+
+
+def _merge_track_metadata(rows: list[dict], batch: list[dict]) -> list[dict]:
+    """Attach track name, artist, album, and playlist names to feature rows."""
+    by_id = {str(track.get("id") or ""): track for track in batch}
+    by_spotify = {str(track.get("spotify_id") or ""): track for track in batch if track.get("spotify_id")}
+    out = []
+    for row in rows:
+        track = by_id.get(str(row.pop("_source_id", "") or "")) or by_spotify.get(str(row.get("spotify_id") or "")) or {}
+        playlists = track.get("playlists") or []
+        row.update({
+            "track_name": track.get("name"),
+            "artist": track.get("artist"),
+            "album": track.get("album"),
+            "playlists": playlists,
+            "playlist_names": playlists,
+        })
+        out.append(row)
+    return out
+
+
+def _metadata_rows_for_existing_tracks(tracks: list[dict]) -> list[dict]:
+    """Build metadata-only upsert rows for already cached feature IDs."""
+    rows = []
+    for track in tracks:
+        spotify_id = str(track.get("spotify_id") or "").strip()
+        if not spotify_id:
+            continue
+        playlists = track.get("playlists") or []
+        rows.append({
+            "spotify_id": spotify_id,
+            "track_name": track.get("name"),
+            "artist": track.get("artist"),
+            "album": track.get("album"),
+            "playlists": playlists,
+            "playlist_names": playlists,
         })
     return rows
 
@@ -211,6 +252,13 @@ def backfill_audio_features(
     print(f"[backfill] Already in track_audio_features by Spotify ID: {len(cached)}")
     print(f"[backfill] To process: {len(tracks_to_process)}")
 
+    if not dry_run:
+        metadata_rows = _metadata_rows_for_existing_tracks(tracks)
+        if metadata_rows:
+            for chunk in _chunks(metadata_rows, 100):
+                storage.save_track_audio_features(chunk)
+            print(f"[backfill] Metadata rows upserted: {len(metadata_rows)}")
+
     if dry_run:
         sample = tracks_to_process[:5]
         print("[backfill] Dry run only. Sample tracks:")
@@ -225,7 +273,7 @@ def backfill_audio_features(
         print(f"[backfill] Batch {index}: resolving {len(batch)} tracks")
         try:
             feature_map = get_audio_features_for_tracks(batch)
-            rows = _feature_rows(feature_map)
+            rows = _merge_track_metadata(_feature_rows(feature_map), batch)
             storage.save_track_audio_features(rows)
             resolved += len(feature_map)
             saved += len(rows)

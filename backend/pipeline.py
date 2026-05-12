@@ -234,17 +234,27 @@ def _attach_reccobeats_features(
         if enriched.get("mode") is not None:
             track["musical_mode"] = enriched["mode"]
 
+    track_meta_by_source = {str(t.get("id") or ""): t for t in tracks}
     feature_rows = []
     for enriched in feature_map.values():
         spotify_id = enriched.get("spotify_id")
         features = enriched.get("features") or {}
         if not spotify_id or not features:
             continue
+        source_track = next(
+            (track_meta_by_source[src_id] for src_id, data in feature_map.items() if data is enriched and src_id in track_meta_by_source),
+            {},
+        )
         feature_rows.append({
             "spotify_id": spotify_id,
             "reccobeats_id": enriched.get("reccobeats_id"),
             "href": enriched.get("href"),
             "isrc": enriched.get("isrc"),
+            "track_name": source_track.get("name"),
+            "artist": source_track.get("artist"),
+            "album": source_track.get("album"),
+            "playlists": source_track.get("playlists") or [],
+            "playlist_names": source_track.get("playlists") or [],
             "musical_key": enriched.get("key"),
             "musical_mode": enriched.get("mode"),
             "raw": enriched,
