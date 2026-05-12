@@ -86,30 +86,45 @@ def save_track_audio_features(rows: list[dict]) -> None:
         spotify_id = str(row.get("spotify_id") or "").strip()
         if not spotify_id:
             continue
-        clean_rows.append({
+        clean_row = {
             "spotify_id": spotify_id,
-            "reccobeats_id": row.get("reccobeats_id"),
-            "href": row.get("href"),
-            "isrc": row.get("isrc"),
-            "track_name": row.get("track_name") or row.get("name"),
-            "artist": row.get("artist"),
-            "album": row.get("album"),
-            "playlists": row.get("playlists") or [],
-            "playlist_names": row.get("playlist_names") or row.get("playlists") or [],
-            "acousticness": row.get("acousticness"),
-            "danceability": row.get("danceability"),
-            "energy": row.get("energy"),
-            "instrumentalness": row.get("instrumentalness"),
-            "liveness": row.get("liveness"),
-            "loudness": row.get("loudness"),
-            "speechiness": row.get("speechiness"),
-            "tempo": row.get("tempo"),
-            "valence": row.get("valence"),
-            "musical_key": row.get("musical_key"),
-            "musical_mode": row.get("musical_mode"),
-            "raw": row.get("raw") or {},
             "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        }
+
+        for key in ("reccobeats_id", "href", "isrc", "artist", "album", "musical_key", "musical_mode"):
+            if row.get(key) is not None:
+                clean_row[key] = row.get(key)
+
+        track_name = row.get("track_name") or row.get("name")
+        if track_name is not None:
+            clean_row["track_name"] = track_name
+
+        playlists = row.get("playlists")
+        playlist_names = row.get("playlist_names") or playlists
+        if playlists:
+            clean_row["playlists"] = playlists
+        if playlist_names:
+            clean_row["playlist_names"] = playlist_names
+
+        for key in (
+            "acousticness",
+            "danceability",
+            "energy",
+            "instrumentalness",
+            "liveness",
+            "loudness",
+            "speechiness",
+            "tempo",
+            "valence",
+        ):
+            if row.get(key) is not None:
+                clean_row[key] = row.get(key)
+
+        raw = row.get("raw")
+        if raw:
+            clean_row["raw"] = raw
+
+        clean_rows.append(clean_row)
     if not clean_rows:
         print("[storage] No valid audio feature rows to save")
         return
