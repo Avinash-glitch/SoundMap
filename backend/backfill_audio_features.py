@@ -16,10 +16,10 @@ For Apple/non-Spotify track resolution:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import time
 from pathlib import Path
-from typing import Any
 
 try:
     from dotenv import load_dotenv
@@ -99,6 +99,34 @@ def _normalise_track(point: dict) -> dict:
     }
 
 
+def _clean_csv_value(value: str | None) -> str:
+    """Normalize Supabase CSV null-ish values."""
+    value = str(value or "").strip()
+    return "" if value.lower() in {"null", "none", "nan"} else value
+
+
+def _load_tracks_from_csv(path: str) -> list[dict]:
+    """Load missing track rows exported from Supabase."""
+    tracks: dict[str, dict] = {}
+    with Path(path).expanduser().open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            track = {
+                "id": _clean_csv_value(row.get("track_id")) or _clean_csv_value(row.get("id")),
+                "spotify_id": _clean_csv_value(row.get("spotify_id")) or _clean_csv_value(row.get("audio_feature_id")),
+                "isrc": _clean_csv_value(row.get("isrc")),
+                "name": _clean_csv_value(row.get("name")),
+                "artist": _clean_csv_value(row.get("artist")),
+                "album": _clean_csv_value(row.get("album")),
+            }
+            if not track["spotify_id"] and SPOTIFY_ID_RE.match(track["id"]):
+                track["spotify_id"] = track["id"]
+            if not track["id"] and not track["name"]:
+                continue
+            tracks.setdefault(_track_key(track), track)
+    return list(tracks.values())
+
+
 def _collect_unique_tracks(map_rows: list[dict]) -> list[dict]:
     tracks: dict[str, dict] = {}
     for row in map_rows:
@@ -143,6 +171,7 @@ def _chunks(items: list[dict], size: int) -> list[list[dict]]:
 def backfill_audio_features(
     *,
     user_id: str | None = None,
+    csv_path: str | None = None,
     batch_size: int = 40,
     limit: int | None = None,
     dry_run: bool = False,
@@ -151,13 +180,17 @@ def backfill_audio_features(
     """Backfill audio features from existing maps."""
     _load_env()
 
-    map_rows = _iter_supabase_maps(user_id=user_id)
-    source = "Supabase"
-    if not map_rows:
-        map_rows = _iter_local_maps(user_id=user_id)
-        source = "local user_data"
-
-    tracks = _collect_unique_tracks(map_rows)
+    map_rows = []
+    if csv_path:
+        tracks = _load_tracks_from_csv(csv_path)
+        source = f"CSV: {csv_path}"
+    else:
+        map_rows = _iter_supabase_maps(user_id=user_id)
+        source = "Supabase"
+        if not map_rows:
+            map_rows = _iter_local_maps(user_id=user_id)
+            source = "local user_data"
+        tracks = _collect_unique_tracks(map_rows)
     if limit:
         tracks = tracks[:limit]
 
@@ -172,7 +205,8 @@ def backfill_audio_features(
     ]
 
     print(f"[backfill] Source: {source}")
-    print(f"[backfill] Maps: {len(map_rows)}")
+    if not csv_path:
+        print(f"[backfill] Maps: {len(map_rows)}")
     print(f"[backfill] Unique tracks: {len(tracks)}")
     print(f"[backfill] Already in track_audio_features by Spotify ID: {len(cached)}")
     print(f"[backfill] To process: {len(tracks_to_process)}")
@@ -211,6 +245,7 @@ def backfill_audio_features(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Backfill track_audio_features from existing user_maps")
     parser.add_argument("--user-id", help="Only process one user_id")
+    parser.add_argument("--csv", dest="csv_path", help="Process a Supabase CSV export instead of reading user_maps")
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--limit", type=int, help="Process at most N unique tracks")
     parser.add_argument("--dry-run", action="store_true")
@@ -219,6 +254,7 @@ def main() -> None:
 
     backfill_audio_features(
         user_id=args.user_id,
+        csv_path=args.csv_path,
         batch_size=max(args.batch_size, 1),
         limit=args.limit,
         dry_run=args.dry_run,
