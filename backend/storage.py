@@ -17,7 +17,11 @@ def _get_supabase():
     if _supabase is not None:
         return _supabase
     url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_KEY")
+    key = (
+        os.environ.get("SUPABASE_KEY")
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("SUPABASE_ANON_KEY")
+    )
     if not url or not key:
         return None
     try:
@@ -100,12 +104,14 @@ def save_track_audio_features(rows: list[dict]) -> None:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
     if not clean_rows:
+        print("[storage] No valid audio feature rows to save")
         return
 
     sb = _get_supabase()
     if sb:
         try:
             sb.table("track_audio_features").upsert(clean_rows, on_conflict="spotify_id").execute()
+            print(f"[storage] Saved {len(clean_rows)} audio feature rows to Supabase")
             return
         except Exception as e:
             print(f"[storage] Supabase audio feature save failed, falling back to file: {e}")
@@ -120,6 +126,7 @@ def save_track_audio_features(rows: list[dict]) -> None:
     for row in clean_rows:
         existing[row["spotify_id"]] = row
     AUDIO_FEATURE_CACHE.write_text(json.dumps(existing), encoding="utf-8")
+    print(f"[storage] Saved {len(clean_rows)} audio feature rows to local cache")
 
 
 def load_track_audio_features(spotify_ids: list[str]) -> dict[str, dict]:
