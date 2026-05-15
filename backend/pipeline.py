@@ -1042,6 +1042,83 @@ def process_apple_user(
     return map_data
 
 
+def process_youtube_music_user(
+    user_id: str,
+    on_progress=None,
+    force: bool = False,
+    share_for_comparison: bool = True,
+) -> dict:
+    """
+    Full pipeline for a YouTube Music library.
+    Saves map as '{user_id}_youtube' in storage.
+    """
+    from .youtube_music import fetch_youtube_music_library
+
+    def progress(pct: int, msg: str) -> None:
+        if on_progress:
+            on_progress(pct, msg)
+        print(f"[youtube-pipeline] {pct:3d}% — {msg}")
+
+    base_user_id = user_id[:-8] if user_id.endswith("_youtube") else user_id
+    youtube_id = f"{base_user_id}_youtube"
+
+    if not force and storage.map_exists(youtube_id) and storage.map_age_hours(youtube_id) < 24:
+        progress(100, "Loaded from cache.")
+        cached = storage.load_map(youtube_id)
+        if cached is not None and cached.get("share_for_comparison", True) != bool(share_for_comparison):
+            cached["share_for_comparison"] = bool(share_for_comparison)
+            storage.save_map(youtube_id, cached)
+        return cached
+
+    progress(5, "Connecting to YouTube Music…")
+    tracks, playlist_meta = fetch_youtube_music_library(
+        base_user_id,
+        on_progress=lambda msg: progress(12, msg),
+    )
+    if not tracks:
+        raise RuntimeError("No tracks found in your YouTube Music library.")
+
+    progress(45, "Matching audio characteristics…")
+    _attach_reccobeats_features(tracks, spotify_token=None, on_progress=progress)
+
+    progress(58, f"Analysing {len(tracks)} tracks…")
+    embeddings, track_genres = _apple_genre_embeddings(tracks)
+
+    progress(75, "Running UMAP…")
+    coords = _run_umap(embeddings)
+
+    progress(90, "Building map…")
+    playlist_track_ids = {t["id"] for t in tracks if t.get("playlists")}
+    remaining_slim = [
+        {
+            "id": t["id"],
+            "name": t["name"],
+            "artist": t["artist"],
+            "album_art": t.get("album_art") or "",
+            "external_url": t.get("external_url") or "",
+            "youtube_music_url": t.get("youtube_music_url") or "",
+            "youtube_music_id": t.get("youtube_music_id") or t.get("id"),
+            "duration_ms": t.get("duration_ms") or 0,
+        }
+        for t in tracks if t["id"] not in playlist_track_ids
+    ]
+
+    map_data = _build_map_data(
+        tracks,
+        coords,
+        track_genres,
+        display_name="YouTube Music Library",
+        playlist_meta=playlist_meta,
+        remaining=remaining_slim,
+    )
+    map_data["source"] = "youtube_music"
+    map_data["share_for_comparison"] = bool(share_for_comparison)
+
+    storage.save_map(youtube_id, map_data)
+    progress(100, "Done!")
+    return map_data
+
+
 def _build_map_data(
     tracks: list[dict],
     coords: np.ndarray,

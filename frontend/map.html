@@ -2727,6 +2727,10 @@ function _isAppleMap() {
   return userId.endsWith('_apple') || mapData?.source === 'apple';
 }
 
+function _isYouTubeMusicMap() {
+  return userId.endsWith('_youtube') || (mapData?.source || '').toLowerCase() === 'youtube_music';
+}
+
 function _appleMusicSessionPayload() {
   if (typeof MusicKit === 'undefined' || typeof MusicKit.getInstance !== 'function') return {};
   try {
@@ -2745,6 +2749,13 @@ function _trackServiceUrl(track) {
   const name = track?.name || '';
   const artist = track?.artist || '';
   const query = encodeURIComponent(`${name} ${artist}`.trim());
+  if (_isYouTubeMusicMap()) {
+    const direct = track?.youtube_music_url || track?.external_url || track?.url;
+    if (direct && /music\.youtube\.com|youtube\.com/.test(direct)) return direct;
+    const videoId = track?.youtube_music_id || track?.videoId || track?.video_id || track?.id;
+    if (videoId) return `https://music.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    return query ? `https://music.youtube.com/search?q=${query}` : 'https://music.youtube.com/';
+  }
   if (_isAppleMap()) {
     const direct = track?.apple_music_url || track?.external_url || track?.url;
     if (direct && /music\.apple\.com/.test(direct)) return direct;
@@ -2758,6 +2769,7 @@ function _trackServiceUrl(track) {
 }
 
 function _trackServiceLabel() {
+  if (_isYouTubeMusicMap()) return 'Open in YouTube Music';
   return _isAppleMap() ? 'Open in Apple Music' : 'Open in Spotify';
 }
 
@@ -2781,6 +2793,16 @@ async function _spotifyImportTargetPayload() {
     throw new Error('Log in with your own Spotify account before importing playlists.');
   }
   return { target_user_id: me.user_id, target_display_name: me.display_name || me.user_id };
+}
+
+function _importProviderLabel() {
+  if (_isYouTubeMusicMap()) return 'YouTube Music';
+  return _isAppleMap() ? 'Apple Music' : 'Spotify';
+}
+
+function _importEndpoint() {
+  if (_isYouTubeMusicMap()) return '/import-to-youtube';
+  return _isAppleMap() ? '/import-to-apple' : '/import-friend-playlist';
 }
 
 // Brain map state
@@ -2852,8 +2874,22 @@ async function loadMap() {
       const uidEl = document.getElementById('uid-display');
       if (uidEl) uidEl.textContent = userId;
     }
-    // Show Apple Music indicator if this is an Apple Music map
-    if (mapData.source === 'apple') {
+    // Show provider indicator if this is an Apple Music or YouTube Music map
+    if (mapData.source === 'youtube_music') {
+      const dot = document.querySelector('.user-badge .dot');
+      if (dot) { dot.style.background = '#ff3b30'; }
+      const crossServiceBtn = document.getElementById('btn-apple');
+      crossServiceBtn.title = 'Connect Spotify';
+      crossServiceBtn.style.background = 'rgba(29,185,84,.10)';
+      crossServiceBtn.style.borderColor = 'rgba(29,185,84,.45)';
+      crossServiceBtn.style.color = 'var(--accent)';
+      crossServiceBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0">
+          <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.52 17.34c-.24.36-.66.48-1.02.24-2.82-1.74-6.36-2.1-10.56-1.14-.42.12-.78-.18-.9-.54-.12-.42.18-.78.54-.9 4.56-1.02 8.52-.6 11.64 1.32.42.18.48.66.3 1.02zm1.44-3.3c-.3.42-.84.6-1.26.3-3.24-1.98-8.16-2.58-11.94-1.38-.48.12-1.02-.12-1.14-.6-.12-.48.12-1.02.6-1.14 4.38-1.32 9.78-.66 13.5 1.62.36.18.54.78.24 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.3c-.6.18-1.2-.18-1.38-.72-.18-.6.18-1.2.72-1.38 4.26-1.26 11.28-1.02 15.72 1.62.54.3.72 1.02.42 1.56-.3.42-1.02.6-1.56.3z"/>
+        </svg>
+        Connect Spotify`;
+      document.getElementById('btn-save-moods').style.display = 'none';
+    } else if (mapData.source === 'apple') {
       const dot = document.querySelector('.user-badge .dot');
       if (dot) { dot.style.background = '#fa3c44'; }
       const crossServiceBtn = document.getElementById('btn-apple');
@@ -5073,7 +5109,9 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
       <div style="font-family:Syne,sans-serif;font-weight:700;font-size:24px;color:${col}">${trackCount}</div>
       <div style="font-size:9px;color:var(--text-dim);margin-top:3px;letter-spacing:.1em">TRACKS</div>
     </div>
-    ${_isAppleMap()
+    ${_isYouTubeMusicMap()
+      ? `<button id="bpi-copy-spotify" style="padding:10px;background:#ff3b30;border:none;border-radius:8px;color:#fff;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">Add to my YouTube Music</button>`
+      : _isAppleMap()
       ? `<button id="bpi-copy-spotify" style="padding:10px;background:#fc3c44;border:none;border-radius:8px;color:#fff;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">Add to my Apple Music</button>`
       : `<button id="bpi-copy-spotify" style="padding:10px;background:var(--accent);border:none;border-radius:8px;color:#000;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;cursor:pointer;width:100%;transition:opacity .15s">Add to my Spotify</button>`
     }
@@ -5094,12 +5132,14 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
     status.style.display = 'block';
     status.textContent = `Adding ${trackMeta.length} tracks…`;
     const isAppleUser = _isAppleMap();
-    const endpoint = isAppleUser ? '/import-to-apple' : '/import-friend-playlist';
+    const isYouTubeUser = _isYouTubeMusicMap();
+    const endpoint = _importEndpoint();
     console.log('[import] playlist:', name, '| tracks:', trackMeta.length, '| friend:', compareDisplayName, '| endpoint:', endpoint);
     try {
       if (!trackMeta.length) throw new Error('No tracks found for this playlist');
-      const targetPayload = isAppleUser ? {} : await _spotifyImportTargetPayload();
-      if (!isAppleUser) status.textContent = `Adding ${trackMeta.length} tracks to ${targetPayload.target_display_name}'s Spotify…`;
+      const targetPayload = (isAppleUser || isYouTubeUser) ? {} : await _spotifyImportTargetPayload();
+      if (!isAppleUser && !isYouTubeUser) status.textContent = `Adding ${trackMeta.length} tracks to ${targetPayload.target_display_name}'s Spotify…`;
+      if (isYouTubeUser) status.textContent = `Matching ${trackMeta.length} tracks in YouTube Music…`;
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5116,7 +5156,9 @@ function _showFriendLobePanel(idx, name, cache, pColors) {
         status.style.color = '#f87171';
         status.textContent = isAppleUser
           ? 'Apple Music session expired — reconnect Apple Music'
-          : 'Not logged in — open your map via Spotify login first';
+          : isYouTubeUser
+            ? 'YouTube Music auth missing — configure ytmusicapi auth on the server'
+            : 'Not logged in — open your map via Spotify login first';
         btn.disabled = false;
         btn.textContent = 'Retry';
         return;
@@ -6981,7 +7023,7 @@ async function _runAiCurator() {
         </div>
         <div style="display:flex;gap:.5rem">
           <button id="ai-show-map" class="btn-secondary" style="flex:1">Show on map</button>
-          <button id="ai-add-spotify" class="btn-primary" style="flex:1">${_isAppleMap() ? 'Add to Apple Music →' : 'Add to Spotify →'}</button>
+          <button id="ai-add-spotify" class="btn-primary" style="flex:1">Add to ${_importProviderLabel()} →</button>
         </div>
         <div id="ai-add-status" style="font-size:.72rem;margin-top:.5rem;display:none"></div>`;
 
@@ -7009,12 +7051,13 @@ async function _runAiCurator() {
         statusEl.style.display = 'none';
         try {
           const isApple = _isAppleMap();
+          const isYouTube = _isYouTubeMusicMap();
           let r;
-          if (isApple) {
+          if (isApple || isYouTube) {
             const trackMeta = points
               .filter(p => selIds.includes(p.id))
               .map(p => ({ id: p.id, name: p.name || '', artist: p.artist || '', isrc: p.isrc || null }));
-            r = await fetch('/import-to-apple', {
+            r = await fetch(isYouTube ? '/import-to-youtube' : '/import-to-apple', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({
@@ -7044,7 +7087,7 @@ async function _runAiCurator() {
           statusEl.style.color = '#f87171';
           statusEl.textContent = err.message;
           addBtn.disabled = false;
-          addBtn.textContent = _isAppleMap() ? 'Add to Apple Music →' : 'Add to Spotify →';
+          addBtn.textContent = `Add to ${_importProviderLabel()} →`;
         }
       });
     }
@@ -7372,6 +7415,12 @@ document.getElementById('export-confirm').addEventListener('click', _exportSelec
 // Refresh button
 // ---------------------------------------------------------------------------
 document.getElementById('btn-refresh').addEventListener('click', () => {
+  if (_isYouTubeMusicMap()) {
+    if (confirm('Rebuild your map with your latest YouTube Music library? This takes ~2 minutes.')) {
+      _startYouTubeMapJob(true);
+    }
+    return;
+  }
   if (_isAppleMap()) {
     if (confirm('Rebuild your map with your latest Apple Music library? This takes ~2 minutes.')) {
       _startAppleMapJob(true);
@@ -7834,7 +7883,7 @@ function _renderFriendPlaylists() {
       <div id="friend-pl-status" style="font-size:.7rem;margin-bottom:.5rem;display:none;line-height:1.5"></div>
       <button id="btn-import-playlists"
         style="width:100%;padding:.45rem;background:var(--accent2);color:#fff;border:none;border-radius:6px;font-size:.75rem;cursor:pointer;font-weight:600">
-        ${_isAppleMap() ? 'Add selected to my Apple Music' : 'Add selected to my Spotify'}
+        Add selected to my ${_importProviderLabel()}
       </button>
     </div>`;
 
@@ -7860,7 +7909,8 @@ async function _importSelectedPlaylists() {
   statusEl.style.display = 'block';
   statusEl.style.color = 'var(--text-dim)';
   const isApple = _isAppleMap();
-  const endpoint = isApple ? '/import-to-apple' : '/import-friend-playlist';
+  const isYouTube = _isYouTubeMusicMap();
+  const endpoint = _importEndpoint();
 
   const results = [];
   for (let i = 0; i < checks.length; i++) {
@@ -7870,8 +7920,9 @@ async function _importSelectedPlaylists() {
     statusEl.textContent = `Importing ${i + 1}/${checks.length}: ${name}…`;
 
     try {
-      const targetPayload = isApple ? {} : await _spotifyImportTargetPayload();
-      if (!isApple) statusEl.textContent = `Importing ${i + 1}/${checks.length} to ${targetPayload.target_display_name}'s Spotify: ${name}…`;
+      const targetPayload = (isApple || isYouTube) ? {} : await _spotifyImportTargetPayload();
+      if (!isApple && !isYouTube) statusEl.textContent = `Importing ${i + 1}/${checks.length} to ${targetPayload.target_display_name}'s Spotify: ${name}…`;
+      if (isYouTube) statusEl.textContent = `Matching ${i + 1}/${checks.length} in YouTube Music: ${name}…`;
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -8683,6 +8734,25 @@ async function _startAppleMapJob(force = false) {
     location.href = `/loading.html?user=${encodeURIComponent(appleUserId)}&job=${encodeURIComponent(job_id)}`;
   } catch (err) {
     body.innerHTML = `<div style="color:#f87171;font-size:.82rem;padding:.5rem 0">${esc(err.message)}</div>`;
+  }
+}
+
+async function _startYouTubeMapJob(force = false) {
+  try {
+    const resp = await fetch('/youtube/start-job', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force, share_for_comparison: _appleShareForComparison }),
+    });
+    if (!resp.ok) {
+      let detail = 'Failed to start YouTube Music rebuild';
+      try { detail = (await resp.json()).detail || detail; } catch {}
+      throw new Error(detail);
+    }
+    const { job_id, user_id: youtubeUserId } = await resp.json();
+    location.href = `/loading.html?user=${encodeURIComponent(youtubeUserId)}&job=${encodeURIComponent(job_id)}`;
+  } catch (err) {
+    alert(err.message || 'Could not start YouTube Music rebuild');
   }
 }
 

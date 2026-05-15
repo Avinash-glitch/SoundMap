@@ -168,6 +168,78 @@ def submit_apple_job(
     return job_id
 
 
+def submit_youtube_job(
+    user_id: str,
+    force: bool = False,
+    share_for_comparison: bool = True,
+) -> str:
+    """Queue a YouTube Music pipeline job and return the job_id."""
+    from . import pipeline
+
+    base_user_id = user_id[:-8] if user_id.endswith("_youtube") else user_id
+    youtube_id = f"{base_user_id}_youtube"
+    job_id = str(uuid.uuid4())
+
+    jobs[job_id] = {
+        "status": "queued",
+        "progress": 0,
+        "message": "Queued — waiting to start…",
+        "user_id": youtube_id,
+        "display_name": "YouTube Music Library",
+        "error": None,
+    }
+    send_notification(
+        "YouTube Music map job queued",
+        user_id=youtube_id,
+        source_user_id=base_user_id,
+        job_id=job_id,
+    )
+
+    def _on_progress(pct: int, message: str) -> None:
+        jobs[job_id]["progress"] = pct
+        jobs[job_id]["message"] = message
+
+    def _run() -> None:
+        jobs[job_id]["status"] = "processing"
+        send_notification(
+            "YouTube Music map job started",
+            user_id=youtube_id,
+            source_user_id=base_user_id,
+            job_id=job_id,
+        )
+        try:
+            pipeline.process_youtube_music_user(
+                base_user_id,
+                on_progress=_on_progress,
+                force=force,
+                share_for_comparison=share_for_comparison,
+            )
+            jobs[job_id]["status"] = "done"
+            jobs[job_id]["progress"] = 100
+            jobs[job_id]["message"] = "Done!"
+            send_notification(
+                "YouTube Music map job completed",
+                user_id=youtube_id,
+                source_user_id=base_user_id,
+                job_id=job_id,
+            )
+        except Exception as exc:
+            jobs[job_id]["status"] = "error"
+            jobs[job_id]["error"] = str(exc)
+            jobs[job_id]["message"] = f"Error: {exc}"
+            print(f"[jobs] YouTube Music pipeline failed for {base_user_id}: {exc}")
+            send_notification(
+                "YouTube Music map job failed",
+                user_id=youtube_id,
+                source_user_id=base_user_id,
+                job_id=job_id,
+                error=str(exc),
+            )
+
+    _executor.submit(_run)
+    return job_id
+
+
 def stop_job(job_id: str) -> bool:
     """Signal the pipeline to stop fetching and build the map with what it has."""
     job = jobs.get(job_id)

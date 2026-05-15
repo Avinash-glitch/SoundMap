@@ -8,6 +8,7 @@ from pathlib import Path
 
 STORAGE_DIR = Path("./user_data")
 AUDIO_FEATURE_CACHE = STORAGE_DIR / "track_audio_features.json"
+YTMUSIC_AUTH_DIR = STORAGE_DIR / "ytmusic_auth"
 
 _supabase = None
 
@@ -32,6 +33,43 @@ def _get_supabase():
     except Exception as e:
         print(f"[storage] Supabase init failed: {e}")
         return None
+
+
+def youtube_auth_path(user_id: str) -> Path | None:
+    """Return the server-side YouTube Music auth path if it exists."""
+    safe_id = str(user_id or "").replace("/", "_").replace("\\", "_").strip()
+    if not safe_id:
+        return None
+    path = YTMUSIC_AUTH_DIR / f"{safe_id}.json"
+    return path if path.exists() else None
+
+
+def save_youtube_auth(user_id: str, auth_data: dict) -> Path:
+    """Store YouTube Music auth JSON outside Git-backed app files."""
+    safe_id = str(user_id or "").replace("/", "_").replace("\\", "_").strip()
+    if not safe_id:
+        raise ValueError("user_id required")
+    YTMUSIC_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+    path = YTMUSIC_AUTH_DIR / f"{safe_id}.json"
+    path.write_text(json.dumps(auth_data, indent=2), encoding="utf-8")
+    return path
+
+
+def load_youtube_auth(user_id: str) -> dict | None:
+    """Load stored YouTube Music auth JSON for a user."""
+    path = youtube_auth_path(user_id)
+    if not path:
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def delete_youtube_auth(user_id: str) -> bool:
+    """Delete stored YouTube Music auth JSON for a user."""
+    path = youtube_auth_path(user_id)
+    if not path:
+        return False
+    path.unlink()
+    return True
 
 
 def save_map(user_id: str, map_data: dict) -> None:
