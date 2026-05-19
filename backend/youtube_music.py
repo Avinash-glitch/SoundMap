@@ -20,6 +20,22 @@ def _ytmusic_class():
     return YTMusic
 
 
+def _oauth_credentials():
+    """Return ytmusicapi OAuth credentials when configured.
+
+    ytmusicapi requires a Google OAuth client ID/secret for authenticated
+    YouTube Music library and playlist writes. Search can still use an
+    unauthenticated client.
+    """
+    client_id = os.environ.get("YTMUSIC_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("YTMUSIC_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        return None
+
+    from ytmusicapi import OAuthCredentials
+    return OAuthCredentials(client_id=client_id, client_secret=client_secret)
+
+
 def get_ytmusic_client(user_id: str | None = None, authenticated: bool = True):
     """Return a YTMusic client, using per-user auth when required."""
     YTMusic = _ytmusic_class()
@@ -32,13 +48,21 @@ def get_ytmusic_client(user_id: str | None = None, authenticated: bool = True):
         auth_path = Path(global_auth) if global_auth else None
     if not auth_path or not auth_path.exists():
         raise FileNotFoundError("YouTube Music auth is not configured for this user")
-    return YTMusic(str(auth_path))
+
+    credentials = _oauth_credentials()
+    if not credentials:
+        raise FileNotFoundError(
+            "YouTube Music OAuth credentials are not configured. "
+            "Set YTMUSIC_CLIENT_ID and YTMUSIC_CLIENT_SECRET."
+        )
+    return YTMusic(str(auth_path), oauth_credentials=credentials)
 
 
 def youtube_auth_configured(user_id: str) -> bool:
     """Return True when YouTube Music auth exists for this user or globally."""
     global_auth = os.environ.get("YTMUSIC_AUTH_FILE", "").strip()
-    return bool(storage.youtube_auth_path(user_id) or (global_auth and Path(global_auth).exists()))
+    has_auth_file = bool(storage.youtube_auth_path(user_id) or (global_auth and Path(global_auth).exists()))
+    return has_auth_file and bool(_oauth_credentials())
 
 
 def _duration_to_ms(value) -> int:

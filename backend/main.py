@@ -1172,6 +1172,7 @@ async def youtube_login(request: Request, user_id: str = "", force: int = 0):
                 "configured": False,
                 "detail": "YouTube Music connection is not configured yet.",
                 "expected_auth_file": f"user_data/ytmusic_auth/{base_user_id}.json",
+                "required_env": ["YTMUSIC_CLIENT_ID", "YTMUSIC_CLIENT_SECRET"],
             }, status_code=503)
         return RedirectResponse("/?error=youtube_not_configured")
 
@@ -1191,8 +1192,9 @@ async def youtube_callback(request: Request, user_id: str = "") -> JSONResponse:
     return JSONResponse({
         "configured": youtube_auth_configured(base_user_id),
         "user_id": f"{base_user_id}_youtube",
-        "message": "YouTube Music uses server-side ytmusicapi auth for this MVP.",
+        "message": "YouTube Music uses server-side ytmusicapi OAuth auth for this MVP.",
         "expected_auth_file": f"user_data/ytmusic_auth/{base_user_id}.json",
+        "required_env": ["YTMUSIC_CLIENT_ID", "YTMUSIC_CLIENT_SECRET"],
     })
 
 
@@ -1210,7 +1212,10 @@ async def youtube_start_job(request: Request) -> JSONResponse:
     if not youtube_auth_configured(base_user_id):
         raise HTTPException(
             status_code=503,
-            detail=f"YouTube Music auth missing. Add user_data/ytmusic_auth/{base_user_id}.json or set YTMUSIC_AUTH_FILE.",
+            detail=(
+                f"YouTube Music auth missing. Add user_data/ytmusic_auth/{base_user_id}.json "
+                "or set YTMUSIC_AUTH_FILE, and set YTMUSIC_CLIENT_ID/YTMUSIC_CLIENT_SECRET."
+            ),
         )
 
     force = bool(body.get("force"))
