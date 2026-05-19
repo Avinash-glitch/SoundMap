@@ -1156,7 +1156,7 @@ def _youtube_base_user_id(request: Request, explicit_user_id: str = "") -> str:
 
 
 @app.get("/auth/youtube/login")
-async def youtube_login(request: Request, user_id: str = "", force: int = 0) -> RedirectResponse | JSONResponse:
+async def youtube_login(request: Request, user_id: str = "", force: int = 0):
     """
     Start a YouTube Music map job when server-side ytmusicapi auth is configured.
 
