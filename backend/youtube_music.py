@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import time
+import json
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -36,6 +37,28 @@ def _oauth_credentials():
     return OAuthCredentials(client_id=client_id, client_secret=client_secret)
 
 
+def _auth_path_from_env() -> Path | None:
+    """Return a global auth path from file or JSON env content."""
+    global_auth = os.environ.get("YTMUSIC_AUTH_FILE", "").strip()
+    if global_auth:
+        path = Path(global_auth)
+        if path.exists():
+            return path
+
+    raw_json = os.environ.get("YTMUSIC_AUTH_JSON", "").strip()
+    if not raw_json:
+        return None
+
+    path = storage.YTMUSIC_AUTH_DIR / "env_oauth.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise FileNotFoundError(f"YTMUSIC_AUTH_JSON is not valid JSON: {exc}")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def get_ytmusic_client(user_id: str | None = None, authenticated: bool = True):
     """Return a YTMusic client, using per-user auth when required."""
     YTMusic = _ytmusic_class()
@@ -44,8 +67,7 @@ def get_ytmusic_client(user_id: str | None = None, authenticated: bool = True):
 
     auth_path = storage.youtube_auth_path(user_id or "")
     if not auth_path:
-        global_auth = os.environ.get("YTMUSIC_AUTH_FILE", "").strip()
-        auth_path = Path(global_auth) if global_auth else None
+        auth_path = _auth_path_from_env()
     if not auth_path or not auth_path.exists():
         raise FileNotFoundError("YouTube Music auth is not configured for this user")
 
@@ -60,8 +82,10 @@ def get_ytmusic_client(user_id: str | None = None, authenticated: bool = True):
 
 def youtube_auth_configured(user_id: str) -> bool:
     """Return True when YouTube Music auth exists for this user or globally."""
-    global_auth = os.environ.get("YTMUSIC_AUTH_FILE", "").strip()
-    has_auth_file = bool(storage.youtube_auth_path(user_id) or (global_auth and Path(global_auth).exists()))
+    try:
+        has_auth_file = bool(storage.youtube_auth_path(user_id) or _auth_path_from_env())
+    except FileNotFoundError:
+        has_auth_file = False
     return has_auth_file and bool(_oauth_credentials())
 
 
