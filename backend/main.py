@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import forget_user_credentials, router as auth_router, refresh_access_token
-from .jobs import get_job, submit_job, stop_job, submit_youtube_job
+from .jobs import get_job, submit_job, stop_job
 from .models import JobStatus
 from .notifications import send_notification
 from . import storage
@@ -1126,200 +1126,17 @@ async def delete_my_data(request: Request) -> JSONResponse:
     ids_to_delete = {user_id}
     if user_id.endswith("_apple"):
         ids_to_delete.add(user_id[:-6])
-    elif user_id.endswith("_youtube"):
-        ids_to_delete.add(user_id[:-8])
     else:
         ids_to_delete.add(f"{user_id}_apple")
-        ids_to_delete.add(f"{user_id}_youtube")
 
     for uid in ids_to_delete:
         if uid and storage.delete_map(uid):
             deleted_ids.append(uid)
         if uid:
             forget_user_credentials(uid)
-            storage.delete_youtube_auth(uid[:-8] if uid.endswith("_youtube") else uid)
 
     request.session.clear()
     return JSONResponse({"ok": True, "deleted_user_ids": sorted(deleted_ids)})
-
-
-def _youtube_base_user_id(request: Request, explicit_user_id: str = "") -> str:
-    """Pick the server-side YouTube Music auth namespace for this browser/session."""
-    user_id = (
-        explicit_user_id
-        or request.session.get("user_id")
-        or os.environ.get("YTMUSIC_USER_ID")
-        or "youtube"
-    )
-    user_id = str(user_id).strip()
-    return user_id[:-8] if user_id.endswith("_youtube") else user_id
-
-
-@app.get("/auth/youtube/login")
-async def youtube_login(request: Request, user_id: str = "", force: int = 0):
-    """
-    Start a YouTube Music map job when server-side ytmusicapi auth is configured.
-
-    ytmusicapi is not a normal web OAuth flow. For this MVP, auth is expected at:
-    user_data/ytmusic_auth/{user_id}.json or YTMUSIC_AUTH_FILE.
-    """
-    from .youtube_music import youtube_auth_configured
-
-    base_user_id = _youtube_base_user_id(request, user_id)
-    if not youtube_auth_configured(base_user_id):
-        if request.headers.get("accept", "").startswith("application/json"):
-            return JSONResponse({
-                "configured": False,
-                "detail": "YouTube Music connection is not configured yet.",
-                "expected_auth_file": f"user_data/ytmusic_auth/{base_user_id}.json",
-                "required_env": ["YTMUSIC_CLIENT_ID", "YTMUSIC_CLIENT_SECRET"],
-            }, status_code=503)
-        return RedirectResponse("/?error=youtube_not_configured")
-
-    request.session["user_id"] = base_user_id
-    request.session["display_name"] = "YouTube Music Library"
-    youtube_user_id = f"{base_user_id}_youtube"
-    job_id = submit_youtube_job(base_user_id, force=bool(force), share_for_comparison=True)
-    return RedirectResponse(f"/loading.html?user={youtube_user_id}&job={job_id}")
-
-
-@app.get("/auth/youtube/callback")
-async def youtube_callback(request: Request, user_id: str = "") -> JSONResponse:
-    """Document the current server-side YouTube Music auth state for the MVP flow."""
-    from .youtube_music import youtube_auth_configured
-
-    base_user_id = _youtube_base_user_id(request, user_id)
-    return JSONResponse({
-        "configured": youtube_auth_configured(base_user_id),
-        "user_id": f"{base_user_id}_youtube",
-        "message": "YouTube Music uses server-side ytmusicapi OAuth auth for this MVP.",
-        "expected_auth_file": f"user_data/ytmusic_auth/{base_user_id}.json",
-        "required_env": ["YTMUSIC_CLIENT_ID", "YTMUSIC_CLIENT_SECRET"],
-    })
-
-
-@app.post("/youtube/start-job")
-async def youtube_start_job(request: Request) -> JSONResponse:
-    """Start a YouTube Music pipeline job. Body: {user_id?, force?, share_for_comparison?}."""
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-
-    from .youtube_music import youtube_auth_configured
-
-    base_user_id = _youtube_base_user_id(request, str(body.get("user_id") or ""))
-    if not youtube_auth_configured(base_user_id):
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"YouTube Music auth missing. Add user_data/ytmusic_auth/{base_user_id}.json "
-                "or set YTMUSIC_AUTH_FILE, and set YTMUSIC_CLIENT_ID/YTMUSIC_CLIENT_SECRET."
-            ),
-        )
-
-    force = bool(body.get("force"))
-    share_for_comparison = bool(body.get("share_for_comparison", request.session.get("share_for_comparison", True)))
-    request.session["user_id"] = base_user_id
-    request.session["display_name"] = "YouTube Music Library"
-
-    job_id = submit_youtube_job(base_user_id, force=force, share_for_comparison=share_for_comparison)
-    return JSONResponse({"job_id": job_id, "user_id": f"{base_user_id}_youtube"})
-
-
-@app.post("/youtube/search")
-async def youtube_search(request: Request) -> JSONResponse:
-    """Search YouTube Music for a track candidate."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid request body")
-
-    name = str(body.get("name") or body.get("track_name") or "").strip()
-    artist = str(body.get("artist") or "").strip()
-    album = str(body.get("album") or "").strip()
-    if not name and not artist:
-        raise HTTPException(status_code=400, detail="name or artist required")
-
-    from .youtube_music import search_youtube_music_track
-
-    try:
-        track = search_youtube_music_track(name, artist, album)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"YouTube Music search failed: {exc}")
-    if not track:
-        raise HTTPException(status_code=404, detail="No confident YouTube Music match found")
-    return JSONResponse(track)
-
-
-@app.post("/youtube/playlist/create")
-async def youtube_playlist_create(request: Request) -> JSONResponse:
-    """Create a YouTube Music playlist and optionally add video IDs."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid request body")
-
-    base_user_id = _youtube_base_user_id(request, str(body.get("user_id") or ""))
-    name = str(body.get("name") or "SoundMap Transfer").strip()
-    description = str(body.get("description") or "Created by SoundMap").strip()
-    video_ids = body.get("video_ids") or body.get("youtube_music_ids") or []
-    if isinstance(video_ids, str):
-        video_ids = [video_ids]
-    if not isinstance(video_ids, list):
-        raise HTTPException(status_code=400, detail="video_ids must be a list")
-
-    from .youtube_music import add_youtube_music_playlist_items, create_youtube_music_playlist
-
-    try:
-        playlist_id = create_youtube_music_playlist(base_user_id, name, description)
-        added = 0
-        response = None
-        if video_ids:
-            result = add_youtube_music_playlist_items(base_user_id, playlist_id, [str(v) for v in video_ids])
-            added = int(result.get("added") or 0)
-            response = result.get("response")
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"YouTube Music playlist creation failed: {exc}")
-
-    return JSONResponse({
-        "playlist_id": playlist_id,
-        "name": name,
-        "track_count": added,
-        "url": f"https://music.youtube.com/playlist?list={playlist_id}",
-        "response": response,
-    })
-
-
-@app.post("/youtube/playlist/add")
-async def youtube_playlist_add(request: Request) -> JSONResponse:
-    """Add video IDs to an existing YouTube Music playlist."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid request body")
-
-    base_user_id = _youtube_base_user_id(request, str(body.get("user_id") or ""))
-    playlist_id = str(body.get("playlist_id") or "").strip()
-    video_ids = body.get("video_ids") or body.get("youtube_music_ids") or []
-    if isinstance(video_ids, str):
-        video_ids = [video_ids]
-    if not playlist_id:
-        raise HTTPException(status_code=400, detail="playlist_id required")
-    if not isinstance(video_ids, list) or not video_ids:
-        raise HTTPException(status_code=400, detail="video_ids required")
-
-    from .youtube_music import add_youtube_music_playlist_items
-
-    try:
-        result = add_youtube_music_playlist_items(base_user_id, playlist_id, [str(v) for v in video_ids])
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"YouTube Music playlist add failed: {exc}")
-    return JSONResponse(result)
 
 
 @app.get("/apple/token")
@@ -1927,69 +1744,6 @@ async def import_to_apple(request: Request) -> JSONResponse:
 
     print(f"[import-to-apple] created '{new_name}' ({added}/{len(catalog_ids)} tracks) id={playlist_id}")
     return JSONResponse({"name": new_name, "track_count": added, "matched_count": len(catalog_ids), "playlist_id": playlist_id})
-
-
-@app.post("/import-to-youtube")
-async def import_to_youtube(request: Request) -> JSONResponse:
-    """Create a YouTube Music playlist by matching supplied SoundMap tracks."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid request body")
-
-    base_user_id = _youtube_base_user_id(request, str(body.get("target_user_id") or body.get("user_id") or ""))
-    playlist_name = str(body.get("playlist_display_name") or body.get("playlist_name") or "SoundMap Playlist").strip()
-    friend_name = str(body.get("friend_display_name") or "friend").strip()
-    tracks = body.get("tracks") or []
-    if not isinstance(tracks, list) or not tracks:
-        raise HTTPException(status_code=400, detail="tracks required")
-
-    from .youtube_music import add_youtube_music_playlist_items, create_youtube_music_playlist, search_youtube_music_track
-
-    video_ids: list[str] = []
-    skipped: list[dict] = []
-    for track in tracks:
-        if not isinstance(track, dict):
-            continue
-        video_id = str(track.get("youtube_music_id") or track.get("videoId") or track.get("video_id") or "").strip()
-        if not video_id:
-            match = search_youtube_music_track(
-                str(track.get("name") or ""),
-                str(track.get("artist") or ""),
-                str(track.get("album") or ""),
-            )
-            video_id = str((match or {}).get("youtube_music_id") or (match or {}).get("id") or "").strip()
-        if video_id and video_id not in video_ids:
-            video_ids.append(video_id)
-        else:
-            skipped.append({"name": track.get("name"), "artist": track.get("artist")})
-
-    if not video_ids:
-        raise HTTPException(status_code=422, detail="Could not match any tracks in YouTube Music")
-
-    new_name = f"{playlist_name} (from {friend_name})"
-    try:
-        playlist_id = create_youtube_music_playlist(
-            base_user_id,
-            new_name,
-            f"Imported from {friend_name}'s SoundMap",
-        )
-        result = add_youtube_music_playlist_items(base_user_id, playlist_id, video_ids)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"YouTube Music import failed: {exc}")
-
-    added = int(result.get("added") or len(video_ids))
-    return JSONResponse({
-        "name": new_name,
-        "track_count": added,
-        "matched_count": len(video_ids),
-        "skipped_count": len(skipped),
-        "skipped": skipped[:25],
-        "playlist_id": playlist_id,
-        "url": f"https://music.youtube.com/playlist?list={playlist_id}",
-    })
 
 
 @app.post("/create-mood-playlists")

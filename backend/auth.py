@@ -7,7 +7,7 @@ import secrets
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from .jobs import submit_job
@@ -87,7 +87,12 @@ def _start_login(
     client_secret: str | None,
     share: str | None,
 ) -> RedirectResponse:
-    spotify_client_id = (client_id or "").strip() or os.environ["SPOTIFY_CLIENT_ID"]
+    spotify_client_id = (client_id or "").strip() or os.environ.get("SPOTIFY_CLIENT_ID", "").strip()
+    if not spotify_client_id:
+        raise HTTPException(
+            status_code=503,
+            detail="Spotify login is not configured. Set SPOTIFY_CLIENT_ID or provide your own Spotify app credentials.",
+        )
     spotify_client_secret = (client_secret or "").strip()
     redirect_uri = _callback_url(request)
 
