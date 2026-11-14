@@ -9510,19 +9510,187 @@ startNowPlayingPolling();
   }
 
   // --------------------------------------------------------- 3D brain
+  // Particle brain: the solid cortex is swapped for ~50k glowing points in an
+  // anatomical shape — two hemispheres with sulci folds, temporal lobes, a
+  // banded cerebellum and a brainstem. Points are tinted by playlist lobe,
+  // fade with depth, shimmer to the beat, carry sparks that run along the
+  // folds, lift when their lobe is hovered, and assemble from a cloud when
+  // the view opens. The old mesh stays invisible underneath for hit-testing.
+  const PB = { obj: null, mat: null, built: '', introAt: -1e9 };
+
+  function pbBuild() {
+    if (!brain3D?.ready || !brain3D.THREE || !brain3D.names?.length || !brain3D.brainMesh) return;
+    if (typeof _hexToThreeColor !== 'function') return;
+    const THREE = brain3D.THREE;
+    const mobile = window.innerWidth < 768;
+    const key = `${brain3D.dataKey}|${mobile}`;
+    if (PB.obj && PB.built === key && PB.obj.parent) return;
+    if (PB.obj) { PB.obj.parent?.remove(PB.obj); PB.obj.geometry.dispose(); PB.mat.dispose(); PB.obj = null; }
+
+    const dirs = brain3D.dirs || [];
+    if (!dirs.length) return;
+    const lobeCols = brain3D.names.map(n => _hexToThreeColor(THREE, playlistColors[n] || COLOR_UNTAGGED));
+    const N = mobile ? 24000 : 50000;
+    const pos = new Float32Array(N * 3), colA = new Float32Array(N * 3);
+    const dat = new Float32Array(N * 4), start = new Float32Array(N * 3);
+    let rs = 123456789;
+    const rnd = () => (rs = (Math.imul(rs, 1103515245) + 12345) & 0x7fffffff) / 0x7fffffff;
+    const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+    const SX = 1.25, SY = 0.95, SZ = 1.15;
+
+    function cortex(d) {
+      const x = d[0], y = d[1], z = d[2];
+      const fold = 0.5 + 0.5 * (
+        0.65 * Math.sin(x * 14 + y * 8) * Math.sin(z * 12 - y * 6) +
+        0.35 * Math.sin((x + z) * 24 + 2) * Math.sin(y * 16 - z * 4));
+      const r = 1
+        - 0.14 * smooth(0, 0.75, -y - 0.2)                                                     // flat underside
+        + 0.035 * z                                                                            // frontal fullness
+        + 0.10 * Math.exp(-((Math.abs(x) - 0.88) ** 2) / 0.09 - ((y + 0.3) ** 2) / 0.1 - ((z - 0.3) ** 2) / 0.4) // temporal lobes
+        - 0.24 * Math.exp(-((y + 0.55) ** 2) / 0.1 - ((z + 0.78) ** 2) / 0.16)                 // room for cerebellum
+        + (fold - 0.5) * 0.085                                                                 // sulci relief
+        - Math.exp(-Math.abs(x) * 26) * 0.17;                                                  // interhemispheric fissure
+      return { r, fold };
+    }
+    function winner(d) {
+      let best = 0, bd = -2;
+      for (let i = 0; i < dirs.length; i++) {
+        const q = dirs[i];
+        const dot = d[0] * q[0] + d[1] * q[1] + d[2] * q[2];
+        if (dot > bd) { bd = dot; best = i; }
+      }
+      return best;
+    }
+    let i = 0;
+    function put(px, py, pz, d, fold, kind, dim) {
+      const lobe = winner(d);
+      const c = lobeCols[lobe] || { r: 0.65, g: 0.55, b: 1 };
+      const shade = dim * (0.45 + 0.6 * fold) * (0.88 + 0.24 * rnd());
+      pos[i * 3] = px; pos[i * 3 + 1] = py; pos[i * 3 + 2] = pz;
+      colA[i * 3] = Math.min(1, c.r * shade); colA[i * 3 + 1] = Math.min(1, c.g * shade); colA[i * 3 + 2] = Math.min(1, c.b * shade);
+      dat[i * 4] = lobe; dat[i * 4 + 1] = rnd(); dat[i * 4 + 2] = fold; dat[i * 4 + 3] = kind;
+      const sr = 2.8 + rnd() * 2.2, sz2 = rnd() * 2 - 1, sa = rnd() * TAU, ss = Math.sqrt(1 - sz2 * sz2);
+      start[i * 3] = Math.cos(sa) * ss * sr; start[i * 3 + 1] = sz2 * sr; start[i * 3 + 2] = Math.sin(sa) * ss * sr;
+      i++;
+    }
+    const nCortex = Math.floor(N * 0.86), nCer = Math.floor(N * 0.11);
+    while (i < nCortex) {
+      const y = rnd() * 2 - 1, a = rnd() * TAU, s = Math.sqrt(1 - y * y);
+      const d = [Math.cos(a) * s, y, Math.sin(a) * s];
+      const { r, fold } = cortex(d);
+      if (r < 0.45) continue;                       // inside a carved region
+      const shell = 1 - rnd() * rnd() * 0.05;       // slight thickness
+      put(d[0] * r * SX * shell, d[1] * r * SY * shell, d[2] * r * SZ * shell, d, fold, 1, 1);
+    }
+    // Cerebellum: banded little brain at the back underside
+    const CC = [0, -0.58, -0.74], CR = [0.47, 0.27, 0.36];
+    while (i < nCortex + nCer) {
+      const y = rnd() * 2 - 1, a = rnd() * TAU, s = Math.sqrt(1 - y * y);
+      const d = [Math.cos(a) * s, y, Math.sin(a) * s];
+      const band = 0.5 + 0.5 * Math.sin(y * 26 + d[0] * 3);
+      const rr = (0.9 + rnd() * 0.1) * (1 + (band - 0.5) * 0.1) * (1 - Math.exp(-Math.abs(d[0]) * 18) * 0.25);
+      const px = (CC[0] + d[0] * CR[0] * rr) * SX, py = (CC[1] + d[1] * CR[1] * rr) * SY, pz = (CC[2] + d[2] * CR[2] * rr) * SZ;
+      put(px, py, pz, [px / SX, py / SY, pz / SZ], band, 0.35, 0.62);
+    }
+    // Brainstem
+    while (i < N) {
+      const t = rnd(), a = rnd() * TAU, rad = 0.13 * Math.sqrt(rnd()) * (1 - t * 0.35);
+      const cx = Math.cos(a) * rad, cz = Math.sin(a) * rad;
+      const px = cx * SX, py = (-0.5 - t * 0.5) * SY, pz = (-0.18 - t * 0.22 + cz) * SZ;
+      put(px, py, pz, [px / SX, py / SY, pz / SZ], 0.5, 0, 0.45);
+    }
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geom.setAttribute('aColor', new THREE.BufferAttribute(colA, 3));
+    geom.setAttribute('aData', new THREE.BufferAttribute(dat, 4));
+    geom.setAttribute('aStart', new THREE.BufferAttribute(start, 3));
+    PB.mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uBeat: { value: 0 }, uIntro: { value: 1 }, uHover: { value: -1 }, uPx: { value: 1 } },
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      vertexShader: `
+        attribute vec3 aColor; attribute vec4 aData; attribute vec3 aStart;
+        uniform float uTime, uBeat, uIntro, uHover, uPx;
+        varying vec3 vC; varying float vA;
+        void main() {
+          float rand = aData.y, fold = aData.z, kind = aData.w;
+          float k = clamp(uIntro * 1.3 - rand * 0.3, 0.0, 1.0);
+          float e = 1.0 - pow(1.0 - k, 3.0);
+          vec3 p = mix(aStart, position, e);
+          float th = (1.0 - e) * (2.2 + rand * 4.0);
+          float cs = cos(th), sn = sin(th);
+          p = vec3(p.x * cs - p.z * sn, p.y, p.x * sn + p.z * cs);
+          float lifted = (uHover > -0.5 && abs(aData.x - uHover) < 0.5) ? 1.0 : 0.0;
+          p *= 1.0 + 0.09 * lifted * (0.7 + 0.3 * sin(uTime * 2.6 + rand * 6.3));
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          float tw = 0.8 + 0.35 * sin(uTime * (1.5 + rand * 2.5) + rand * 40.0);
+          float beatK = 1.0 + 0.55 * uBeat * step(0.68, fract(rand * 9.7));
+          gl_PointSize = min(uPx * (0.8 + 1.3 * rand) * tw * beatK * (1.0 + 0.7 * lifted) * (115.0 / -mv.z), 6.5 * uPx);
+          float spark = pow(max(sin(fold * 19.0 - uTime * 2.6 + rand * 0.8), 0.0), 30.0) * kind * (0.35 + 0.75 * uBeat);
+          vA = clamp((6.2 + mv.z) / 4.0, 0.04, 0.85) * e;
+          vC = aColor * (0.5 + 0.28 * uBeat) * (1.0 + 0.7 * lifted) + vec3(1.0, 0.97, 0.9) * spark * 0.6;
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        varying vec3 vC; varying float vA;
+        void main() {
+          vec2 q = gl_PointCoord - vec2(0.5);
+          float d = dot(q, q);
+          if (d > 0.25) discard;
+          float core = smoothstep(0.25, 0.0, d);
+          gl_FragColor = vec4(vC * (0.3 + 0.8 * core), vA * 0.55 * (0.08 + 0.92 * core));
+        }`,
+    });
+    PB.obj = new THREE.Points(geom, PB.mat);
+    PB.obj.renderOrder = 2;
+    PB.obj.frustumCulled = false;
+    brain3D.group.add(PB.obj);
+    PB.built = key;
+    PB.introAt = M.t;
+  }
+
+  if (typeof _rebuildBrain3DScene === 'function') {
+    const _rbOrig = _rebuildBrain3DScene;
+    _rebuildBrain3DScene = function () {
+      const r = _rbOrig.apply(this, arguments);
+      PB.built = '';
+      try { pbBuild(); } catch (err) { console.warn('[motion:pb]', err); }
+      return r;
+    };
+  }
+  if (typeof _showBrain3DOverlay === 'function') {
+    const _sb3Orig = _showBrain3DOverlay;
+    _showBrain3DOverlay = function () {
+      const wasHidden = !overlayShown('brain3d-overlay');
+      const r = _sb3Orig.apply(this, arguments);
+      if (wasHidden) { PB.introAt = M.t; M.warp = 1; }
+      return r;
+    };
+  }
   if (typeof _brain3DAnimate === 'function' && typeof brain3D === 'object') {
     const _b3dOrig = _brain3DAnimate;
     _brain3DAnimate = function () {
       if (brain3D.ready) {
         const on = M.on;
+        if (on && (!PB.obj || !PB.obj.parent)) { try { pbBuild(); } catch (err) { console.warn('[motion:pb]', err); } }
         const gb = on ? globalBeat() : 0;
+        if (PB.obj && PB.mat) {
+          PB.obj.visible = on;
+          if (brain3D.brainMesh?.material) brain3D.brainMesh.material.visible = !on;
+          const u = PB.mat.uniforms;
+          u.uTime.value = M.t;
+          u.uBeat.value = gb;
+          u.uHover.value = brain3D.mode === 'world' ? brain3D.hoverIndex : brain3D.activePlaylistIndex;
+          u.uIntro.value = clamp((M.t - PB.introAt) / 2.4, 0, 1);
+          u.uPx.value = (brain3D.renderer?.domElement?.height || 900) / 900;
+        }
         if (brain3D.group) {
-          const s = on ? 1 + 0.012 * Math.sin(M.t * 1.3) + 0.018 * gb : 1;
+          const s = on ? 1 + 0.012 * Math.sin(M.t * 1.3) + 0.015 * gb : 1;
           brain3D.group.scale.setScalar(s);
         }
         if (brain3D.stars) {
           brain3D.stars.rotation.y += on ? 0.0012 + M.warp * 0.02 : 0;
-          brain3D.stars.rotation.x = on ? Math.sin(M.t * 0.07) * 0.08 : brain3D.stars.rotation.x;
+          if (on) brain3D.stars.rotation.x = Math.sin(M.t * 0.07) * 0.08;
         }
       }
       return _b3dOrig.apply(this, arguments);
