@@ -8968,5 +8968,631 @@ loadMap().then(() => {
 });
 startNowPlayingPolling();
 </script>
+<!-- ===================================================================
+     SoundMap Motion Layer
+     Adds motion-graphics on top of the existing views without changing
+     their logic: living background, scatter "big bang" intro, BPM-pulsing
+     dots, travelling constellation waves, comets, shockwave ripples,
+     now-playing rings, breathing 2D brain, 3D brain pulse, grain + vignette.
+     Toggle with the "Motion" button (or press M). Respects reduced motion.
+     =================================================================== -->
+<style id="sm-motion-css">
+  #motion-bg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; display: block; }
+  body.sm-motion #brain-overlay,
+  body.sm-motion #cmp-brain-view { background: transparent; }
+  #motion-grain, #motion-vignette { position: fixed; inset: 0; pointer-events: none; z-index: 9; opacity: 0; transition: opacity .6s; }
+  #motion-grain { inset: -50%; mix-blend-mode: overlay; animation: smGrain .7s steps(6) infinite; }
+  #motion-vignette { background: radial-gradient(ellipse at 50% 48%, transparent 52%, rgba(0,0,0,.55) 100%); animation: smVig 3.2s ease-in-out infinite; }
+  body.sm-motion #motion-grain { opacity: .17; }
+  body.sm-motion #motion-vignette { opacity: 1; }
+  @keyframes smGrain {
+    0% { transform: translate(0,0); } 17% { transform: translate(-6%,4%); } 33% { transform: translate(5%,-7%); }
+    50% { transform: translate(-3%,8%); } 67% { transform: translate(8%,2%); } 83% { transform: translate(-7%,-4%); } 100% { transform: translate(2%,6%); }
+  }
+  @keyframes smVig { 0%,100% { opacity: .85; } 50% { opacity: 1; } }
+
+  /* 2D brain */
+  body.sm-motion #brain-svg .bv-cell,
+  body.sm-motion #cmp-brain-view .bv-cell {
+    transform-box: fill-box; transform-origin: center;
+    animation: smBreath 4.8s ease-in-out infinite;
+    animation-delay: calc(var(--sm-i, 0) * -0.53s);
+  }
+  @keyframes smBreath { 0%,100% { transform: scale(1); } 50% { transform: scale(1.025); } }
+  body.sm-motion #brain-svg.sm-bv-intro .bv-cell {
+    animation: smCellIn 1s cubic-bezier(.2,1.45,.4,1) backwards;
+    animation-delay: calc(var(--sm-i, 0) * 75ms);
+  }
+  @keyframes smCellIn { from { transform: scale(.25) rotate(-8deg); opacity: 0; } }
+  body.sm-motion #brain-svg.sm-bv-intro .bv-seed { animation: smSeedIn .9s ease-out backwards; animation-delay: calc(.5s + var(--sm-i, 0) * 75ms); }
+  @keyframes smSeedIn { from { opacity: 0; } }
+  body.sm-motion .sm-gyrus { stroke-dasharray: 5 13; animation: smDash 2.6s linear infinite; }
+  @keyframes smDash { to { stroke-dashoffset: -36; } }
+  .sm-sweep, .sm-sonar { display: none; }
+  body.sm-motion .sm-sweep, body.sm-motion .sm-sonar { display: inline; }
+  .sm-sweep rect { animation: smSweep 6.5s cubic-bezier(.45,0,.55,1) infinite; }
+  @keyframes smSweep { 0% { transform: translateX(-420px); } 60%,100% { transform: translateX(1250px); } }
+
+  /* Motion toggle */
+  #btn-motion { font-size: .72rem; width: auto; padding: 0 .75rem; gap: .35rem; border-color: rgba(244,114,182,.45); color: #f9a8d4; }
+  #btn-motion:not(.on) { border-color: var(--border); color: var(--text-dim); }
+  #btn-motion svg { width: 14px; height: 14px; flex-shrink: 0; }
+  #btn-motion.on svg path { animation: smWave 1.2s ease-in-out infinite; transform-origin: center; }
+  @keyframes smWave { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(.55); } }
+  @media (prefers-reduced-motion: reduce) {
+    #motion-grain, #btn-motion.on svg path { animation: none; }
+  }
+</style>
+<script>
+(() => {
+  'use strict';
+  if (typeof _renderDots !== 'function' || typeof toCanvas !== 'function') return;
+
+  // ------------------------------------------------------------------ state
+  const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let saved = null;
+  try { saved = localStorage.getItem('soundmap_motion'); } catch (_) {}
+  const M = {
+    on: saved ? saved === '1' : !reduced,
+    t0: performance.now(), t: 0, dt: 0, last: performance.now(),
+    introStart: -1, introT: 99, lastScatter: false,
+    adjKey: '', pairs: [], adj: [], vis: [],
+    comets: [], ripples: [], lastSelId: null,
+    warp: 0, sprites: new Map(),
+    bg: null, bctx: null, small: null, sctx: null, stars: [], sonar: [], lastSonarBeat: -1,
+    palette: [],
+  };
+  const TAU = Math.PI * 2;
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const easeOutBack = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+  const hash = s => { let h = 2166136261; s = String(s || ''); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; };
+
+  // ------------------------------------------------------------ helpers
+  function bpmOf(p) {
+    if (!p) return 112;
+    if (p.__smBpm) return p.__smBpm;
+    const raw = Number(p.tempo || p.bpm || p.audio_features?.tempo || p.features?.tempo || 0);
+    let bpm = raw > 40 && raw < 220 ? raw : 78 + Math.round(hash(p.id) * 60);
+    while (bpm > 150) bpm /= 2;
+    p.__smBpm = bpm;
+    p.__smPh = hash('ph' + p.id);
+    return bpm;
+  }
+  // Kick-drum style envelope 0..1, peaks on each beat of the track's tempo.
+  function beat(p, t = M.t) {
+    const bpm = bpmOf(p);
+    const x = ((t * bpm / 60) + p.__smPh) % 1;
+    return Math.exp(-x * 6.5);
+  }
+  function nowPlayingPoint() {
+    if (typeof _npCurrentId === 'undefined' || !_npCurrentId) return null;
+    if (M._npId === _npCurrentId) return M._npPt;
+    M._npId = _npCurrentId;
+    M._npPt = points.find(p => p.id === _npCurrentId) || null;
+    return M._npPt;
+  }
+  function globalBeat() {
+    const np = nowPlayingPoint();
+    if (np) return beat(np);
+    const x = (M.t * 112 / 60) % 1;
+    return Math.exp(-x * 5);
+  }
+  function rgba(col, a) {
+    if (!col) return `rgba(255,255,255,${a})`;
+    if (col.startsWith('hsl(')) return col.replace('hsl(', 'hsla(').replace(')', `, ${a})`);
+    if (col.startsWith('#') && col.length === 7) {
+      const n = parseInt(col.slice(1), 16);
+      return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+    }
+    return col;
+  }
+  function sprite(col) {
+    let s = M.sprites.get(col);
+    if (s) return s;
+    s = document.createElement('canvas');
+    s.width = s.height = 64;
+    const g = s.getContext('2d');
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, rgba(col, 0.9));
+    gr.addColorStop(0.25, rgba(col, 0.35));
+    gr.addColorStop(1, rgba(col, 0));
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 64, 64);
+    M.sprites.set(col, s);
+    return s;
+  }
+  function scatterVisible() {
+    return !!mapData && points.length && !brainMode && !chartMode && !drilldownTracks;
+  }
+  function overlayShown(id) {
+    const el = document.getElementById(id);
+    return !!el && el.style.display && el.style.display !== 'none';
+  }
+  function isVisiblePoint(p) {
+    return !(mapMode === 'playlists' && !(p.playlists && p.playlists.length));
+  }
+  function isDimmed(p) {
+    let d = activeGenreFilter && (mapMode === 'moods'
+      ? (p.mood || 'Uncharted') !== activeGenreFilter
+      : !(p.playlists || []).includes(activeGenreFilter));
+    if (aiHighlightSet) d = !aiHighlightSet.has(p.id);
+    return !!d;
+  }
+
+  // -------------------------------------------- hook: pulsing dot radius
+  const _pointRadius = pointRadius;
+  pointRadius = function (p, base) {
+    const r = _pointRadius(p, base);
+    if (!M.on || brainMode || chartMode || !p) return r;
+    return r * (1 + 0.3 * beat(p));
+  };
+
+  // -------------------------- hook: intro spiral + shockwave displacement
+  const _toCanvas = toCanvas;
+  toCanvas = function (nx, ny) {
+    const o = _toCanvas(nx, ny);
+    if (!M.on || brainMode || chartMode) return o;
+    let cx = o.cx, cy = o.cy;
+    // Shockwaves push dots outward as the ring passes them.
+    for (const r of M.ripples) {
+      const age = M.t - r.t0;
+      if (age > 1.4) continue;
+      const dx = nx - r.nx, dy = ny - r.ny;
+      const d = Math.hypot(dx, dy) || 1e-6;
+      const R = age * 0.42;
+      const k = Math.exp(-Math.pow((d - R) / 0.035, 2)) * (1 - age / 1.4);
+      if (k < 0.002) continue;
+      const push = k * 0.022 * transform.scale;
+      cx += dx / d * push; cy += dy / d * push;
+    }
+    if (M.introT < 1.75) {
+      const c = _toCanvas(0.5, 0.5);
+      const dx = nx - 0.5, dy = ny - 0.5;
+      const d = Math.hypot(dx, dy);
+      const local = clamp((M.introT - d * 0.85) / 0.95, 0, 1);
+      const e = easeOutBack(local);
+      const ang = (1 - local) * (2.6 + d * 3);
+      const vx = cx - c.cx, vy = cy - c.cy;
+      const cs = Math.cos(ang), sn = Math.sin(ang);
+      cx = c.cx + (vx * cs - vy * sn) * e;
+      cy = c.cy + (vx * sn + vy * cs) * e;
+    }
+    return { cx, cy };
+  };
+
+  // ------------------------------------------- constellation adjacency
+  function ensureAdjacency() {
+    const key = `${points.length}:${points[0]?.id}:${mapMode}`;
+    if (key === M.adjKey) return;
+    M.adjKey = key;
+    const vis = [];
+    points.forEach((p, i) => { if (isVisiblePoint(p)) vis.push(i); });
+    const adj = new Map(vis.map(i => [i, []]));
+    const pairs = [];
+    const seen = new Set();
+    const K = 2, MAXD = 0.075;
+    for (const i of vis) {
+      const a = points[i];
+      const best = [];
+      for (const j of vis) {
+        if (j === i) continue;
+        const b = points[j];
+        const d = (a.nx - b.nx) ** 2 + (a.ny - b.ny) ** 2;
+        if (d > MAXD * MAXD) continue;
+        if (best.length < K) { best.push([d, j]); best.sort((x, y) => x[0] - y[0]); }
+        else if (d < best[K - 1][0]) { best[K - 1] = [d, j]; best.sort((x, y) => x[0] - y[0]); }
+      }
+      for (const [, j] of best) {
+        const k = i < j ? `${i}-${j}` : `${j}-${i}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        pairs.push([i, j]);
+        adj.get(i).push(j); adj.get(j).push(i);
+      }
+    }
+    M.vis = vis; M.pairs = pairs; M.adj = adj; M.comets = [];
+  }
+
+  function spawnComet(from) {
+    const vis = M.vis.filter(i => M.adj.get(i)?.length);
+    if (!vis.length) return null;
+    const a = from ?? vis[Math.floor(Math.random() * vis.length)];
+    const nb = M.adj.get(a);
+    if (!nb || !nb.length) return null;
+    return { a, b: nb[Math.floor(Math.random() * nb.length)], k: 0, speed: 0.9 + Math.random() * 1.4, hops: 0 };
+  }
+
+  // --------------------------------------------------- hook: dots FX pass
+  const _renderDotsOrig = _renderDots;
+  _renderDots = function () {
+    _renderDotsOrig.apply(this, arguments);
+    if (!M.on) return;
+    try { dotsFX(); } catch (err) { console.warn('[motion]', err); }
+  };
+
+  function dotsFX() {
+    ensureAdjacency();
+    const t = M.t;
+    const pos = new Map();
+    for (const i of M.vis) { const p = points[i]; pos.set(i, toCanvas(p.nx, p.ny)); }
+
+    // ---- behind the dots: glows, then constellation lines (destination-over)
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-over';
+    for (const i of M.vis) {
+      const p = points[i];
+      if (isDimmed(p)) continue;
+      const { cx, cy } = pos.get(i);
+      const b = beat(p);
+      const s = (10 + 18 * b) * (1 + Math.log(Math.max(1, p.play_score || 1)) / 6);
+      ctx.globalAlpha = 0.22 + 0.45 * b;
+      ctx.drawImage(sprite(pointColor(p)), cx - s, cy - s, s * 2, s * 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 0.8;
+    for (const [i, j] of M.pairs) {
+      const a = points[i], b = points[j];
+      // A wave front sweeps diagonally across the map, lighting the web up.
+      const w = Math.max(0, Math.sin(t * 1.5 - (a.nx + a.ny) * 8));
+      const alpha = 0.035 + 0.22 * Math.pow(w, 8);
+      const pa = pos.get(i), pb = pos.get(j);
+      ctx.strokeStyle = w > 0.9 ? rgba(pointColor(a), alpha + 0.1) : `rgba(255,255,255,${alpha.toFixed(3)})`;
+      ctx.beginPath(); ctx.moveTo(pa.cx, pa.cy); ctx.lineTo(pb.cx, pb.cy); ctx.stroke();
+    }
+    ctx.restore();
+
+    // ---- on top: additive light
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Comets racing along the constellation web
+    const target = Math.min(18, Math.max(4, Math.round(M.pairs.length / 40)));
+    while (M.comets.length < target) { const c = spawnComet(); if (!c) break; M.comets.push(c); }
+    for (let n = M.comets.length - 1; n >= 0; n--) {
+      const c = M.comets[n];
+      c.k += M.dt * c.speed;
+      if (c.k >= 1) {
+        const next = c.hops < 6 ? spawnComet(c.b) : spawnComet();
+        if (next) { next.hops = c.hops + 1; M.comets[n] = next; } else M.comets.splice(n, 1);
+        continue;
+      }
+      const pa = pos.get(c.a), pb = pos.get(c.b);
+      if (!pa || !pb) { M.comets.splice(n, 1); continue; }
+      const hx = pa.cx + (pb.cx - pa.cx) * c.k, hy = pa.cy + (pb.cy - pa.cy) * c.k;
+      const tk = Math.max(0, c.k - 0.45);
+      const tx = pa.cx + (pb.cx - pa.cx) * tk, ty = pa.cy + (pb.cy - pa.cy) * tk;
+      const col = pointColor(points[c.a]);
+      const g = ctx.createLinearGradient(tx, ty, hx, hy);
+      g.addColorStop(0, rgba(col, 0));
+      g.addColorStop(1, rgba(col, 0.85));
+      ctx.strokeStyle = g; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.stroke();
+      ctx.drawImage(sprite(col), hx - 9, hy - 9, 18, 18);
+    }
+
+    // Shockwave rings
+    M.ripples = M.ripples.filter(r => t - r.t0 < 1.4);
+    for (const r of M.ripples) {
+      const age = t - r.t0;
+      const c = _toCanvas(r.nx, r.ny);
+      for (let k = 0; k < 3; k++) {
+        const a2 = age - k * 0.12;
+        if (a2 <= 0) continue;
+        const R = a2 * 0.42 * transform.scale;
+        ctx.strokeStyle = rgba(r.color, Math.max(0, 0.55 * (1 - a2 / 1.3)));
+        ctx.lineWidth = 2.2 - k * 0.6;
+        ctx.beginPath(); ctx.arc(c.cx, c.cy, R, 0, TAU); ctx.stroke();
+      }
+    }
+
+    // Now playing: beat-synced sonar on the track
+    const np = nowPlayingPoint();
+    if (np && isVisiblePoint(np)) {
+      const { cx, cy } = toCanvas(np.nx, np.ny);
+      const bpm = bpmOf(np);
+      const col = pointColor(np);
+      for (let k = 0; k < 3; k++) {
+        const ph = ((t * bpm / 60) / 2 + k / 3) % 1;
+        ctx.strokeStyle = rgba(col, 0.7 * (1 - ph));
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(cx, cy, 6 + ph * 46, 0, TAU); ctx.stroke();
+      }
+      ctx.drawImage(sprite(col), cx - 30, cy - 30, 60, 60);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.font = '9px DM Mono, monospace';
+      ctx.fillStyle = rgba(col, 0.9);
+      ctx.fillText('♪ NOW PLAYING', cx + 12, cy + 20);
+      ctx.globalCompositeOperation = 'lighter';
+    }
+
+    // Hover / selection: spinning dashed orbit
+    for (const [pt, col, rad] of [[hoveredPoint, '#ffffff', 13], [selectedPoint, COLOR_SEL, 18]]) {
+      if (!pt) continue;
+      const { cx, cy } = toCanvas(pt.nx, pt.ny);
+      ctx.setLineDash([3, 5]);
+      ctx.lineDashOffset = -t * 24;
+      ctx.strokeStyle = rgba(col, 0.75);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(cx, cy, rad + 2 * beat(pt), 0, TAU); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+
+  // -------------------------------------------------- ripple triggers
+  let downAt = null;
+  canvas.addEventListener('mousedown', e => { downAt = [e.clientX, e.clientY]; }, true);
+  canvas.addEventListener('mouseup', e => {
+    if (!M.on || !downAt || brainMode || chartMode) return;
+    if (Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+    const n = fromCanvas(e.clientX, e.clientY);
+    M.ripples.push({ nx: n.nx, ny: n.ny, t0: M.t, color: hoveredPoint ? pointColor(hoveredPoint) : '#1db954' });
+    if (M.ripples.length > 5) M.ripples.shift();
+  }, true);
+  function watchSelection() {
+    const id = selectedPoint?.id || null;
+    if (id && id !== M.lastSelId && scatterVisible()) {
+      M.ripples.push({ nx: selectedPoint.nx, ny: selectedPoint.ny, t0: M.t, color: pointColor(selectedPoint) });
+      if (M.ripples.length > 5) M.ripples.shift();
+    }
+    M.lastSelId = id;
+  }
+
+  // --------------------------------------------------- living background
+  function setupBg() {
+    const bg = document.createElement('canvas');
+    bg.id = 'motion-bg';
+    canvas.parentNode.insertBefore(bg, canvas);
+    M.bg = bg; M.bctx = bg.getContext('2d');
+    M.small = document.createElement('canvas');
+    M.sctx = M.small.getContext('2d');
+    const grain = document.createElement('div'); grain.id = 'motion-grain';
+    const vig = document.createElement('div'); vig.id = 'motion-vignette';
+    document.body.appendChild(vig); document.body.appendChild(grain);
+    // Noise tile for film grain
+    const n = document.createElement('canvas'); n.width = n.height = 160;
+    const ng = n.getContext('2d'); const img = ng.createImageData(160, 160);
+    for (let i = 0; i < img.data.length; i += 4) { const v = Math.random() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+    ng.putImageData(img, 0, 0);
+    grain.style.backgroundImage = `url(${n.toDataURL()})`;
+    sizeBg();
+    window.addEventListener('resize', sizeBg);
+  }
+  function sizeBg() {
+    if (!M.bg) return;
+    const w = window.innerWidth, h = window.innerHeight;
+    M.bg.width = w; M.bg.height = h;
+    M.small.width = Math.max(32, Math.round(w / 8));
+    M.small.height = Math.max(32, Math.round(h / 8));
+    const count = w < 700 ? 70 : 150;
+    M.stars = Array.from({ length: count }, () => newStar(true));
+  }
+  function newStar(anywhere) {
+    const a = Math.random() * TAU;
+    const d = anywhere ? Math.random() : Math.random() * 0.08;
+    return { a, d, z: 0.25 + Math.random() * 0.75, tw: Math.random() * TAU, px: null, py: null };
+  }
+  function buildPalette() {
+    const cols = [];
+    if (typeof playlistColors === 'object') cols.push(...Object.values(playlistColors));
+    if (typeof moodColors === 'object' && cols.length < 3) cols.push(...Object.values(moodColors));
+    const fallback = ['hsl(265, 80%, 62%)', 'hsl(145, 70%, 45%)', 'hsl(205, 85%, 58%)', 'hsl(325, 80%, 62%)', 'hsl(35, 90%, 58%)'];
+    M.palette = (cols.length ? cols : fallback).slice(0, 6);
+    while (M.palette.length < 4) M.palette.push(fallback[M.palette.length]);
+    M.paletteKey = M.palette.join();
+  }
+
+  function drawBg() {
+    const g = M.bctx, w = M.bg.width, h = M.bg.height, t = M.t;
+    if (!M.palette.length || M._palTick++ % 120 === 0) buildPalette();
+    const gb = globalBeat();
+
+    // Aurora clouds — rendered tiny, upscaled for a free blur.
+    const s = M.sctx, sw = M.small.width, sh = M.small.height;
+    s.globalCompositeOperation = 'source-over';
+    s.fillStyle = '#0a0a0f';
+    s.fillRect(0, 0, sw, sh);
+    s.globalCompositeOperation = 'lighter';
+    M.palette.forEach((col, i) => {
+      const fx = 0.11 + i * 0.037, fy = 0.083 + i * 0.029;
+      const x = sw * (0.5 + 0.42 * Math.sin(t * fx + i * 1.7));
+      const y = sh * (0.5 + 0.38 * Math.cos(t * fy + i * 2.3));
+      const r = Math.min(sw, sh) * (0.42 + 0.12 * Math.sin(t * 0.21 + i));
+      const gr = s.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, rgba(col, 0.20 + 0.10 * gb));
+      gr.addColorStop(1, rgba(col, 0));
+      s.fillStyle = gr;
+      s.fillRect(0, 0, sw, sh);
+    });
+    g.globalCompositeOperation = 'source-over';
+    g.imageSmoothingEnabled = true;
+    g.drawImage(M.small, 0, 0, w, h);
+
+    // Sonar rings from the centre every 2 beats
+    const beatIdx = Math.floor(M.t * (nowPlayingPoint() ? bpmOf(nowPlayingPoint()) : 112) / 60 / 2);
+    if (beatIdx !== M.lastSonarBeat) { M.lastSonarBeat = beatIdx; M.sonar.push(t); if (M.sonar.length > 4) M.sonar.shift(); }
+    const cx = w / 2, cy = h / 2, maxR = Math.hypot(w, h) / 2;
+    g.lineWidth = 1;
+    for (const st of M.sonar) {
+      const a = (t - st) / 4.5;
+      if (a > 1) continue;
+      g.strokeStyle = `rgba(255,255,255,${(0.07 * (1 - a)).toFixed(3)})`;
+      g.beginPath(); g.arc(cx, cy, a * maxR, 0, TAU); g.stroke();
+    }
+
+    // Star field drifting outward (warps during the intro)
+    M.warp = Math.max(0, M.warp - M.dt * 0.9);
+    const speed = 0.012 + M.warp * 0.9;
+    g.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < M.stars.length; i++) {
+      const st = M.stars[i];
+      st.d += speed * st.z * M.dt * (0.4 + st.d);
+      if (st.d > 1.05) { M.stars[i] = newStar(false); continue; }
+      const x = cx + Math.cos(st.a) * st.d * maxR;
+      const y = cy + Math.sin(st.a) * st.d * maxR;
+      const tw = 0.45 + 0.55 * Math.sin(t * 2.2 + st.tw);
+      const alpha = Math.min(1, st.d * 3) * tw * st.z * (0.55 + 0.4 * gb);
+      if (M.warp > 0.15 && st.px != null) {
+        g.strokeStyle = `rgba(200,210,255,${(alpha * 0.8).toFixed(3)})`;
+        g.lineWidth = st.z * 1.4;
+        g.beginPath(); g.moveTo(st.px, st.py); g.lineTo(x, y); g.stroke();
+      } else {
+        g.fillStyle = `rgba(220,225,255,${alpha.toFixed(3)})`;
+        g.fillRect(x, y, st.z * 1.6, st.z * 1.6);
+      }
+      st.px = x; st.py = y;
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  // --------------------------------------------------------- 2D brain
+  function decorateBrainSVG(svg) {
+    if (!svg || svg.querySelector('.sm-sweep')) return;
+    svg.querySelectorAll('.bv-cell').forEach(el => el.style.setProperty('--sm-i', el.dataset.idx || 0));
+    svg.querySelectorAll('.bv-seed').forEach(el => el.style.setProperty('--sm-i', el.dataset.idx || 0));
+    svg.querySelectorAll('path[stroke="rgba(255,255,255,0.1)"]').forEach(el => el.classList.add('sm-gyrus'));
+    const clip = svg.querySelector('clipPath');
+    if (!clip) return;
+    const ns = 'http://www.w3.org/2000/svg';
+    const defs = document.createElementNS(ns, 'defs');
+    defs.innerHTML = `<linearGradient id="smSweepGrad" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+        <stop offset=".5" stop-color="#fff" stop-opacity=".16"/>
+        <stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>`;
+    const sweep = document.createElementNS(ns, 'g');
+    sweep.setAttribute('class', 'sm-sweep');
+    sweep.setAttribute('clip-path', `url(#${clip.id})`);
+    sweep.setAttribute('style', 'pointer-events:none;mix-blend-mode:screen');
+    sweep.innerHTML = `<rect x="0" y="0" width="300" height="700" fill="url(#smSweepGrad)" transform="skewX(-18)"/>`;
+    const sonar = document.createElementNS(ns, 'g');
+    sonar.setAttribute('class', 'sm-sonar');
+    sonar.setAttribute('clip-path', `url(#${clip.id})`);
+    sonar.setAttribute('style', 'pointer-events:none');
+    sonar.innerHTML = [0, 1.3, 2.6].map(b => `
+      <circle cx="500" cy="344" r="0" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="1.5">
+        <animate attributeName="r" values="0;460" dur="3.9s" begin="${b}s" repeatCount="indefinite"/>
+        <animate attributeName="stroke-opacity" values=".45;0" dur="3.9s" begin="${b}s" repeatCount="indefinite"/>
+      </circle>`).join('');
+    const labels = svg.querySelector('[id$="bv-labels"]');
+    svg.insertBefore(defs, svg.firstChild);
+    svg.insertBefore(sweep, labels);
+    svg.insertBefore(sonar, labels);
+  }
+  function brainIntro(svg) {
+    if (!M.on || !svg) return;
+    svg.classList.remove('sm-bv-intro');
+    void svg.getBoundingClientRect();
+    svg.classList.add('sm-bv-intro');
+    clearTimeout(M._bvTimer);
+    M._bvTimer = setTimeout(() => svg.classList.remove('sm-bv-intro'), 2000);
+    M.warp = 1;
+  }
+  if (typeof _showBrainOverlay === 'function') {
+    const _showBrainOverlayOrig = _showBrainOverlay;
+    _showBrainOverlay = function () {
+      const ov = document.getElementById('brain-overlay');
+      const svg = document.getElementById('brain-svg');
+      const wasHidden = ov && ov.style.display !== 'block';
+      const before = svg?.dataset.built;
+      const r = _showBrainOverlayOrig.apply(this, arguments);
+      if (svg && (svg.dataset.built !== before || !svg.querySelector('.sm-sweep'))) decorateBrainSVG(svg);
+      if (wasHidden) brainIntro(svg);
+      return r;
+    };
+  }
+  if (typeof _showCompareBrainView === 'function') {
+    const _cmpOrig = _showCompareBrainView;
+    _showCompareBrainView = function () {
+      const r = _cmpOrig.apply(this, arguments);
+      ['cmp-svg-me', 'cmp-svg-friend'].forEach(id => decorateBrainSVG(document.getElementById(id)));
+      return r;
+    };
+  }
+
+  // --------------------------------------------------------- 3D brain
+  if (typeof _brain3DAnimate === 'function' && typeof brain3D === 'object') {
+    const _b3dOrig = _brain3DAnimate;
+    _brain3DAnimate = function () {
+      if (brain3D.ready) {
+        const on = M.on;
+        const gb = on ? globalBeat() : 0;
+        if (brain3D.group) {
+          const s = on ? 1 + 0.012 * Math.sin(M.t * 1.3) + 0.018 * gb : 1;
+          brain3D.group.scale.setScalar(s);
+        }
+        if (brain3D.stars) {
+          brain3D.stars.rotation.y += on ? 0.0012 + M.warp * 0.02 : 0;
+          brain3D.stars.rotation.x = on ? Math.sin(M.t * 0.07) * 0.08 : brain3D.stars.rotation.x;
+        }
+      }
+      return _b3dOrig.apply(this, arguments);
+    };
+  }
+
+  // ------------------------------------------------------------ toggle
+  function addToggle() {
+    const anchor = document.getElementById('btn-brain3d') || document.getElementById('btn-brain');
+    if (!anchor) return;
+    const btn = document.createElement('button');
+    btn.className = 'btn-icon';
+    btn.id = 'btn-motion';
+    btn.title = 'Toggle motion graphics (M)';
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M4 10v4" style="animation-delay:-.2s"/><path d="M8 6v12" style="animation-delay:-.5s"/>
+      <path d="M12 3v18" style="animation-delay:-.1s"/><path d="M16 7v10" style="animation-delay:-.7s"/>
+      <path d="M20 10v4" style="animation-delay:-.35s"/></svg> Motion`;
+    anchor.insertAdjacentElement('afterend', btn);
+    btn.addEventListener('click', () => setMotion(!M.on));
+    document.addEventListener('keydown', e => {
+      if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey && !e.altKey &&
+          !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '') &&
+          !document.activeElement?.isContentEditable) setMotion(!M.on);
+    });
+  }
+  function setMotion(on) {
+    M.on = on;
+    try { localStorage.setItem('soundmap_motion', on ? '1' : '0'); } catch (_) {}
+    document.body.classList.toggle('sm-motion', on);
+    document.getElementById('btn-motion')?.classList.toggle('on', on);
+    if (M.bg) M.bg.style.display = on ? 'block' : 'none';
+    M.introT = 99; M.ripples = [];
+    if (!on && scatterVisible()) render();
+    if (on && scatterVisible()) startIntro();
+  }
+  function startIntro() {
+    if (!M.on) return;
+    M.introStart = M.t; M.introT = 0; M.warp = 1;
+  }
+
+  // -------------------------------------------------------------- loop
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (document.hidden) { M.last = now; return; }
+    M.dt = Math.min(0.05, (now - M.last) / 1000);
+    M.last = now;
+    M.t = (now - M.t0) / 1000;
+    if (!M.on) return;
+
+    const sc = scatterVisible();
+    if (sc && !M.lastScatter) startIntro();
+    M.lastScatter = sc;
+    if (M.introStart >= 0) M.introT = M.t - M.introStart;
+
+    if (!overlayShown('brain3d-overlay') && !drilldownTracks) drawBg();
+    if (sc) {
+      watchSelection();
+      try { comparePoints.length ? renderWithCompare() : _renderDots(); } catch (err) { console.warn('[motion]', err); }
+    }
+  }
+
+  setupBg();
+  addToggle();
+  setMotion(M.on);
+  M._palTick = 0;
+  requestAnimationFrame(frame);
+})();
+</script>
+<!-- =================== end SoundMap Motion Layer =================== -->
+
 </body>
 </html>
