@@ -3,6 +3,7 @@ Spotify library processing pipeline — adapted for per-user programmatic use.
 Fetches tracks, computes genre embeddings, runs UMAP, saves result via storage.py.
 """
 
+import os
 import time
 import numpy as np
 from typing import Callable
@@ -606,7 +607,7 @@ def _call_llm_chat(system: str, user: str, api_key: str, provider: str = "anthro
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1")
         resp = client.chat.completions.create(
-            model="z-ai/glm-5.1",
+            model=os.environ.get("NVIDIA_MODEL", "z-ai/glm-5.3"),
             max_tokens=max_tokens,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         )
