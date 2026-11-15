@@ -9530,7 +9530,7 @@ startNowPlayingPolling();
     const dirs = brain3D.dirs || [];
     if (!dirs.length) return;
     const lobeCols = brain3D.names.map(n => _hexToThreeColor(THREE, playlistColors[n] || COLOR_UNTAGGED));
-    const N = mobile ? 24000 : 50000;
+    const N = mobile ? 16000 : 34000;
     const pos = new Float32Array(N * 3), colA = new Float32Array(N * 3);
     const dat = new Float32Array(N * 4), start = new Float32Array(N * 3);
     let rs = 123456789;
@@ -9600,6 +9600,20 @@ startNowPlayingPolling();
       put(px, py, pz, [px / SX, py / SY, pz / SZ], 0.5, 0, 0.45);
     }
 
+    // Shuffle so that drawing only the first X% still samples the whole
+    // brain evenly — that is what adaptive quality leans on below.
+    for (let a1 = N - 1; a1 > 0; a1--) {
+      const b1 = Math.floor(rnd() * (a1 + 1));
+      for (let c = 0; c < 3; c++) {
+        let t2 = pos[a1 * 3 + c]; pos[a1 * 3 + c] = pos[b1 * 3 + c]; pos[b1 * 3 + c] = t2;
+        t2 = colA[a1 * 3 + c]; colA[a1 * 3 + c] = colA[b1 * 3 + c]; colA[b1 * 3 + c] = t2;
+        t2 = start[a1 * 3 + c]; start[a1 * 3 + c] = start[b1 * 3 + c]; start[b1 * 3 + c] = t2;
+      }
+      for (let c = 0; c < 4; c++) {
+        const t2 = dat[a1 * 4 + c]; dat[a1 * 4 + c] = dat[b1 * 4 + c]; dat[b1 * 4 + c] = t2;
+      }
+    }
+
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geom.setAttribute('aColor', new THREE.BufferAttribute(colA, 3));
@@ -9641,6 +9655,9 @@ startNowPlayingPolling();
           gl_FragColor = vec4(vC * (0.3 + 0.8 * core), vA * 0.55 * (0.08 + 0.92 * core));
         }`,
     });
+    PB.total = N;
+    PB.quality = PB.quality || 1;
+    geom.setDrawRange(0, Math.round(N * PB.quality));
     PB.obj = new THREE.Points(geom, PB.mat);
     PB.obj.renderOrder = 2;
     PB.obj.frustumCulled = false;
@@ -9672,6 +9689,35 @@ startNowPlayingPolling();
     _brain3DAnimate = function () {
       if (brain3D.ready) {
         const on = M.on;
+        // Adaptive quality: sample frame times and drop/raise the share of
+        // points drawn so the brain keeps a smooth frame rate on any machine.
+        if (on && PB.obj && PB.total) {
+          const nowMs = performance.now();
+          if (PB.lastFrame) {
+            const ft = nowMs - PB.lastFrame;
+            PB.ftAvg = PB.ftAvg ? PB.ftAvg * 0.9 + ft * 0.1 : ft;
+            PB.qCheck = (PB.qCheck || 0) + 1;
+            if (PB.qCheck > 45 && PB.ftAvg) {
+              PB.qCheck = 0;
+              const q = PB.quality || 1;
+              let nq = q;
+              if (PB.ftAvg > 26 && q > 0.18) nq = Math.max(0.18, q - 0.18);
+              else if (PB.ftAvg < 15 && q < 1) nq = Math.min(1, q + 0.08);
+              if (nq !== q) {
+                PB.quality = nq;
+                PB.obj.geometry.setDrawRange(0, Math.round(PB.total * nq));
+              }
+            }
+          }
+          PB.lastFrame = nowMs;
+        }
+        if (PB.zoomT != null) {
+          if (brain3D.cameraTween) PB.zoomT = null;
+          else {
+            brain3D.distance += (PB.zoomT - brain3D.distance) * (1 - Math.exp(-M.dt * 8));
+            if (Math.abs(PB.zoomT - brain3D.distance) < 0.003) { brain3D.distance = PB.zoomT; PB.zoomT = null; }
+          }
+        }
         if (on && (!PB.obj || !PB.obj.parent)) { try { pbBuild(); } catch (err) { console.warn('[motion:pb]', err); } }
         const gb = on ? globalBeat() : 0;
         if (PB.obj && PB.mat) {
@@ -9795,15 +9841,37 @@ startNowPlayingPolling();
     if (typeof _brain3DZoom === 'function') {
       const _zoomOrig = _brain3DZoom;
       _brain3DZoom = function (factor) {
-        if (brain3D.ready && brain3D.mode !== 'world' && factor < 1 && brain3D.distance >= 5.4) {
+        if (!brain3D.ready) return _zoomOrig.apply(this, arguments);
+        brain3D.cameraTween = null;
+        brain3D.lastInputAt = performance.now();
+        // Dynamic zoom: wheel moves a TARGET; the camera glides to it each
+        // frame instead of teleporting one step per notch.
+        const cur = PB.zoomT == null ? brain3D.distance : PB.zoomT;
+        PB.zoomT = Math.max(2.15, Math.min(8.5, cur / factor));
+        M.warp = Math.min(1, M.warp + 0.12);
+        if (brain3D.mode !== 'world' && factor < 1 && PB.zoomT >= 5.4) {
+          PB.zoomT = null;
           _brain3DReturnWorld();
           return true;
         }
-        const r = _zoomOrig.apply(this, arguments);
-        if (brain3D.ready && brain3D.mode === 'world' && factor > 1 && brain3D.hoverIndex >= 0 && brain3D.distance <= 2.4) {
-          _brain3DEnterPlaylist(brain3D.hoverIndex);
+        if (brain3D.mode === 'world' && factor > 1 && brain3D.hoverIndex >= 0) {
+          // Steer toward the lobe under the cursor while zooming in
+          const d = brain3D.dirs[brain3D.hoverIndex];
+          if (d) {
+            const ty = Math.atan2(d[0], d[2]);
+            const tp = Math.asin(Math.max(-0.72, Math.min(0.72, d[1]))) * 0.72;
+            let dy = ty - brain3D.yaw;
+            dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+            brain3D.yaw += dy * 0.16;
+            brain3D.pitch += (tp - brain3D.pitch) * 0.16;
+          }
+          if (PB.zoomT <= 2.35) {
+            PB.zoomT = null;
+            _brain3DEnterPlaylist(brain3D.hoverIndex);
+            return true;
+          }
         }
-        return r;
+        return true;
       };
     }
     if (typeof _brain3DUpdateNav === 'function') {
@@ -9873,16 +9941,31 @@ startNowPlayingPolling();
     M.t = (now - M.t0) / 1000;
     if (!M.on) return;
 
-    const sc = scatterVisible();
+    const sc = scatterVisible() && !overlayShown('brain3d-overlay');
     if (sc && !M.lastScatter) startIntro();
     M.lastScatter = sc;
     if (M.introStart >= 0) M.introT = M.t - M.introStart;
 
-    if (!overlayShown('brain3d-overlay') && !drilldownTracks) drawBg();
+    const b3d = overlayShown('brain3d-overlay');
+    const grainEl = document.getElementById('motion-grain');
+    if (grainEl) grainEl.style.display = b3d ? 'none' : '';
+    if (!b3d && !drilldownTracks) drawBg();
     if (sc) {
       watchSelection();
       try { comparePoints.length ? renderWithCompare() : _renderDots(); } catch (err) { console.warn('[motion]', err); }
     }
+  }
+
+  // Focus mode: only the 3D particle brain for now — the scatter and 2D
+  // brain switchers are parked while performance is tuned. Flip to false
+  // to bring them back.
+  const FOCUS_3D = true;
+  if (FOCUS_3D) {
+    const css = document.createElement('style');
+    css.textContent = '#btn-brain, #btn-brain3d { display: none !important; }';
+    document.head.appendChild(css);
+    brainMode = true;
+    brain3DMode = true;
   }
 
   setupBg();
