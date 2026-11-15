@@ -220,15 +220,48 @@ def get_audio_features_for_tracks(
     if not tracks:
         return {}
 
-    token = _spotify_search_token(spotify_token)
     source_to_spotify: dict[str, str] = {}
+    needs_resolve: list[dict] = []
+
+    # Pass 1 — no network: direct Spotify IDs, then the ISRC cache.
+    # Apple/YouTube libraries carry ISRCs, so on a rebuild almost every
+    # track resolves from the cache instead of a per-track Spotify search.
+    isrc_cache: dict[str, dict] = {}
+    try:
+        from . import storage
+        isrcs = [str(t.get("isrc") or "").strip() for t in tracks
+                 if t.get("isrc") and not SPOTIFY_ID_RE.match(str(t.get("id") or "").strip())]
+        if isrcs:
+            isrc_cache = storage.load_track_audio_features_by_isrc(isrcs)
+    except Exception as exc:
+        print(f"[reccobeats] ISRC cache unavailable ({exc})")
+
     for track in tracks:
         source_id = str(track.get("id") or "").strip()
         if not source_id:
             continue
-        spotify_id = _resolve_spotify_id(track, token)
-        if spotify_id:
-            source_to_spotify[source_id] = spotify_id
+        tid = str(track.get("spotify_id") or track.get("id") or "").strip()
+        if SPOTIFY_ID_RE.match(tid):
+            source_to_spotify[source_id] = tid
+            continue
+        cached_row = isrc_cache.get(str(track.get("isrc") or "").strip().upper())
+        cached_sid = str((cached_row or {}).get("spotify_id") or "").strip()
+        if cached_sid:
+            source_to_spotify[source_id] = cached_sid
+            continue
+        needs_resolve.append(track)
+
+    # Pass 2 — resolve the rest against Spotify search, in parallel.
+    if needs_resolve:
+        token = _spotify_search_token(spotify_token)
+        if token:
+            print(f"[reccobeats] resolving {len(needs_resolve)}/{len(tracks)} tracks via Spotify search")
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                resolved = pool.map(lambda t: _resolve_spotify_id(t, token), needs_resolve)
+                for track, spotify_id in zip(needs_resolve, resolved):
+                    if spotify_id:
+                        source_to_spotify[str(track.get("id") or "").strip()] = spotify_id
 
     spotify_ids = list(dict.fromkeys(source_to_spotify.values()))
     if not spotify_ids:

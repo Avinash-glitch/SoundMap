@@ -216,6 +216,47 @@ def load_track_audio_features(spotify_ids: list[str]) -> dict[str, dict]:
     return {sid: existing[sid] for sid in clean_ids if sid in existing}
 
 
+def load_track_audio_features_by_isrc(isrcs: list[str]) -> dict[str, dict]:
+    """Return cached audio features keyed by ISRC.
+
+    Lets non-Spotify libraries (Apple Music, YouTube Music) skip the
+    per-track Spotify search on rebuilds: a track whose ISRC is already
+    cached resolves to its spotify_id with zero network requests.
+    """
+    clean = list(dict.fromkeys(str(i).strip().upper() for i in isrcs if str(i or "").strip()))
+    if not clean:
+        return {}
+
+    sb = _get_supabase()
+    if sb:
+        try:
+            rows: dict[str, dict] = {}
+            for start in range(0, len(clean), 200):
+                batch = clean[start:start + 200]
+                result = sb.table("track_audio_features").select("*").in_("isrc", batch).execute()
+                for row in (result.data or []):
+                    isrc = str(row.get("isrc") or "").strip().upper()
+                    if isrc and isrc not in rows:
+                        rows[isrc] = row
+            return rows
+        except Exception as e:
+            print(f"[storage] Supabase ISRC feature load failed, falling back to file: {e}")
+
+    if not AUDIO_FEATURE_CACHE.exists():
+        return {}
+    try:
+        existing = json.loads(AUDIO_FEATURE_CACHE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    wanted = set(clean)
+    out: dict[str, dict] = {}
+    for row in existing.values():
+        isrc = str((row or {}).get("isrc") or "").strip().upper()
+        if isrc in wanted and isrc not in out:
+            out[isrc] = row
+    return out
+
+
 def load_map(user_id: str) -> dict | None:
     """Return map data or None if not found."""
     sb = _get_supabase()
