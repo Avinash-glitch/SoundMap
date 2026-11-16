@@ -128,7 +128,9 @@ def _find_mbid(name: str, artist: str, isrc: str | None) -> str | None:
         time.sleep(RATE_DELAY)
 
     # Name + artist search
-    safe = lambda s: s.replace('"', "").replace("\\", "")[:100]
+    def safe(s: str) -> str:
+        return s.replace('"', "").replace("\\", "")[:100]
+
     return _search(f'recording:"{safe(name)}" AND artist:"{safe(artist)}"', limit=1)
 
 

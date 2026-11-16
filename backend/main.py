@@ -135,13 +135,52 @@ async def redirect_legacy_hosts(request: Request, call_next):
         return RedirectResponse(target, status_code=308)
     return await call_next(request)
 
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.environ.get("SESSION_SECRET", "dev-secret-change-in-production"),
-)
+def _session_secret() -> str:
+    """Session signing key.
+
+    A hard-coded fallback would let anyone forge a session, so there is none.
+    When SESSION_SECRET is unset we mint a random one for this process and say
+    so loudly: sessions then reset on restart and are not shared across
+    replicas, but they can never be forged.
+    """
+    secret = os.environ.get("SESSION_SECRET", "").strip()
+    if secret:
+        return secret
+    import secrets as _secrets
+    print(
+        "[startup] WARNING: SESSION_SECRET is not set. Using a random key for "
+        "this process - everyone is logged out on restart and sessions do not "
+        "work across replicas. Set SESSION_SECRET to fix this.",
+        flush=True,
+    )
+    return _secrets.token_urlsafe(48)
+
+
+def _allowed_origins() -> list[str]:
+    """Browser origins allowed to send credentialed cross-site requests.
+
+    The frontend is served from the same origin as the API, so this only needs
+    the hosts we actually run on. '*' together with allow_credentials makes
+    Starlette reflect whatever Origin it is sent, which would expose the
+    session cookie to any site, so it is never used.
+    """
+    origins = {"http://127.0.0.1:8000", "http://localhost:8000"}
+    if CANONICAL_HOST:
+        origins.add(f"https://{CANONICAL_HOST}")
+    for host in LEGACY_HOSTS:
+        if host:
+            origins.add(f"https://{host}")
+    for extra in os.environ.get("CORS_ALLOW_ORIGINS", "").split(","):
+        extra = extra.strip()
+        if extra:
+            origins.add(extra)
+    return sorted(origins)
+
+
+app.add_middleware(SessionMiddleware, secret_key=_session_secret())
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -416,9 +455,28 @@ async def stop_job_endpoint(job_id: str, request: Request) -> JSONResponse:
     return JSONResponse({"stopped": stopped})
 
 
+DEBUG_ROUTES_ENABLED = os.environ.get("SOUNDMAP_DEBUG_ROUTES", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _require_debug_routes() -> None:
+    """Debug routes hand out access tokens, so they are off unless asked for.
+
+    404 rather than 403 when disabled, so they are not advertised at all.
+    """
+    if not DEBUG_ROUTES_ENABLED:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+@app.get("/healthz")
+async def healthz() -> JSONResponse:
+    """Liveness probe: no auth, no session, no external calls."""
+    return JSONResponse({"status": "ok"})
+
+
 @app.get("/debug/token")
 async def debug_token(request: Request) -> JSONResponse:
     """Return the current session's Spotify token for testing."""
+    _require_debug_routes()
     token = request.session.get("access_token")
     user_id = request.session.get("user_id")
     if not token:
@@ -429,6 +487,7 @@ async def debug_token(request: Request) -> JSONResponse:
 @app.get("/debug/playlists")
 async def debug_playlists(request: Request) -> JSONResponse:
     """Test endpoint — lists owned playlists and fetches items from the first one."""
+    _require_debug_routes()
     token = request.session.get("access_token")
     user_id = request.session.get("user_id")
     if not token:
@@ -1042,7 +1101,7 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
 
     def artist_recommendations(source_profile: dict[str, dict], target_keys: set[str], limit: int = 24) -> list[dict]:
         recs: list[dict] = []
-        for artist_key, source_artist in source_profile.items():
+        for _artist_key, source_artist in source_profile.items():
             candidates = [
                 item
                 for tk, item in source_artist["tracks"].items()
@@ -1920,7 +1979,7 @@ async def create_mood_playlists(request: Request) -> JSONResponse:
 
         # Create the playlist
         pl_resp = _requests.post(
-            f"https://api.spotify.com/v1/me/playlists",
+            "https://api.spotify.com/v1/me/playlists",
             headers=h,
             json={
                 "name": pl_name,
