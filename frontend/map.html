@@ -9014,7 +9014,117 @@ startNowPlayingPolling();
   @keyframes smSweep { 0% { transform: translateX(-420px); } 60%,100% { transform: translateX(1250px); } }
 
   /* Motion toggle */
+  /* ---- playlist panel + overlay chrome, restyled for the space view ---- */
   #brain3d-overlay { user-select: none; -webkit-user-select: none; }
+  #brain3d-detail-panel {
+    width: min(430px, 31vw) !important;
+    padding: 4.7rem 1.45rem 2rem !important;   /* clear the top toolbar */
+    background:
+      linear-gradient(180deg, rgba(9,11,18,.84), rgba(5,6,11,.95) 60%),
+      radial-gradient(125% 48% at 88% -4%, var(--pl, #7c6af7), transparent 62%) !important;
+    backdrop-filter: blur(22px) saturate(1.25);
+    -webkit-backdrop-filter: blur(22px) saturate(1.25);
+    border-left: 1px solid rgba(255,255,255,.07) !important;
+    box-shadow: -34px 0 80px rgba(0,0,0,.6) !important;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,.16) transparent;
+  }
+  #brain3d-detail-panel::-webkit-scrollbar { width: 7px; }
+  #brain3d-detail-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 99px; }
+  #brain3d-detail-panel::-webkit-scrollbar-track { background: transparent; }
+  #brain3d-detail-panel .brain3d-panel-eyebrow {
+    text-transform: uppercase; font-size: .6rem; letter-spacing: .24em;
+    color: var(--pl, #a5b4fc); opacity: .85;
+  }
+  #brain3d-detail-panel .brain3d-panel-title {
+    font-size: clamp(1.35rem, 2.1vw, 1.75rem) !important;
+    line-height: 1.04; letter-spacing: -.025em; margin-top: .18rem;
+  }
+  #brain3d-detail-panel .brain3d-panel-meta {
+    font-size: .73rem; color: rgba(255,255,255,.46); margin-top: .3rem; letter-spacing: .02em;
+  }
+  #brain3d-detail-panel .brain3d-panel-orb {
+    box-shadow: inset 0 0 18px rgba(255,255,255,.22), 0 0 0 1px rgba(255,255,255,.12), 0 0 30px var(--pl, #7c6af7);
+  }
+  #brain3d-detail-panel .brain3d-ai-button {
+    width: 100%; border-radius: 12px !important;
+    border: 1px solid rgba(255,255,255,.13) !important;
+    background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02)) !important;
+    color: #f2f3f7 !important; font-size: .8rem !important; padding: .72rem 1rem !important;
+    transition: border-color .18s, background .18s, transform .12s;
+  }
+  #brain3d-detail-panel .brain3d-ai-button:hover:not(:disabled) {
+    border-color: var(--pl, #7c6af7) !important;
+    background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.03)) !important;
+  }
+  #brain3d-detail-panel .brain3d-ai-button:active:not(:disabled) { transform: translateY(1px); }
+  #brain3d-detail-panel .brain3d-ai-note {
+    font-size: .67rem !important; line-height: 1.55 !important; color: rgba(255,255,255,.4) !important;
+  }
+  #brain3d-detail-panel .brain3d-artist-title {
+    position: sticky; top: -.2rem; z-index: 2;
+    padding: .5rem .2rem .45rem !important;
+    background: linear-gradient(180deg, rgba(7,8,14,.96), rgba(7,8,14,.72));
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    font-size: .84rem !important; letter-spacing: -.01em;
+  }
+  #brain3d-detail-panel .brain3d-artist-title::before {
+    content: ''; flex: 0 0 auto; width: 7px; height: 7px; border-radius: 99px;
+    margin-right: .5rem; background: var(--pl, #7c6af7); box-shadow: 0 0 9px var(--pl, #7c6af7);
+  }
+  #brain3d-detail-panel .brain3d-artist-count {
+    font-size: .66rem !important; color: rgba(255,255,255,.4) !important; letter-spacing: .04em;
+  }
+  #brain3d-detail-panel .brain3d-track-row {
+    border-radius: 9px; padding: .4rem .5rem !important; margin: .1rem 0;
+    border-bottom: none !important;
+    transition: background .15s, transform .15s, box-shadow .15s;
+  }
+  #brain3d-detail-panel .brain3d-track-row:hover {
+    background: rgba(255,255,255,.055);
+    transform: translateX(3px);
+    box-shadow: inset 2px 0 0 var(--pl, #7c6af7);
+  }
+  #brain3d-detail-panel .brain3d-track-num {
+    font-variant-numeric: tabular-nums; font-size: .66rem !important; color: rgba(255,255,255,.28) !important;
+  }
+  #brain3d-detail-panel .brain3d-track-title { font-size: .81rem !important; font-weight: 500 !important; }
+  #brain3d-detail-panel .brain3d-track-duration { font-size: .68rem !important; color: rgba(255,255,255,.34) !important; }
+  #brain3d-detail-panel .brain3d-panel-close {
+    width: 30px; height: 30px; border-radius: 99px;
+    border: 1px solid rgba(255,255,255,.12) !important;
+    background: rgba(255,255,255,.05) !important; color: rgba(255,255,255,.7) !important;
+    transition: background .15s, color .15s;
+  }
+  #brain3d-detail-panel .brain3d-panel-close:hover { background: rgba(255,255,255,.12) !important; color: #fff !important; }
+  /* floating labels and hint chips as glass */
+  #brain3d-label-layer .brain3d-label {
+    background: rgba(10,12,20,.62) !important;
+    backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+    border: 1px solid rgba(255,255,255,.1) !important;
+    border-radius: 99px !important;
+    padding: .22rem .6rem !important;
+    font-size: .68rem !important;
+    letter-spacing: .01em;
+    box-shadow: 0 3px 14px rgba(0,0,0,.45);
+    transition: background .15s, border-color .15s;
+  }
+  #brain3d-label-layer .brain3d-label:hover {
+    background: rgba(22,25,38,.82) !important; border-color: rgba(255,255,255,.22) !important;
+  }
+  #brain3d-hud span {
+    background: rgba(10,12,20,.55) !important;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.08) !important;
+  }
+  /* the world blurb has no business over a playlist */
+  #brain3d-overlay.sm-in-playlist #brain3d-brand { opacity: 0; pointer-events: none; }
+  #brain3d-brand { transition: opacity .3s; }
+  @media (max-width: 860px) {
+    #brain3d-detail-panel { padding: 1.15rem 1rem 1.65rem !important; width: 100% !important; }
+  }
+
   #btn-motion { font-size: .72rem; width: auto; padding: 0 .75rem; gap: .35rem; border-color: rgba(244,114,182,.45); color: #f9a8d4; }
   #btn-motion:not(.on) { border-color: var(--border); color: var(--text-dim); }
   #btn-motion svg { width: 14px; height: 14px; flex-shrink: 0; }
@@ -10062,10 +10172,37 @@ startNowPlayingPolling();
     const _selOrig = _brain3DSelectArtist;
     _brain3DSelectArtist = function (idx) {
       const r = _selOrig.apply(this, arguments);
+      PB.buzz && PB.buzz(10);
       (brain3D.artistMeshes || []).forEach((mesh, i) => {
         const u = mesh.material && mesh.material.uniforms;
         if (u && u.uSelect) u.uSelect.value = i === idx ? 1 : 0.4;
       });
+      return r;
+    };
+  }
+
+  // Light haptic taps. navigator.vibrate works on Android browsers; iOS
+  // Safari and desktop have no web haptics API, where this is a no-op.
+  const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (_) {} };
+  PB.buzz = buzz;
+
+  // Tint the panel with the playlist's own colour, and mark the overlay so
+  // the world blurb can step aside.
+  if (typeof _brain3DShowPlaylistPanel === 'function') {
+    const _panelOrig = _brain3DShowPlaylistPanel;
+    _brain3DShowPlaylistPanel = function (idx) {
+      const r = _panelOrig.apply(this, arguments);
+      const panel = document.getElementById('brain3d-detail-panel');
+      const col = (typeof playlistColors === 'object' && playlistColors[brain3D.names?.[idx]]) || '#7c6af7';
+      if (panel) panel.style.setProperty('--pl', col);
+      return r;
+    };
+  }
+  if (typeof _brain3DUpdateNav === 'function') {
+    const _navOrig2 = _brain3DUpdateNav;
+    _brain3DUpdateNav = function () {
+      const r = _navOrig2.apply(this, arguments);
+      document.getElementById('brain3d-overlay')?.classList.toggle('sm-in-playlist', brain3D.mode !== 'world');
       return r;
     };
   }
@@ -10116,6 +10253,7 @@ startNowPlayingPolling();
     const _enterOrig = _brain3DEnterPlaylist;
     _brain3DEnterPlaylist = function (idx) {
       const r = _enterOrig.apply(this, arguments);
+      PB.buzz && PB.buzz([12, 28, 16]);
       if (M.on && brain3D.cameraTween && brain3D.cameraTween.to) {
         brain3D.cameraTween.to.distance = window.innerWidth < 768 ? 3.1 : 2.85;
       }
