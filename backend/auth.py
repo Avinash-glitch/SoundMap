@@ -10,7 +10,6 @@ import httpx
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from .jobs import submit_job
 from .notifications import send_notification
 from . import storage
 

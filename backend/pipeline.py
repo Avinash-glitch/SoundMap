@@ -1177,7 +1177,7 @@ def _build_map_data(
 ) -> dict:
     pl_to_mood = pl_to_mood or {}
     points = []
-    for track, (x, y), genre in zip(tracks, coords, track_genres):
+    for track, (x, y), genre in zip(tracks, coords, track_genres, strict=False):
         pl = (track.get("playlists") or [None])[0]
         mood = pl_to_mood.get(pl, "Uncharted") if pl else "Uncharted"
         points.append({
@@ -1196,7 +1196,7 @@ def _build_map_data(
         "embedding_method": "genres",
         "display_name": display_name,
         "playlists": playlist_meta or [],
-        "moods": sorted(set(p["mood"] for p in points)),
+        "moods": sorted({p["mood"] for p in points}),
         "persona": persona,
         "remaining": remaining or [],
     }

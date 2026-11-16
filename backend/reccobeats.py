@@ -136,9 +136,17 @@ def get_audio_features_for_ids(track_ids: list[str]) -> list[dict]:
             raise RuntimeError(f"ReccoBeats audio features lookup failed: {detail}")
 
         payload = resp.json()
-        rows = payload.get("content", payload if isinstance(payload, list) else [])
-        if not isinstance(rows, list):
-            rows = [payload]
+        # The endpoint answers either {"content": [...]} or a bare list. The
+        # old spelling called .get() before checking, so a list response raised
+        # AttributeError instead of being handled.
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict):
+            rows = payload.get("content") or []
+            if not isinstance(rows, list):
+                rows = [rows]
+        else:
+            rows = []
         for row in rows:
             if isinstance(row, dict):
                 normalised = _normalise_features(row)
@@ -259,7 +267,7 @@ def get_audio_features_for_tracks(
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=6) as pool:
                 resolved = pool.map(lambda t: _resolve_spotify_id(t, token), needs_resolve)
-                for track, spotify_id in zip(needs_resolve, resolved):
+                for track, spotify_id in zip(needs_resolve, resolved, strict=True):
                     if spotify_id:
                         source_to_spotify[str(track.get("id") or "").strip()] = spotify_id
 

@@ -1,0 +1,4 @@
+# Test and lint tooling. Not installed into the runtime image.
+-r requirements.txt
+pytest==8.3.4
+ruff==0.8.6

@@ -100,6 +100,58 @@ SUPABASE_KEY=optional
 
 ---
 
+## Development
+
+### Run it in Docker
+
+```bash
+cp .env.example .env.local      # fill in your keys
+docker compose up --build
+```
+
+Serves on <http://127.0.0.1:8000> with map data in a named volume, so no
+Supabase project is needed. Register `http://127.0.0.1:8000/auth/callback` as a
+redirect URI on your Spotify developer app for login to work.
+
+The Dockerfile lives in `docker/` rather than the repo root on purpose: a root
+Dockerfile makes Railway switch away from Nixpacks, which would change how
+production is built. It runs as a non-root user and ships a `HEALTHCHECK`
+against `/healthz`.
+
+### Dependencies
+
+`requirements.txt` is the single source of truth and keeps loose ranges, so a
+Railway deploy never fails on a resolver conflict. `requirements.lock` pins
+every transitive version and is what Docker and CI install, so those builds are
+reproducible. Regenerate the lock with:
+
+```bash
+pip install --dry-run --ignore-installed --report r.json -r requirements.txt
+```
+
+### Tests and lint
+
+```bash
+pip install -r requirements-dev.txt
+pytest          # offline; no tokens or API keys needed
+ruff check backend tests
+```
+
+GitHub Actions runs both on every pull request and on pushes to `main` and
+`dev-soundmap`, then builds the Docker image, boots it and checks `/healthz`
+answers and that the container is not running as root.
+
+### Operational notes
+
+- `GET /healthz` is the liveness probe: no auth, no session, no external calls.
+- `/debug/token` and `/debug/playlists` hand out the caller's Spotify access
+  token and return **404 unless `SOUNDMAP_DEBUG_ROUTES=1`**. Leave it unset in
+  production.
+- `SESSION_SECRET` has no default. If unset the app generates a random key per
+  process and logs a warning, so sessions cannot be forged but do reset on
+  every restart. Set it in any environment you care about.
+- CORS allows only the app's own hosts plus anything in `CORS_ALLOW_ORIGINS`.
+
 ## Deploy to Railway
 
 1. Fork this repo and connect it to [Railway](https://railway.app)

@@ -1,0 +1,30 @@
+# Local SoundMap: `docker compose up --build`
+#
+# Uses file storage under a named volume, so no Supabase project is needed and
+# nothing touches production. Put your keys in .env.local (see .env.example);
+# for a Spotify login to work, register
+#   http://127.0.0.1:8000/auth/callback
+# as a redirect URI on your Spotify developer app.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env.local
+    environment:
+      PORT: 8000
+      APP_URL: http://127.0.0.1:8000
+      SPOTIFY_REDIRECT_URI: http://127.0.0.1:8000/auth/callback
+      # no canonical host locally, so the redirect middleware stays out of the way
+      CANONICAL_HOST: ""
+      SOUNDMAP_DEBUG_ROUTES: "1"
+    ports:
+      # bound to loopback: not reachable from the rest of the network
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - soundmap_data:/app/user_data
+    restart: unless-stopped
+
+volumes:
+  soundmap_data:

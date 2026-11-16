@@ -1,3 +1,8 @@
+# Single source of truth for application dependencies.
+# Railway/Nixpacks installs from this file; ranges are kept loose here so a
+# deploy never fails on a resolver conflict.
+# docker/Dockerfile installs from requirements.lock instead, which pins every
+# version so local and CI builds are byte-for-byte reproducible.
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 spotipy>=2.23.0
@@ -14,3 +19,10 @@ anthropic>=0.25.0
 itsdangerous>=2.1.0
 supabase>=2.3.0
 openai>=1.12.0
+# Apple Music developer tokens. Was only in backend/requirements.txt, which
+# Nixpacks does not install - the Apple path worked by luck of a transitive dep.
+# cryptography is listed outright: current PyJWT no longer ships a
+# [cryptography] extra, so the old spelling installed PyJWT *without* it and
+# apple_auth.py would fail on import.
+PyJWT>=2.8.0
+cryptography>=42.0.0
