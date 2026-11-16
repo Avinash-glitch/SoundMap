@@ -9735,7 +9735,13 @@ startNowPlayingPolling();
           if (PB.detail && brain3D.mode !== 'world') {
             PB.detail.artists.forEach((mesh, i) => mesh.scale.setScalar(1 + 0.07 * gb * (0.5 + 0.5 * Math.sin(i * 2.1 + M.t * 1.7))));
             PB.detail.sprites.forEach(sp => sp.scale.setScalar(sp.userData.baseScale * (1 + 0.18 * gb)));
-            if (PB.detail.songMat) PB.detail.songMat.size = PB.detail.songMat.userData.baseSize * (1 + 0.3 * gb);
+            const sm = PB.detail.songMat;
+            if (sm && sm.uniforms) {
+              sm.uniforms.uTime.value = M.t;
+              sm.uniforms.uBeat.value = gb;
+              sm.uniforms.uGroupScale.value = brain3D.detailGroup ? brain3D.detailGroup.scale.x : 1;
+              sm.uniforms.uScale.value = (brain3D.renderer?.domElement?.height || 900) * 0.5;
+            }
           }
         }
         if (brain3D.group) {
@@ -9762,7 +9768,9 @@ startNowPlayingPolling();
         if (!m) return;
         if (m.userData.smBase === undefined) m.userData.smBase = (m.opacity === undefined || m.opacity === null) ? 1 : m.opacity;
         m.transparent = true;
-        m.opacity = m.userData.smBase * Math.max(0, Math.min(1, k));
+        const o = m.userData.smBase * Math.max(0, Math.min(1, k));
+        m.opacity = o;
+        if (m.uniforms && m.uniforms.uOpacity) m.uniforms.uOpacity.value = o;
       });
     };
   }
@@ -9808,8 +9816,82 @@ startNowPlayingPolling();
       det.artists.push(mesh);
       det.sprites.push(sp);
     });
+    // Songs: glowing balls that drift in slow orbits around their artist.
+    // They are not raycast (only the artist spheres are), so moving them
+    // costs nothing in interaction terms.
     const pts = brain3D.detailSongPoints;
-    if (pts && pts.material) { det.songMat = pts.material; det.songMat.userData.baseSize = pts.material.size * 1.2; }
+    if (pts && pts.geometry && pts.geometry.attributes.position) {
+      const sg = pts.geometry;
+      const pa = sg.attributes.position, ca = sg.attributes.color;
+      const n = pa.count;
+      const centers = new Float32Array(n * 3);
+      const orbit = new Float32Array(n * 3);   // radius, start angle, seed
+      const cols = new Float32Array(n * 3);
+      const meshes = brain3D.artistMeshes || [];
+      for (let i = 0; i < n; i++) {
+        const px = pa.getX(i), py = pa.getY(i), pz = pa.getZ(i);
+        let cx = 0, cy = 0, cz = 0, bd = Infinity;
+        for (const mh of meshes) {            // nearest artist = the one it was placed around
+          const d = (mh.position.x - px) ** 2 + (mh.position.y - py) ** 2;
+          if (d < bd) { bd = d; cx = mh.position.x; cy = mh.position.y; cz = mh.position.z; }
+        }
+        centers[i * 3] = cx; centers[i * 3 + 1] = cy; centers[i * 3 + 2] = cz;
+        const dx = px - cx, dy = (py - cy) / 0.86;
+        orbit[i * 3] = Math.hypot(dx, dy) || 0.08;
+        orbit[i * 3 + 1] = Math.atan2(dy, dx);
+        orbit[i * 3 + 2] = Math.random();
+        if (ca) { cols[i * 3] = ca.getX(i); cols[i * 3 + 1] = ca.getY(i); cols[i * 3 + 2] = ca.getZ(i); }
+        else { cols[i * 3] = cols[i * 3 + 1] = cols[i * 3 + 2] = 1; }
+      }
+      sg.setAttribute('aCenter', new THREE.BufferAttribute(centers, 3));
+      sg.setAttribute('aOrbit', new THREE.BufferAttribute(orbit, 3));
+      sg.setAttribute('aCol', new THREE.BufferAttribute(cols, 3));
+      const mobile = window.innerWidth < 768;
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 }, uBeat: { value: 0 }, uOpacity: { value: 0 },
+          uSize: { value: mobile ? 0.22 : 0.19 }, uScale: { value: 450 }, uGroupScale: { value: 1 },
+        },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        vertexShader: `
+          attribute vec3 aCenter; attribute vec3 aOrbit; attribute vec3 aCol;
+          uniform float uTime, uBeat, uSize, uScale, uGroupScale;
+          varying vec3 vCol; varying float vSeed;
+          void main() {
+            float rad = aOrbit.x, a0 = aOrbit.y, seed = aOrbit.z;
+            float dir = seed > 0.5 ? 1.0 : -1.0;
+            float a = a0 + uTime * (0.16 + seed * 0.3) * dir;
+            float r = rad * (1.0 + 0.09 * sin(uTime * (0.6 + seed) + seed * 6.3));
+            vec3 p = aCenter + vec3(
+              cos(a) * r,
+              sin(a) * r * 0.86,
+              0.075 + 0.032 * sin(uTime * (1.0 + seed * 1.5) + seed * 12.0));
+            vec4 mv = modelViewMatrix * vec4(p, 1.0);
+            float pulse = 1.0 + 0.3 * uBeat * (0.5 + 0.5 * sin(seed * 20.0));
+            gl_PointSize = min(uSize * uGroupScale * pulse * (uScale / -mv.z), 90.0);
+            vCol = aCol; vSeed = seed;
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `
+          uniform float uOpacity, uTime;
+          varying vec3 vCol; varying float vSeed;
+          void main() {
+            vec2 q = gl_PointCoord - vec2(0.5);
+            float d = length(q);
+            if (d > 0.5) discard;
+            float core = smoothstep(0.5, 0.0, d);
+            float ball = pow(core, 2.0);
+            float hl = pow(max(0.0, 1.0 - length(q - vec2(-0.12, 0.12)) * 3.0), 3.0);
+            float shimmer = 0.9 + 0.1 * sin(uTime * 2.0 + vSeed * 30.0);
+            vec3 col = vCol * (0.22 + 1.7 * ball) * shimmer + vec3(1.0, 0.98, 0.94) * hl * 0.6;
+            gl_FragColor = vec4(col, uOpacity * clamp(ball * 1.05 + core * 0.2, 0.0, 1.0));
+          }`,
+      });
+      mat.userData.smBase = 0.95;
+      pts.material.dispose();
+      pts.material = mat;
+      det.songMat = mat;
+    }
     PB.detail = det;
   }
   if (typeof _brain3DMakePlaylistDetail === 'function') {
