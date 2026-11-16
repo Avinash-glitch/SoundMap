@@ -9014,6 +9014,7 @@ startNowPlayingPolling();
   @keyframes smSweep { 0% { transform: translateX(-420px); } 60%,100% { transform: translateX(1250px); } }
 
   /* Motion toggle */
+  #brain3d-overlay { user-select: none; -webkit-user-select: none; }
   #btn-motion { font-size: .72rem; width: auto; padding: 0 .75rem; gap: .35rem; border-color: rgba(244,114,182,.45); color: #f9a8d4; }
   #btn-motion:not(.on) { border-color: var(--border); color: var(--text-dim); }
   #btn-motion svg { width: 14px; height: 14px; flex-shrink: 0; }
@@ -9733,8 +9734,17 @@ startNowPlayingPolling();
           PB.dim = (PB.dim === undefined ? 1 : PB.dim) + (dimT - (PB.dim === undefined ? 1 : PB.dim)) * Math.min(1, M.dt * 3.5);
           u.uDim.value = PB.dim;
           if (PB.detail && brain3D.mode !== 'world') {
-            PB.detail.artists.forEach((mesh, i) => mesh.scale.setScalar(1 + 0.07 * gb * (0.5 + 0.5 * Math.sin(i * 2.1 + M.t * 1.7))));
-            PB.detail.sprites.forEach(sp => sp.scale.setScalar(sp.userData.baseScale * (1 + 0.18 * gb)));
+            // Planets turn on their own axes; their scale is left alone so
+            // selecting an artist still reads.
+            (PB.detail.spin || []).forEach((sp, i) => {
+              const mh = PB.detail.artists[i];
+              if (mh) { mh.rotation.y += M.dt * sp; mh.rotation.x += M.dt * sp * 0.3; }
+            });
+            if (!brain3D.dragging && !brain3D.cameraTween && performance.now() - brain3D.lastInputAt > 2600) brain3D.yaw += 0.0011;
+            (PB.detail.artists || []).forEach(mh => {
+              const u = mh.material && mh.material.uniforms;
+              if (u) { u.uTime.value = M.t; u.uBeat.value = gb; }
+            });
             const sm = PB.detail.songMat;
             if (sm && sm.uniforms) {
               sm.uniforms.uTime.value = M.t;
@@ -9792,80 +9802,221 @@ startNowPlayingPolling();
 
   // Particle-style the drill-down: near-black backing, glowing artist orbs
   // with additive halos, bigger song sparks — all pulsing to the beat.
+  // Turn the drill-down into a solar system: artists become planets spread
+  // through 3D space, their songs become moons on inclined orbits. The flat
+  // lobe cut-out is dropped so the system sits in open space.
   function pbStyleDetail() {
     const THREE = brain3D.THREE, g = brain3D.detailGroup;
     if (!THREE || !g) return;
-    const det = { artists: [], sprites: [], songMat: null };
-    const base = g.children.find(c => c.isMesh && c.geometry && c.geometry.type === 'ShapeGeometry');
-    if (base) { base.material.color.multiplyScalar(0.4); base.material.userData.smBase = 0.05; }
-    const edge = g.children.find(c => c.isLine);
-    if (edge) edge.material.userData.smBase = 0.4;
-    const tex = pbGlowTexture(THREE);
-    (brain3D.artistMeshes || []).forEach(mesh => {
-      const m = mesh.material;
-      if (m.emissive) m.emissive = m.color.clone().multiplyScalar(0.55);
-      m.userData.smBase = 0.92;
-      const sm = new THREE.SpriteMaterial({ map: tex, color: m.color.clone(), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-      sm.userData.smBase = 0.55;
-      const sp = new THREE.Sprite(sm);
-      const r0 = (mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.radius) || 0.1;
-      sp.scale.setScalar(r0 * 5.2);
-      sp.position.copy(mesh.position);
-      sp.userData.baseScale = r0 * 5.2;
-      g.add(sp);
-      det.artists.push(mesh);
-      det.sprites.push(sp);
+    const det = { artists: [], spin: [], songMat: null };
+    const meshes = brain3D.artistMeshes || [];
+    const clusters = brain3D.artistData || [];
+
+    // --- the flat lobe plate and its outline have no place in open space
+    g.children.forEach(c => {
+      if (c.isMesh && c.geometry && c.geometry.type === 'ShapeGeometry') c.material.userData.smBase = 0;
+      if (c.isLine) c.material.userData.smBase = 0;
     });
-    // Songs: glowing balls that drift in slow orbits around their artist.
-    // They are not raycast (only the artist spheres are), so moving them
-    // costs nothing in interaction terms.
+
+    // --- planets: spread over nested shells with a Fibonacci direction each
+    const total = Math.max(meshes.length, 1);
+    const GOLD = 2.399963229728653;
+    const radiusOf = m => (m.geometry && m.geometry.parameters && m.geometry.parameters.radius) || 0.1;
+    const reach = m => radiusOf(m) + 0.15;            // planet plus its moon shell
+    meshes.forEach((mesh, i) => {
+      const t = (i + 0.5) / total;
+      const y = 1 - 2 * t;
+      const ring = Math.sqrt(Math.max(0, 1 - y * y));
+      const phi = i * GOLD;
+      const shell = 0.42 + 0.56 * (((i * 0.6180339887) % 1));
+      mesh.position.set(Math.cos(phi) * ring * shell, y * shell * 0.86, Math.sin(phi) * ring * shell);
+    });
+    // nudge apart any planets whose moon shells would collide
+    for (let pass = 0; pass < 12; pass++) {
+      let moved = false;
+      for (let i = 0; i < meshes.length; i++) {
+        for (let j = i + 1; j < meshes.length; j++) {
+          const A = meshes[i].position, B = meshes[j].position;
+          const need = reach(meshes[i]) + reach(meshes[j]);
+          const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
+          const d = Math.hypot(dx, dy, dz) || 1e-4;
+          if (d >= need) continue;
+          const push = (need - d) * 0.5, ux = dx / d, uy = dy / d, uz = dz / d;
+          A.set(A.x - ux * push, A.y - uy * push, A.z - uz * push);
+          B.set(B.x + ux * push, B.y + uy * push, B.z + uz * push);
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+
+    // --- planet surfaces: procedural terrain so each artist reads as a world
+    //     — ocean, land, highlands, ice caps, drifting cloud and an
+    //     atmosphere rim, all tinted by that artist's colour.
+    const planetVert = `
+      varying vec3 vObj; varying vec3 vN; varying vec3 vV;
+      void main() {
+        vObj = normalize(position);
+        vN = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vV = -mv.xyz;
+        gl_Position = projectionMatrix * mv;
+      }`;
+    const planetFrag = `
+      uniform vec3 uColor; uniform float uTime, uBeat, uOpacity, uSelect, uSeed;
+      varying vec3 vObj; varying vec3 vN; varying vec3 vV;
+      float hs(vec3 p) {
+        p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+        p *= 17.0;
+        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+      }
+      float nz(vec3 x) {
+        vec3 i = floor(x), f = fract(x);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(hs(i), hs(i + vec3(1,0,0)), f.x),
+                       mix(hs(i + vec3(0,1,0)), hs(i + vec3(1,1,0)), f.x), f.y),
+                   mix(mix(hs(i + vec3(0,0,1)), hs(i + vec3(1,0,1)), f.x),
+                       mix(hs(i + vec3(0,1,1)), hs(i + vec3(1,1,1)), f.x), f.y), f.z);
+      }
+      float fbm(vec3 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 4; i++) { v += a * nz(p); p *= 2.03; a *= 0.5; }
+        return v;
+      }
+      void main() {
+        vec3 N = normalize(vN), V = normalize(vV);
+        vec3 L = normalize(vec3(0.42, 0.62, 0.72));
+        vec3 q = vObj + uSeed;
+        float h = fbm(q * 2.1);
+        float land = smoothstep(0.47, 0.55, h);
+        float high = smoothstep(0.58, 0.76, h);
+        vec3 ocean = mix(uColor * 0.26, vec3(0.03, 0.08, 0.16), 0.5);
+        vec3 grass = mix(uColor * 0.95, vec3(0.26, 0.35, 0.16), 0.42);
+        vec3 rock  = mix(uColor * 1.15, vec3(0.50, 0.43, 0.32), 0.52);
+        vec3 surf = mix(ocean, grass, land);
+        surf = mix(surf, rock, high * land);
+        float cap = smoothstep(0.74, 0.93, abs(vObj.y));
+        surf = mix(surf, vec3(0.86, 0.90, 0.95), cap * 0.8);
+        float cl = fbm(q * 3.0 + vec3(uTime * 0.015, 0.0, 0.0));
+        surf = mix(surf, vec3(0.92), smoothstep(0.54, 0.73, cl) * 0.45);
+        float diff = max(dot(N, L), 0.0);
+        vec3 col = surf * (0.24 + 0.95 * diff);
+        float spec = pow(max(dot(reflect(-L, N), V), 0.0), 26.0) * (1.0 - land) * 0.45;
+        col += vec3(1.0) * spec * diff;
+        float rim = pow(1.0 - max(dot(N, V), 0.0), 2.6);
+        col += uColor * rim * 0.75;
+        col *= 1.0 + 0.10 * uBeat;
+        gl_FragColor = vec4(col, uOpacity * uSelect);
+      }`;
+    meshes.forEach((mesh, i) => {
+      const tint = mesh.material.color ? mesh.material.color.clone() : new THREE.Color(0.6, 0.6, 0.8);
+      const pm = new THREE.ShaderMaterial({
+        uniforms: {
+          uColor: { value: tint }, uTime: { value: 0 }, uBeat: { value: 0 },
+          uOpacity: { value: 0 }, uSelect: { value: 1 }, uSeed: { value: i * 3.77 },
+        },
+        transparent: true, depthWrite: true,
+        vertexShader: planetVert, fragmentShader: planetFrag,
+      });
+      pm.userData.smBase = 1;
+      mesh.material.dispose();
+      mesh.material = pm;
+      det.artists.push(mesh);
+      det.spin.push(0.05 + ((i * 0.37) % 1) * 0.1);
+    });
+
+    // --- labels ride along to the planets' new homes
+    (brain3D.labelItems || []).forEach(item => {
+      if (item.kind !== 'artist' || !Number.isInteger(item.index)) return;
+      const mesh = meshes[item.index];
+      if (mesh) item.localPos = mesh.position.clone().add(new THREE.Vector3(0, radiusOf(mesh) + 0.08, 0));
+    });
+
+    // --- moons: one inclined orbit each, around their own planet
     const pts = brain3D.detailSongPoints;
     if (pts && pts.geometry && pts.geometry.attributes.position) {
       const sg = pts.geometry;
       const pa = sg.attributes.position, ca = sg.attributes.color;
       const n = pa.count;
+
+      // songs were emitted cluster by cluster, up to 36 each — rebuild that map
+      const owner = new Int32Array(n).fill(-1);
+      const slot = new Float32Array(n);
+      let k = 0;
+      for (let i = 0; i < clusters.length && k < n; i++) {
+        const shown = Math.min((clusters[i].songs || []).length, 36);
+        for (let j = 0; j < shown && k < n; j++) { owner[k] = i; slot[k] = (j + 0.5) / shown; k++; }
+      }
+
       const centers = new Float32Array(n * 3);
-      const orbit = new Float32Array(n * 3);   // radius, start angle, seed
+      const uAxis = new Float32Array(n * 3);
+      const vAxis = new Float32Array(n * 3);
+      const orbit = new Float32Array(n * 4);   // radius, start angle, speed, seed
       const cols = new Float32Array(n * 3);
-      const meshes = brain3D.artistMeshes || [];
+      let rs = 20260416;
+      const rnd = () => (rs = (Math.imul(rs, 1103515245) + 12345) & 0x7fffffff) / 0x7fffffff;
+
       for (let i = 0; i < n; i++) {
-        const px = pa.getX(i), py = pa.getY(i), pz = pa.getZ(i);
-        let cx = 0, cy = 0, cz = 0, bd = Infinity;
-        for (const mh of meshes) {            // nearest artist = the one it was placed around
-          const d = (mh.position.x - px) ** 2 + (mh.position.y - py) ** 2;
-          if (d < bd) { bd = d; cx = mh.position.x; cy = mh.position.y; cz = mh.position.z; }
+        let mesh = owner[i] >= 0 ? meshes[owner[i]] : null;
+        if (!mesh) {                                    // safety: nearest planet
+          let bd = Infinity;
+          const px = pa.getX(i), py = pa.getY(i), pz = pa.getZ(i);
+          for (const mh of meshes) {
+            const d = (mh.position.x - px) ** 2 + (mh.position.y - py) ** 2 + (mh.position.z - pz) ** 2;
+            if (d < bd) { bd = d; mesh = mh; }
+          }
         }
-        centers[i * 3] = cx; centers[i * 3 + 1] = cy; centers[i * 3 + 2] = cz;
-        const dx = px - cx, dy = (py - cy) / 0.86;
-        orbit[i * 3] = Math.hypot(dx, dy) || 0.08;
-        orbit[i * 3 + 1] = Math.atan2(dy, dx);
-        orbit[i * 3 + 2] = Math.random();
+        const c = mesh ? mesh.position : { x: 0, y: 0, z: 0 };
+        centers[i * 3] = c.x; centers[i * 3 + 1] = c.y; centers[i * 3 + 2] = c.z;
+
+        const pr = mesh ? radiusOf(mesh) : 0.1;
+        const r = pr + 0.035 + (slot[i] || rnd()) * 0.105 + rnd() * 0.012;
+
+        // a random orbital plane: normal n, then two perpendicular axes in it
+        const nz = rnd() * 2 - 1, na = rnd() * TAU, ns = Math.sqrt(Math.max(0, 1 - nz * nz));
+        const nx = Math.cos(na) * ns, ny2 = nz, nzz = Math.sin(na) * ns;
+        let ax = 0, ay = 1, az = 0;
+        if (Math.abs(ny2) > 0.9) { ax = 1; ay = 0; }
+        let ux = ay * nzz - az * ny2, uy = az * nx - ax * nzz, uz = ax * ny2 - ay * nx;
+        let ul = Math.hypot(ux, uy, uz) || 1; ux /= ul; uy /= ul; uz /= ul;
+        const vx = ny2 * uz - nzz * uy, vy = nzz * ux - nx * uz, vz = nx * uy - ny2 * ux;
+        uAxis[i * 3] = ux; uAxis[i * 3 + 1] = uy; uAxis[i * 3 + 2] = uz;
+        vAxis[i * 3] = vx; vAxis[i * 3 + 1] = vy; vAxis[i * 3 + 2] = vz;
+
+        // closer moons run faster, as they should
+        const speed = Math.max(0.12, Math.min(1.5, 0.30 * Math.pow(0.11 / r, 1.3))) * (rnd() > 0.5 ? 1 : -1);
+        orbit[i * 4] = r;
+        orbit[i * 4 + 1] = rnd() * TAU;
+        orbit[i * 4 + 2] = speed;
+        orbit[i * 4 + 3] = rnd();
+
         if (ca) { cols[i * 3] = ca.getX(i); cols[i * 3 + 1] = ca.getY(i); cols[i * 3 + 2] = ca.getZ(i); }
         else { cols[i * 3] = cols[i * 3 + 1] = cols[i * 3 + 2] = 1; }
       }
       sg.setAttribute('aCenter', new THREE.BufferAttribute(centers, 3));
-      sg.setAttribute('aOrbit', new THREE.BufferAttribute(orbit, 3));
+      sg.setAttribute('aU', new THREE.BufferAttribute(uAxis, 3));
+      sg.setAttribute('aV', new THREE.BufferAttribute(vAxis, 3));
+      sg.setAttribute('aOrbit', new THREE.BufferAttribute(orbit, 4));
       sg.setAttribute('aCol', new THREE.BufferAttribute(cols, 3));
+      sg.computeBoundingSphere();
+
       const mobile = window.innerWidth < 768;
       const mat = new THREE.ShaderMaterial({
         uniforms: {
           uTime: { value: 0 }, uBeat: { value: 0 }, uOpacity: { value: 0 },
           uSize: { value: mobile ? 0.22 : 0.19 }, uScale: { value: 450 }, uGroupScale: { value: 1 },
         },
-        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending,
         vertexShader: `
-          attribute vec3 aCenter; attribute vec3 aOrbit; attribute vec3 aCol;
+          attribute vec3 aCenter; attribute vec3 aU; attribute vec3 aV;
+          attribute vec4 aOrbit; attribute vec3 aCol;
           uniform float uTime, uBeat, uSize, uScale, uGroupScale;
           varying vec3 vCol; varying float vSeed;
           void main() {
-            float rad = aOrbit.x, a0 = aOrbit.y, seed = aOrbit.z;
-            float dir = seed > 0.5 ? 1.0 : -1.0;
-            float a = a0 + uTime * (0.16 + seed * 0.3) * dir;
-            float r = rad * (1.0 + 0.09 * sin(uTime * (0.6 + seed) + seed * 6.3));
-            vec3 p = aCenter + vec3(
-              cos(a) * r,
-              sin(a) * r * 0.86,
-              0.075 + 0.032 * sin(uTime * (1.0 + seed * 1.5) + seed * 12.0));
+            float rad = aOrbit.x, a0 = aOrbit.y, spd = aOrbit.z, seed = aOrbit.w;
+            float a = a0 + uTime * spd;
+            float r = rad * (1.0 + 0.05 * sin(uTime * (0.5 + seed) + seed * 6.3));
+            vec3 p = aCenter + (aU * cos(a) + aV * sin(a)) * r;
             vec4 mv = modelViewMatrix * vec4(p, 1.0);
             float pulse = 1.0 + 0.3 * uBeat * (0.5 + 0.5 * sin(seed * 20.0));
             gl_PointSize = min(uSize * uGroupScale * pulse * (uScale / -mv.z), 90.0);
@@ -9890,15 +10041,84 @@ startNowPlayingPolling();
       mat.userData.smBase = 0.95;
       pts.material.dispose();
       pts.material = mat;
+      pts.frustumCulled = false;
       det.songMat = mat;
     }
     PB.detail = det;
   }
+
   if (typeof _brain3DMakePlaylistDetail === 'function') {
     const _mkDetOrig = _brain3DMakePlaylistDetail;
     _brain3DMakePlaylistDetail = function (idx) {
       const r = _mkDetOrig.apply(this, arguments);
       try { if (M.on) pbStyleDetail(); } catch (err) { console.warn('[motion:pb]', err); }
+      return r;
+    };
+  }
+
+  // Selecting an artist dims the others via material.opacity, which a
+  // shader material ignores — mirror it into the uniform.
+  if (typeof _brain3DSelectArtist === 'function') {
+    const _selOrig = _brain3DSelectArtist;
+    _brain3DSelectArtist = function (idx) {
+      const r = _selOrig.apply(this, arguments);
+      (brain3D.artistMeshes || []).forEach((mesh, i) => {
+        const u = mesh.material && mesh.material.uniforms;
+        if (u && u.uSelect) u.uSelect.value = i === idx ? 1 : 0.4;
+      });
+      return r;
+    };
+  }
+
+  // Labels, the HUD and other overlay chrome sit above the canvas and used
+  // to swallow the wheel, so zooming stalled whenever one drifted under the
+  // cursor. Catch the wheel for the whole overlay instead, leaving the
+  // side panel and song card free to scroll.
+  (() => {
+    const ov = document.getElementById('brain3d-overlay');
+    if (!ov || typeof _brain3DZoom !== 'function') return;
+    ov.addEventListener('wheel', e => {
+      if (!M.on || !overlayShown('brain3d-overlay')) return;
+      const t = e.target;
+      if (t && t.closest && t.closest('#brain3d-detail-panel, #brain3d-song-card')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      _brain3DZoom(e.deltaY > 0 ? 0.9 : 1.12);
+    }, { passive: false, capture: true });
+  })();
+
+  // The camera orbits the world origin, but a playlist's system is lifted
+  // off to one side — so dragging used to swing it out of view. Inside a
+  // playlist the camera now orbits the system itself, easing on entry/exit.
+  if (typeof _brain3DUpdateCamera === 'function') {
+    const _camOrig = _brain3DUpdateCamera;
+    _brain3DUpdateCamera = function () {
+      if (!M.on || !brain3D.THREE) return _camOrig.apply(this, arguments);
+      const THREE = brain3D.THREE;
+      if (!PB.camTarget) PB.camTarget = new THREE.Vector3();
+      if (!PB.camWant) PB.camWant = new THREE.Vector3();
+      if (brain3D.mode !== 'world' && brain3D.detailGroup) PB.camWant.copy(brain3D.detailGroup.position);
+      else PB.camWant.set(0, 0, 0);
+      PB.camTarget.lerp(PB.camWant, 1 - Math.exp(-(M.dt || 0.016) * 4.5));
+      if (PB.camTarget.lengthSq() < 1e-6 && brain3D.mode === 'world') return _camOrig.apply(this, arguments);
+      const t = PB.camTarget, cp = Math.cos(brain3D.pitch);
+      brain3D.camera.position.set(
+        t.x + Math.sin(brain3D.yaw) * cp * brain3D.distance,
+        t.y + Math.sin(brain3D.pitch) * brain3D.distance + 0.12,
+        t.z + Math.cos(brain3D.yaw) * cp * brain3D.distance
+      );
+      brain3D.camera.lookAt(t);
+    };
+  }
+
+  // Centred on the system, the old framing distance is far too far out.
+  if (typeof _brain3DEnterPlaylist === 'function') {
+    const _enterOrig = _brain3DEnterPlaylist;
+    _brain3DEnterPlaylist = function (idx) {
+      const r = _enterOrig.apply(this, arguments);
+      if (M.on && brain3D.cameraTween && brain3D.cameraTween.to) {
+        brain3D.cameraTween.to.distance = window.innerWidth < 768 ? 3.1 : 2.85;
+      }
       return r;
     };
   }
@@ -9929,9 +10149,10 @@ startNowPlayingPolling();
         // Dynamic zoom: wheel moves a TARGET; the camera glides to it each
         // frame instead of teleporting one step per notch.
         const cur = PB.zoomT == null ? brain3D.distance : PB.zoomT;
-        PB.zoomT = Math.max(2.15, Math.min(8.5, cur / factor));
+        const minD = brain3D.mode === 'world' ? 2.15 : 1.15;
+        PB.zoomT = Math.max(minD, Math.min(8.5, cur / factor));
         M.warp = Math.min(1, M.warp + 0.12);
-        if (brain3D.mode !== 'world' && factor < 1 && PB.zoomT >= 5.4) {
+        if (brain3D.mode !== 'world' && factor < 1 && PB.zoomT >= 4.6) {
           PB.zoomT = null;
           _brain3DReturnWorld();
           return true;
