@@ -9530,7 +9530,7 @@ startNowPlayingPolling();
     const dirs = brain3D.dirs || [];
     if (!dirs.length) return;
     const lobeCols = brain3D.names.map(n => _hexToThreeColor(THREE, playlistColors[n] || COLOR_UNTAGGED));
-    const N = mobile ? 24000 : 50000;
+    const N = mobile ? 16000 : 34000;
     const pos = new Float32Array(N * 3), colA = new Float32Array(N * 3);
     const dat = new Float32Array(N * 4), start = new Float32Array(N * 3);
     let rs = 123456789;
@@ -9600,17 +9600,31 @@ startNowPlayingPolling();
       put(px, py, pz, [px / SX, py / SY, pz / SZ], 0.5, 0, 0.45);
     }
 
+    // Shuffle so that drawing only the first X% still samples the whole
+    // brain evenly — that is what adaptive quality leans on below.
+    for (let a1 = N - 1; a1 > 0; a1--) {
+      const b1 = Math.floor(rnd() * (a1 + 1));
+      for (let c = 0; c < 3; c++) {
+        let t2 = pos[a1 * 3 + c]; pos[a1 * 3 + c] = pos[b1 * 3 + c]; pos[b1 * 3 + c] = t2;
+        t2 = colA[a1 * 3 + c]; colA[a1 * 3 + c] = colA[b1 * 3 + c]; colA[b1 * 3 + c] = t2;
+        t2 = start[a1 * 3 + c]; start[a1 * 3 + c] = start[b1 * 3 + c]; start[b1 * 3 + c] = t2;
+      }
+      for (let c = 0; c < 4; c++) {
+        const t2 = dat[a1 * 4 + c]; dat[a1 * 4 + c] = dat[b1 * 4 + c]; dat[b1 * 4 + c] = t2;
+      }
+    }
+
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geom.setAttribute('aColor', new THREE.BufferAttribute(colA, 3));
     geom.setAttribute('aData', new THREE.BufferAttribute(dat, 4));
     geom.setAttribute('aStart', new THREE.BufferAttribute(start, 3));
     PB.mat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uBeat: { value: 0 }, uIntro: { value: 1 }, uHover: { value: -1 }, uPx: { value: 1 } },
+      uniforms: { uTime: { value: 0 }, uBeat: { value: 0 }, uIntro: { value: 1 }, uHover: { value: -1 }, uPx: { value: 1 }, uDim: { value: 1 } },
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
       vertexShader: `
         attribute vec3 aColor; attribute vec4 aData; attribute vec3 aStart;
-        uniform float uTime, uBeat, uIntro, uHover, uPx;
+        uniform float uTime, uBeat, uIntro, uHover, uPx, uDim;
         varying vec3 vC; varying float vA;
         void main() {
           float rand = aData.y, fold = aData.z, kind = aData.w;
@@ -9627,7 +9641,7 @@ startNowPlayingPolling();
           float beatK = 1.0 + 0.55 * uBeat * step(0.68, fract(rand * 9.7));
           gl_PointSize = min(uPx * (0.8 + 1.3 * rand) * tw * beatK * (1.0 + 0.7 * lifted) * (115.0 / -mv.z), 6.5 * uPx);
           float spark = pow(max(sin(fold * 19.0 - uTime * 2.6 + rand * 0.8), 0.0), 30.0) * kind * (0.35 + 0.75 * uBeat);
-          vA = clamp((6.2 + mv.z) / 4.0, 0.04, 0.85) * e;
+          vA = clamp((6.2 + mv.z) / 4.0, 0.04, 0.85) * e * uDim;
           vC = aColor * (0.5 + 0.28 * uBeat) * (1.0 + 0.7 * lifted) + vec3(1.0, 0.97, 0.9) * spark * 0.6;
           gl_Position = projectionMatrix * mv;
         }`,
@@ -9641,6 +9655,9 @@ startNowPlayingPolling();
           gl_FragColor = vec4(vC * (0.3 + 0.8 * core), vA * 0.55 * (0.08 + 0.92 * core));
         }`,
     });
+    PB.total = N;
+    PB.quality = PB.quality || 1;
+    geom.setDrawRange(0, Math.round(N * PB.quality));
     PB.obj = new THREE.Points(geom, PB.mat);
     PB.obj.renderOrder = 2;
     PB.obj.frustumCulled = false;
@@ -9672,6 +9689,35 @@ startNowPlayingPolling();
     _brain3DAnimate = function () {
       if (brain3D.ready) {
         const on = M.on;
+        // Adaptive quality: sample frame times and drop/raise the share of
+        // points drawn so the brain keeps a smooth frame rate on any machine.
+        if (on && PB.obj && PB.total) {
+          const nowMs = performance.now();
+          if (PB.lastFrame) {
+            const ft = nowMs - PB.lastFrame;
+            PB.ftAvg = PB.ftAvg ? PB.ftAvg * 0.9 + ft * 0.1 : ft;
+            PB.qCheck = (PB.qCheck || 0) + 1;
+            if (PB.qCheck > 45 && PB.ftAvg) {
+              PB.qCheck = 0;
+              const q = PB.quality || 1;
+              let nq = q;
+              if (PB.ftAvg > 26 && q > 0.18) nq = Math.max(0.18, q - 0.18);
+              else if (PB.ftAvg < 15 && q < 1) nq = Math.min(1, q + 0.08);
+              if (nq !== q) {
+                PB.quality = nq;
+                PB.obj.geometry.setDrawRange(0, Math.round(PB.total * nq));
+              }
+            }
+          }
+          PB.lastFrame = nowMs;
+        }
+        if (PB.zoomT != null) {
+          if (brain3D.cameraTween) PB.zoomT = null;
+          else {
+            brain3D.distance += (PB.zoomT - brain3D.distance) * (1 - Math.exp(-M.dt * 8));
+            if (Math.abs(PB.zoomT - brain3D.distance) < 0.003) { brain3D.distance = PB.zoomT; PB.zoomT = null; }
+          }
+        }
         if (on && (!PB.obj || !PB.obj.parent)) { try { pbBuild(); } catch (err) { console.warn('[motion:pb]', err); } }
         const gb = on ? globalBeat() : 0;
         if (PB.obj && PB.mat) {
@@ -9683,6 +9729,14 @@ startNowPlayingPolling();
           u.uHover.value = brain3D.mode === 'world' ? brain3D.hoverIndex : brain3D.activePlaylistIndex;
           u.uIntro.value = clamp((M.t - PB.introAt) / 2.4, 0, 1);
           u.uPx.value = (brain3D.renderer?.domElement?.height || 900) / 900;
+          const dimT = brain3D.mode === 'world' ? 1 : 0.12;
+          PB.dim = (PB.dim === undefined ? 1 : PB.dim) + (dimT - (PB.dim === undefined ? 1 : PB.dim)) * Math.min(1, M.dt * 3.5);
+          u.uDim.value = PB.dim;
+          if (PB.detail && brain3D.mode !== 'world') {
+            PB.detail.artists.forEach((mesh, i) => mesh.scale.setScalar(1 + 0.07 * gb * (0.5 + 0.5 * Math.sin(i * 2.1 + M.t * 1.7))));
+            PB.detail.sprites.forEach(sp => sp.scale.setScalar(sp.userData.baseScale * (1 + 0.18 * gb)));
+            if (PB.detail.songMat) PB.detail.songMat.size = PB.detail.songMat.userData.baseSize * (1 + 0.3 * gb);
+          }
         }
         if (brain3D.group) {
           const s = on ? 1 + 0.012 * Math.sin(M.t * 1.3) + 0.015 * gb : 1;
@@ -9695,6 +9749,152 @@ startNowPlayingPolling();
       }
       return _b3dOrig.apply(this, arguments);
     };
+  }
+
+  // ---------------------------------------- 3D brain: detail view + way back
+  // Fix the base opacity tween: it used to set every material to the same
+  // absolute opacity, turning the lobe backing (designed at 0.06) into an
+  // opaque pancake. Respect each material's design opacity instead.
+  if (typeof _brain3DSetMaterialOpacity === 'function') {
+    _brain3DSetMaterialOpacity = function (obj, k) {
+      obj.traverse(child => {
+        const m = child.material;
+        if (!m) return;
+        if (m.userData.smBase === undefined) m.userData.smBase = (m.opacity === undefined || m.opacity === null) ? 1 : m.opacity;
+        m.transparent = true;
+        m.opacity = m.userData.smBase * Math.max(0, Math.min(1, k));
+      });
+    };
+  }
+
+  function pbGlowTexture(THREE) {
+    if (PB.glowTex) return PB.glowTex;
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,.95)');
+    gr.addColorStop(0.3, 'rgba(255,255,255,.32)');
+    gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 64, 64);
+    PB.glowTex = new THREE.CanvasTexture(c);
+    return PB.glowTex;
+  }
+
+  // Particle-style the drill-down: near-black backing, glowing artist orbs
+  // with additive halos, bigger song sparks — all pulsing to the beat.
+  function pbStyleDetail() {
+    const THREE = brain3D.THREE, g = brain3D.detailGroup;
+    if (!THREE || !g) return;
+    const det = { artists: [], sprites: [], songMat: null };
+    const base = g.children.find(c => c.isMesh && c.geometry && c.geometry.type === 'ShapeGeometry');
+    if (base) { base.material.color.multiplyScalar(0.4); base.material.userData.smBase = 0.05; }
+    const edge = g.children.find(c => c.isLine);
+    if (edge) edge.material.userData.smBase = 0.4;
+    const tex = pbGlowTexture(THREE);
+    (brain3D.artistMeshes || []).forEach(mesh => {
+      const m = mesh.material;
+      if (m.emissive) m.emissive = m.color.clone().multiplyScalar(0.55);
+      m.userData.smBase = 0.92;
+      const sm = new THREE.SpriteMaterial({ map: tex, color: m.color.clone(), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+      sm.userData.smBase = 0.55;
+      const sp = new THREE.Sprite(sm);
+      const r0 = (mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.radius) || 0.1;
+      sp.scale.setScalar(r0 * 5.2);
+      sp.position.copy(mesh.position);
+      sp.userData.baseScale = r0 * 5.2;
+      g.add(sp);
+      det.artists.push(mesh);
+      det.sprites.push(sp);
+    });
+    const pts = brain3D.detailSongPoints;
+    if (pts && pts.material) { det.songMat = pts.material; det.songMat.userData.baseSize = pts.material.size * 1.2; }
+    PB.detail = det;
+  }
+  if (typeof _brain3DMakePlaylistDetail === 'function') {
+    const _mkDetOrig = _brain3DMakePlaylistDetail;
+    _brain3DMakePlaylistDetail = function (idx) {
+      const r = _mkDetOrig.apply(this, arguments);
+      try { if (M.on) pbStyleDetail(); } catch (err) { console.warn('[motion:pb]', err); }
+      return r;
+    };
+  }
+
+  // Ways back from a playlist: Esc, double-click anywhere, or zoom out.
+  // Zooming in hard on a hovered lobe dives into it.
+  if (typeof _brain3DReturnWorld === 'function') {
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || !overlayShown('brain3d-overlay')) return;
+      if (typeof brain3D === 'object' && brain3D.mode && brain3D.mode !== 'world') {
+        e.stopPropagation();
+        _brain3DReturnWorld();
+      }
+    }, true);
+    if (typeof _brain3DDoubleClick === 'function') {
+      const _dblOrig = _brain3DDoubleClick;
+      _brain3DDoubleClick = function (e) {
+        if (brain3D.mode !== 'world') { _brain3DReturnWorld(); return; }
+        return _dblOrig.apply(this, arguments);
+      };
+    }
+    if (typeof _brain3DZoom === 'function') {
+      const _zoomOrig = _brain3DZoom;
+      _brain3DZoom = function (factor) {
+        if (!brain3D.ready) return _zoomOrig.apply(this, arguments);
+        brain3D.cameraTween = null;
+        brain3D.lastInputAt = performance.now();
+        // Dynamic zoom: wheel moves a TARGET; the camera glides to it each
+        // frame instead of teleporting one step per notch.
+        const cur = PB.zoomT == null ? brain3D.distance : PB.zoomT;
+        PB.zoomT = Math.max(2.15, Math.min(8.5, cur / factor));
+        M.warp = Math.min(1, M.warp + 0.12);
+        if (brain3D.mode !== 'world' && factor < 1 && PB.zoomT >= 5.4) {
+          PB.zoomT = null;
+          _brain3DReturnWorld();
+          return true;
+        }
+        if (brain3D.mode === 'world' && factor > 1 && brain3D.hoverIndex >= 0) {
+          // Steer toward the lobe under the cursor while zooming in
+          const d = brain3D.dirs[brain3D.hoverIndex];
+          if (d) {
+            const ty = Math.atan2(d[0], d[2]);
+            const tp = Math.asin(Math.max(-0.72, Math.min(0.72, d[1]))) * 0.72;
+            let dy = ty - brain3D.yaw;
+            dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+            brain3D.yaw += dy * 0.16;
+            brain3D.pitch += (tp - brain3D.pitch) * 0.16;
+          }
+          if (PB.zoomT <= 2.35) {
+            PB.zoomT = null;
+            _brain3DEnterPlaylist(brain3D.hoverIndex);
+            return true;
+          }
+        }
+        return true;
+      };
+    }
+    if (typeof _brain3DUpdateNav === 'function') {
+      const _navOrig = _brain3DUpdateNav;
+      _brain3DUpdateNav = function () {
+        const r = _navOrig.apply(this, arguments);
+        if (brain3D.mode !== 'world') {
+          const hud = document.getElementById('brain3d-hud');
+          if (hud) hud.innerHTML += '<span>Esc, zoom out or double-click → back</span>';
+        }
+        return r;
+      };
+    }
+    const navCss = document.createElement('style');
+    navCss.textContent = `
+      #brain3d-back { font-size: .85rem !important; padding: .5rem 1.05rem !important;
+        border: 1px solid rgba(124,106,247,.65) !important; border-radius: 999px !important;
+        background: rgba(18,16,34,.92) !important; color: #c4b5fd !important;
+        box-shadow: 0 0 18px rgba(124,106,247,.35); cursor: pointer; }
+      #brain3d-back:hover { background: rgba(124,106,247,.28) !important; color: #fff !important; }`;
+    document.head.appendChild(navCss);
+    const backBtn = document.getElementById('brain3d-back');
+    if (backBtn) backBtn.textContent = '← Back to brain';
   }
 
   // ------------------------------------------------------------ toggle
@@ -9741,16 +9941,31 @@ startNowPlayingPolling();
     M.t = (now - M.t0) / 1000;
     if (!M.on) return;
 
-    const sc = scatterVisible();
+    const sc = scatterVisible() && !overlayShown('brain3d-overlay');
     if (sc && !M.lastScatter) startIntro();
     M.lastScatter = sc;
     if (M.introStart >= 0) M.introT = M.t - M.introStart;
 
-    if (!overlayShown('brain3d-overlay') && !drilldownTracks) drawBg();
+    const b3d = overlayShown('brain3d-overlay');
+    const grainEl = document.getElementById('motion-grain');
+    if (grainEl) grainEl.style.display = b3d ? 'none' : '';
+    if (!b3d && !drilldownTracks) drawBg();
     if (sc) {
       watchSelection();
       try { comparePoints.length ? renderWithCompare() : _renderDots(); } catch (err) { console.warn('[motion]', err); }
     }
+  }
+
+  // Focus mode: only the 3D particle brain for now — the scatter and 2D
+  // brain switchers are parked while performance is tuned. Flip to false
+  // to bring them back.
+  const FOCUS_3D = true;
+  if (FOCUS_3D) {
+    const css = document.createElement('style');
+    css.textContent = '#btn-brain, #btn-brain3d { display: none !important; }';
+    document.head.appendChild(css);
+    brainMode = true;
+    brain3DMode = true;
   }
 
   setupBg();
