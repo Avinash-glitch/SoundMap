@@ -8968,5 +8968,1455 @@ loadMap().then(() => {
 });
 startNowPlayingPolling();
 </script>
+<!-- ===================================================================
+     SoundMap Motion Layer
+     Adds motion-graphics on top of the existing views without changing
+     their logic: living background, scatter "big bang" intro, BPM-pulsing
+     dots, travelling constellation waves, comets, shockwave ripples,
+     now-playing rings, breathing 2D brain, 3D brain pulse, grain + vignette.
+     Toggle with the "Motion" button (or press M). Respects reduced motion.
+     =================================================================== -->
+<style id="sm-motion-css">
+  #motion-bg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; display: block; }
+  body.sm-motion #brain-overlay,
+  body.sm-motion #cmp-brain-view { background: transparent; }
+  #motion-grain, #motion-vignette { position: fixed; inset: 0; pointer-events: none; z-index: 9; opacity: 0; transition: opacity .6s; }
+  #motion-grain { inset: -50%; mix-blend-mode: overlay; animation: smGrain .7s steps(6) infinite; }
+  #motion-vignette { background: radial-gradient(ellipse at 50% 48%, transparent 52%, rgba(0,0,0,.55) 100%); animation: smVig 3.2s ease-in-out infinite; }
+  body.sm-motion #motion-grain { opacity: .17; }
+  body.sm-motion #motion-vignette { opacity: 1; }
+  @keyframes smGrain {
+    0% { transform: translate(0,0); } 17% { transform: translate(-6%,4%); } 33% { transform: translate(5%,-7%); }
+    50% { transform: translate(-3%,8%); } 67% { transform: translate(8%,2%); } 83% { transform: translate(-7%,-4%); } 100% { transform: translate(2%,6%); }
+  }
+  @keyframes smVig { 0%,100% { opacity: .85; } 50% { opacity: 1; } }
+
+  /* 2D brain */
+  body.sm-motion #brain-svg .bv-cell,
+  body.sm-motion #cmp-brain-view .bv-cell {
+    transform-box: fill-box; transform-origin: center;
+    animation: smBreath 4.8s ease-in-out infinite;
+    animation-delay: calc(var(--sm-i, 0) * -0.53s);
+  }
+  @keyframes smBreath { 0%,100% { transform: scale(1); } 50% { transform: scale(1.025); } }
+  body.sm-motion #brain-svg.sm-bv-intro .bv-cell {
+    animation: smCellIn 1s cubic-bezier(.2,1.45,.4,1) backwards;
+    animation-delay: calc(var(--sm-i, 0) * 75ms);
+  }
+  @keyframes smCellIn { from { transform: scale(.25) rotate(-8deg); opacity: 0; } }
+  body.sm-motion #brain-svg.sm-bv-intro .bv-seed { animation: smSeedIn .9s ease-out backwards; animation-delay: calc(.5s + var(--sm-i, 0) * 75ms); }
+  @keyframes smSeedIn { from { opacity: 0; } }
+  body.sm-motion .sm-gyrus { stroke-dasharray: 5 13; animation: smDash 2.6s linear infinite; }
+  @keyframes smDash { to { stroke-dashoffset: -36; } }
+  .sm-sweep, .sm-sonar { display: none; }
+  body.sm-motion .sm-sweep, body.sm-motion .sm-sonar { display: inline; }
+  .sm-sweep rect { animation: smSweep 6.5s cubic-bezier(.45,0,.55,1) infinite; }
+  @keyframes smSweep { 0% { transform: translateX(-420px); } 60%,100% { transform: translateX(1250px); } }
+
+  /* Motion toggle */
+  /* ---- playlist panel + overlay chrome, restyled for the space view ---- */
+  #brain3d-overlay { user-select: none; -webkit-user-select: none; }
+  #brain3d-detail-panel {
+    width: min(430px, 31vw) !important;
+    padding: 4.7rem 1.45rem 2rem !important;   /* clear the top toolbar */
+    background:
+      linear-gradient(180deg, rgba(9,11,18,.84), rgba(5,6,11,.95) 60%),
+      radial-gradient(125% 48% at 88% -4%, var(--pl, #7c6af7), transparent 62%) !important;
+    backdrop-filter: blur(22px) saturate(1.25);
+    -webkit-backdrop-filter: blur(22px) saturate(1.25);
+    border-left: 1px solid rgba(255,255,255,.07) !important;
+    box-shadow: -34px 0 80px rgba(0,0,0,.6) !important;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,.16) transparent;
+  }
+  #brain3d-detail-panel::-webkit-scrollbar { width: 7px; }
+  #brain3d-detail-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 99px; }
+  #brain3d-detail-panel::-webkit-scrollbar-track { background: transparent; }
+  #brain3d-detail-panel .brain3d-panel-eyebrow {
+    text-transform: uppercase; font-size: .6rem; letter-spacing: .24em;
+    color: var(--pl, #a5b4fc); opacity: .85;
+  }
+  #brain3d-detail-panel .brain3d-panel-title {
+    font-size: clamp(1.35rem, 2.1vw, 1.75rem) !important;
+    line-height: 1.04; letter-spacing: -.025em; margin-top: .18rem;
+  }
+  #brain3d-detail-panel .brain3d-panel-meta {
+    font-size: .73rem; color: rgba(255,255,255,.46); margin-top: .3rem; letter-spacing: .02em;
+  }
+  #brain3d-detail-panel .brain3d-panel-orb {
+    box-shadow: inset 0 0 18px rgba(255,255,255,.22), 0 0 0 1px rgba(255,255,255,.12), 0 0 30px var(--pl, #7c6af7);
+  }
+  #brain3d-detail-panel .brain3d-ai-button {
+    width: 100%; border-radius: 12px !important;
+    border: 1px solid rgba(255,255,255,.13) !important;
+    background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02)) !important;
+    color: #f2f3f7 !important; font-size: .8rem !important; padding: .72rem 1rem !important;
+    transition: border-color .18s, background .18s, transform .12s;
+  }
+  #brain3d-detail-panel .brain3d-ai-button:hover:not(:disabled) {
+    border-color: var(--pl, #7c6af7) !important;
+    background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.03)) !important;
+  }
+  #brain3d-detail-panel .brain3d-ai-button:active:not(:disabled) { transform: translateY(1px); }
+  #brain3d-detail-panel .brain3d-ai-note {
+    font-size: .67rem !important; line-height: 1.55 !important; color: rgba(255,255,255,.4) !important;
+  }
+  #brain3d-detail-panel .brain3d-artist-title {
+    position: sticky; top: -.2rem; z-index: 2;
+    padding: .5rem .2rem .45rem !important;
+    background: linear-gradient(180deg, rgba(7,8,14,.96), rgba(7,8,14,.72));
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    font-size: .84rem !important; letter-spacing: -.01em;
+  }
+  #brain3d-detail-panel .brain3d-artist-title::before {
+    content: ''; flex: 0 0 auto; width: 7px; height: 7px; border-radius: 99px;
+    margin-right: .5rem; background: var(--pl, #7c6af7); box-shadow: 0 0 9px var(--pl, #7c6af7);
+  }
+  #brain3d-detail-panel .brain3d-artist-count {
+    font-size: .66rem !important; color: rgba(255,255,255,.4) !important; letter-spacing: .04em;
+  }
+  #brain3d-detail-panel .brain3d-track-row {
+    border-radius: 9px; padding: .4rem .5rem !important; margin: .1rem 0;
+    border-bottom: none !important;
+    transition: background .15s, transform .15s, box-shadow .15s;
+  }
+  #brain3d-detail-panel .brain3d-track-row:hover {
+    background: rgba(255,255,255,.055);
+    transform: translateX(3px);
+    box-shadow: inset 2px 0 0 var(--pl, #7c6af7);
+  }
+  #brain3d-detail-panel .brain3d-track-num {
+    font-variant-numeric: tabular-nums; font-size: .66rem !important; color: rgba(255,255,255,.28) !important;
+  }
+  #brain3d-detail-panel .brain3d-track-title { font-size: .81rem !important; font-weight: 500 !important; }
+  #brain3d-detail-panel .brain3d-track-duration { font-size: .68rem !important; color: rgba(255,255,255,.34) !important; }
+  #brain3d-detail-panel .brain3d-panel-close {
+    width: 30px; height: 30px; border-radius: 99px;
+    border: 1px solid rgba(255,255,255,.12) !important;
+    background: rgba(255,255,255,.05) !important; color: rgba(255,255,255,.7) !important;
+    transition: background .15s, color .15s;
+  }
+  #brain3d-detail-panel .brain3d-panel-close:hover { background: rgba(255,255,255,.12) !important; color: #fff !important; }
+  /* floating labels and hint chips as glass */
+  #brain3d-label-layer .brain3d-label {
+    background: rgba(10,12,20,.62) !important;
+    backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+    border: 1px solid rgba(255,255,255,.1) !important;
+    border-radius: 99px !important;
+    padding: .22rem .6rem !important;
+    font-size: .68rem !important;
+    letter-spacing: .01em;
+    box-shadow: 0 3px 14px rgba(0,0,0,.45);
+    transition: background .15s, border-color .15s;
+  }
+  #brain3d-label-layer .brain3d-label:hover {
+    background: rgba(22,25,38,.82) !important; border-color: rgba(255,255,255,.22) !important;
+  }
+  #brain3d-hud span {
+    background: rgba(10,12,20,.55) !important;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.08) !important;
+  }
+  /* the world blurb has no business over a playlist */
+  #brain3d-overlay.sm-in-playlist #brain3d-brand { opacity: 0; pointer-events: none; }
+  #brain3d-brand { transition: opacity .3s; }
+  @media (max-width: 860px) {
+    #brain3d-detail-panel { padding: 1.15rem 1rem 1.65rem !important; width: 100% !important; }
+  }
+
+  #btn-motion { font-size: .72rem; width: auto; padding: 0 .75rem; gap: .35rem; border-color: rgba(244,114,182,.45); color: #f9a8d4; }
+  #btn-motion:not(.on) { border-color: var(--border); color: var(--text-dim); }
+  #btn-motion svg { width: 14px; height: 14px; flex-shrink: 0; }
+  #btn-motion.on svg path { animation: smWave 1.2s ease-in-out infinite; transform-origin: center; }
+  @keyframes smWave { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(.55); } }
+  @media (prefers-reduced-motion: reduce) {
+    #motion-grain, #btn-motion.on svg path { animation: none; }
+  }
+</style>
+<script>
+(() => {
+  'use strict';
+  if (typeof _renderDots !== 'function' || typeof toCanvas !== 'function') return;
+
+  // ------------------------------------------------------------------ state
+  const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let saved = null;
+  try { saved = localStorage.getItem('soundmap_motion'); } catch (_) {}
+  const M = {
+    on: saved ? saved === '1' : !reduced,
+    t0: performance.now(), t: 0, dt: 0, last: performance.now(),
+    introStart: -1, introT: 99, lastScatter: false,
+    adjKey: '', pairs: [], adj: [], vis: [],
+    comets: [], ripples: [], lastSelId: null,
+    warp: 0, sprites: new Map(),
+    bg: null, bctx: null, small: null, sctx: null, stars: [], sonar: [], lastSonarBeat: -1,
+    palette: [],
+  };
+  const TAU = Math.PI * 2;
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const easeOutBack = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+  const hash = s => { let h = 2166136261; s = String(s || ''); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; };
+
+  // ------------------------------------------------------------ helpers
+  function bpmOf(p) {
+    if (!p) return 112;
+    if (p.__smBpm) return p.__smBpm;
+    const raw = Number(p.tempo || p.bpm || p.audio_features?.tempo || p.features?.tempo || 0);
+    let bpm = raw > 40 && raw < 220 ? raw : 78 + Math.round(hash(p.id) * 60);
+    while (bpm > 150) bpm /= 2;
+    p.__smBpm = bpm;
+    p.__smPh = hash('ph' + p.id);
+    return bpm;
+  }
+  // Kick-drum style envelope 0..1, peaks on each beat of the track's tempo.
+  function beat(p, t = M.t) {
+    const bpm = bpmOf(p);
+    const x = ((t * bpm / 60) + p.__smPh) % 1;
+    return Math.exp(-x * 6.5);
+  }
+  function nowPlayingPoint() {
+    if (typeof _npCurrentId === 'undefined' || !_npCurrentId) return null;
+    if (M._npId === _npCurrentId) return M._npPt;
+    M._npId = _npCurrentId;
+    M._npPt = points.find(p => p.id === _npCurrentId) || null;
+    return M._npPt;
+  }
+  function globalBeat() {
+    const np = nowPlayingPoint();
+    if (np) return beat(np);
+    const x = (M.t * 112 / 60) % 1;
+    return Math.exp(-x * 5);
+  }
+  function rgba(col, a) {
+    if (!col) return `rgba(255,255,255,${a})`;
+    if (col.startsWith('hsl(')) return col.replace('hsl(', 'hsla(').replace(')', `, ${a})`);
+    if (col.startsWith('#') && col.length === 7) {
+      const n = parseInt(col.slice(1), 16);
+      return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+    }
+    return col;
+  }
+  function sprite(col) {
+    let s = M.sprites.get(col);
+    if (s) return s;
+    s = document.createElement('canvas');
+    s.width = s.height = 64;
+    const g = s.getContext('2d');
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, rgba(col, 0.9));
+    gr.addColorStop(0.25, rgba(col, 0.35));
+    gr.addColorStop(1, rgba(col, 0));
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 64, 64);
+    M.sprites.set(col, s);
+    return s;
+  }
+  function scatterVisible() {
+    return !!mapData && points.length && !brainMode && !chartMode && !drilldownTracks;
+  }
+  function overlayShown(id) {
+    const el = document.getElementById(id);
+    return !!el && el.style.display && el.style.display !== 'none';
+  }
+  function isVisiblePoint(p) {
+    return !(mapMode === 'playlists' && !(p.playlists && p.playlists.length));
+  }
+  function isDimmed(p) {
+    let d = activeGenreFilter && (mapMode === 'moods'
+      ? (p.mood || 'Uncharted') !== activeGenreFilter
+      : !(p.playlists || []).includes(activeGenreFilter));
+    if (aiHighlightSet) d = !aiHighlightSet.has(p.id);
+    return !!d;
+  }
+
+  // -------------------------------------------- hook: pulsing dot radius
+  const _pointRadius = pointRadius;
+  pointRadius = function (p, base) {
+    const r = _pointRadius(p, base);
+    if (!M.on || brainMode || chartMode || !p) return r;
+    return r * (1 + 0.3 * beat(p));
+  };
+
+  // -------------------------- hook: intro spiral + shockwave displacement
+  const _toCanvas = toCanvas;
+  toCanvas = function (nx, ny) {
+    const o = _toCanvas(nx, ny);
+    if (!M.on || brainMode || chartMode) return o;
+    let cx = o.cx, cy = o.cy;
+    // Shockwaves push dots outward as the ring passes them.
+    for (const r of M.ripples) {
+      const age = M.t - r.t0;
+      if (age > 1.4) continue;
+      const dx = nx - r.nx, dy = ny - r.ny;
+      const d = Math.hypot(dx, dy) || 1e-6;
+      const R = age * 0.42;
+      const k = Math.exp(-Math.pow((d - R) / 0.035, 2)) * (1 - age / 1.4);
+      if (k < 0.002) continue;
+      const push = k * 0.022 * transform.scale;
+      cx += dx / d * push; cy += dy / d * push;
+    }
+    if (M.introT < 1.75) {
+      const c = _toCanvas(0.5, 0.5);
+      const dx = nx - 0.5, dy = ny - 0.5;
+      const d = Math.hypot(dx, dy);
+      const local = clamp((M.introT - d * 0.85) / 0.95, 0, 1);
+      const e = easeOutBack(local);
+      const ang = (1 - local) * (2.6 + d * 3);
+      const vx = cx - c.cx, vy = cy - c.cy;
+      const cs = Math.cos(ang), sn = Math.sin(ang);
+      cx = c.cx + (vx * cs - vy * sn) * e;
+      cy = c.cy + (vx * sn + vy * cs) * e;
+    }
+    return { cx, cy };
+  };
+
+  // ------------------------------------------- constellation adjacency
+  function ensureAdjacency() {
+    const key = `${points.length}:${points[0]?.id}:${mapMode}`;
+    if (key === M.adjKey) return;
+    M.adjKey = key;
+    const vis = [];
+    points.forEach((p, i) => { if (isVisiblePoint(p)) vis.push(i); });
+    const adj = new Map(vis.map(i => [i, []]));
+    const pairs = [];
+    const seen = new Set();
+    const K = 2, MAXD = 0.075;
+    for (const i of vis) {
+      const a = points[i];
+      const best = [];
+      for (const j of vis) {
+        if (j === i) continue;
+        const b = points[j];
+        const d = (a.nx - b.nx) ** 2 + (a.ny - b.ny) ** 2;
+        if (d > MAXD * MAXD) continue;
+        if (best.length < K) { best.push([d, j]); best.sort((x, y) => x[0] - y[0]); }
+        else if (d < best[K - 1][0]) { best[K - 1] = [d, j]; best.sort((x, y) => x[0] - y[0]); }
+      }
+      for (const [, j] of best) {
+        const k = i < j ? `${i}-${j}` : `${j}-${i}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        pairs.push([i, j]);
+        adj.get(i).push(j); adj.get(j).push(i);
+      }
+    }
+    M.vis = vis; M.pairs = pairs; M.adj = adj; M.comets = [];
+  }
+
+  function spawnComet(from) {
+    const vis = M.vis.filter(i => M.adj.get(i)?.length);
+    if (!vis.length) return null;
+    const a = from ?? vis[Math.floor(Math.random() * vis.length)];
+    const nb = M.adj.get(a);
+    if (!nb || !nb.length) return null;
+    return { a, b: nb[Math.floor(Math.random() * nb.length)], k: 0, speed: 0.9 + Math.random() * 1.4, hops: 0 };
+  }
+
+  // --------------------------------------------------- hook: dots FX pass
+  const _renderDotsOrig = _renderDots;
+  _renderDots = function () {
+    _renderDotsOrig.apply(this, arguments);
+    if (!M.on) return;
+    try { dotsFX(); } catch (err) { console.warn('[motion]', err); }
+  };
+
+  function dotsFX() {
+    ensureAdjacency();
+    const t = M.t;
+    const pos = new Map();
+    for (const i of M.vis) { const p = points[i]; pos.set(i, toCanvas(p.nx, p.ny)); }
+
+    // ---- behind the dots: glows, then constellation lines (destination-over)
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-over';
+    for (const i of M.vis) {
+      const p = points[i];
+      if (isDimmed(p)) continue;
+      const { cx, cy } = pos.get(i);
+      const b = beat(p);
+      const s = (10 + 18 * b) * (1 + Math.log(Math.max(1, p.play_score || 1)) / 6);
+      ctx.globalAlpha = 0.22 + 0.45 * b;
+      ctx.drawImage(sprite(pointColor(p)), cx - s, cy - s, s * 2, s * 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 0.8;
+    for (const [i, j] of M.pairs) {
+      const a = points[i], b = points[j];
+      // A wave front sweeps diagonally across the map, lighting the web up.
+      const w = Math.max(0, Math.sin(t * 1.5 - (a.nx + a.ny) * 8));
+      const alpha = 0.035 + 0.22 * Math.pow(w, 8);
+      const pa = pos.get(i), pb = pos.get(j);
+      ctx.strokeStyle = w > 0.9 ? rgba(pointColor(a), alpha + 0.1) : `rgba(255,255,255,${alpha.toFixed(3)})`;
+      ctx.beginPath(); ctx.moveTo(pa.cx, pa.cy); ctx.lineTo(pb.cx, pb.cy); ctx.stroke();
+    }
+    ctx.restore();
+
+    // ---- on top: additive light
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Comets racing along the constellation web
+    const target = Math.min(18, Math.max(4, Math.round(M.pairs.length / 40)));
+    while (M.comets.length < target) { const c = spawnComet(); if (!c) break; M.comets.push(c); }
+    for (let n = M.comets.length - 1; n >= 0; n--) {
+      const c = M.comets[n];
+      c.k += M.dt * c.speed;
+      if (c.k >= 1) {
+        const next = c.hops < 6 ? spawnComet(c.b) : spawnComet();
+        if (next) { next.hops = c.hops + 1; M.comets[n] = next; } else M.comets.splice(n, 1);
+        continue;
+      }
+      const pa = pos.get(c.a), pb = pos.get(c.b);
+      if (!pa || !pb) { M.comets.splice(n, 1); continue; }
+      const hx = pa.cx + (pb.cx - pa.cx) * c.k, hy = pa.cy + (pb.cy - pa.cy) * c.k;
+      const tk = Math.max(0, c.k - 0.45);
+      const tx = pa.cx + (pb.cx - pa.cx) * tk, ty = pa.cy + (pb.cy - pa.cy) * tk;
+      const col = pointColor(points[c.a]);
+      const g = ctx.createLinearGradient(tx, ty, hx, hy);
+      g.addColorStop(0, rgba(col, 0));
+      g.addColorStop(1, rgba(col, 0.85));
+      ctx.strokeStyle = g; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.stroke();
+      ctx.drawImage(sprite(col), hx - 9, hy - 9, 18, 18);
+    }
+
+    // Shockwave rings
+    M.ripples = M.ripples.filter(r => t - r.t0 < 1.4);
+    for (const r of M.ripples) {
+      const age = t - r.t0;
+      const c = _toCanvas(r.nx, r.ny);
+      for (let k = 0; k < 3; k++) {
+        const a2 = age - k * 0.12;
+        if (a2 <= 0) continue;
+        const R = a2 * 0.42 * transform.scale;
+        ctx.strokeStyle = rgba(r.color, Math.max(0, 0.55 * (1 - a2 / 1.3)));
+        ctx.lineWidth = 2.2 - k * 0.6;
+        ctx.beginPath(); ctx.arc(c.cx, c.cy, R, 0, TAU); ctx.stroke();
+      }
+    }
+
+    // Now playing: beat-synced sonar on the track
+    const np = nowPlayingPoint();
+    if (np && isVisiblePoint(np)) {
+      const { cx, cy } = toCanvas(np.nx, np.ny);
+      const bpm = bpmOf(np);
+      const col = pointColor(np);
+      for (let k = 0; k < 3; k++) {
+        const ph = ((t * bpm / 60) / 2 + k / 3) % 1;
+        ctx.strokeStyle = rgba(col, 0.7 * (1 - ph));
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(cx, cy, 6 + ph * 46, 0, TAU); ctx.stroke();
+      }
+      ctx.drawImage(sprite(col), cx - 30, cy - 30, 60, 60);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.font = '9px DM Mono, monospace';
+      ctx.fillStyle = rgba(col, 0.9);
+      ctx.fillText('♪ NOW PLAYING', cx + 12, cy + 20);
+      ctx.globalCompositeOperation = 'lighter';
+    }
+
+    // Hover / selection: spinning dashed orbit
+    for (const [pt, col, rad] of [[hoveredPoint, '#ffffff', 13], [selectedPoint, COLOR_SEL, 18]]) {
+      if (!pt) continue;
+      const { cx, cy } = toCanvas(pt.nx, pt.ny);
+      ctx.setLineDash([3, 5]);
+      ctx.lineDashOffset = -t * 24;
+      ctx.strokeStyle = rgba(col, 0.75);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(cx, cy, rad + 2 * beat(pt), 0, TAU); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+
+  // -------------------------------------------------- ripple triggers
+  let downAt = null;
+  canvas.addEventListener('mousedown', e => { downAt = [e.clientX, e.clientY]; }, true);
+  canvas.addEventListener('mouseup', e => {
+    if (!M.on || !downAt || brainMode || chartMode) return;
+    if (Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+    const n = fromCanvas(e.clientX, e.clientY);
+    M.ripples.push({ nx: n.nx, ny: n.ny, t0: M.t, color: hoveredPoint ? pointColor(hoveredPoint) : '#1db954' });
+    if (M.ripples.length > 5) M.ripples.shift();
+  }, true);
+  function watchSelection() {
+    const id = selectedPoint?.id || null;
+    if (id && id !== M.lastSelId && scatterVisible()) {
+      M.ripples.push({ nx: selectedPoint.nx, ny: selectedPoint.ny, t0: M.t, color: pointColor(selectedPoint) });
+      if (M.ripples.length > 5) M.ripples.shift();
+    }
+    M.lastSelId = id;
+  }
+
+  // --------------------------------------------------- living background
+  function setupBg() {
+    const bg = document.createElement('canvas');
+    bg.id = 'motion-bg';
+    canvas.parentNode.insertBefore(bg, canvas);
+    M.bg = bg; M.bctx = bg.getContext('2d');
+    M.small = document.createElement('canvas');
+    M.sctx = M.small.getContext('2d');
+    const grain = document.createElement('div'); grain.id = 'motion-grain';
+    const vig = document.createElement('div'); vig.id = 'motion-vignette';
+    document.body.appendChild(vig); document.body.appendChild(grain);
+    // Noise tile for film grain
+    const n = document.createElement('canvas'); n.width = n.height = 160;
+    const ng = n.getContext('2d'); const img = ng.createImageData(160, 160);
+    for (let i = 0; i < img.data.length; i += 4) { const v = Math.random() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+    ng.putImageData(img, 0, 0);
+    grain.style.backgroundImage = `url(${n.toDataURL()})`;
+    sizeBg();
+    window.addEventListener('resize', sizeBg);
+  }
+  function sizeBg() {
+    if (!M.bg) return;
+    const w = window.innerWidth, h = window.innerHeight;
+    M.bg.width = w; M.bg.height = h;
+    M.small.width = Math.max(32, Math.round(w / 8));
+    M.small.height = Math.max(32, Math.round(h / 8));
+    const count = w < 700 ? 70 : 150;
+    M.stars = Array.from({ length: count }, () => newStar(true));
+  }
+  function newStar(anywhere) {
+    const a = Math.random() * TAU;
+    const d = anywhere ? Math.random() : Math.random() * 0.08;
+    return { a, d, z: 0.25 + Math.random() * 0.75, tw: Math.random() * TAU, px: null, py: null };
+  }
+  function buildPalette() {
+    const cols = [];
+    if (typeof playlistColors === 'object') cols.push(...Object.values(playlistColors));
+    if (typeof moodColors === 'object' && cols.length < 3) cols.push(...Object.values(moodColors));
+    const fallback = ['hsl(265, 80%, 62%)', 'hsl(145, 70%, 45%)', 'hsl(205, 85%, 58%)', 'hsl(325, 80%, 62%)', 'hsl(35, 90%, 58%)'];
+    M.palette = (cols.length ? cols : fallback).slice(0, 6);
+    while (M.palette.length < 4) M.palette.push(fallback[M.palette.length]);
+    M.paletteKey = M.palette.join();
+  }
+
+  function drawBg() {
+    const g = M.bctx, w = M.bg.width, h = M.bg.height, t = M.t;
+    if (!M.palette.length || M._palTick++ % 120 === 0) buildPalette();
+    const gb = globalBeat();
+
+    // Aurora clouds — rendered tiny, upscaled for a free blur.
+    const s = M.sctx, sw = M.small.width, sh = M.small.height;
+    s.globalCompositeOperation = 'source-over';
+    s.fillStyle = '#0a0a0f';
+    s.fillRect(0, 0, sw, sh);
+    s.globalCompositeOperation = 'lighter';
+    M.palette.forEach((col, i) => {
+      const fx = 0.11 + i * 0.037, fy = 0.083 + i * 0.029;
+      const x = sw * (0.5 + 0.42 * Math.sin(t * fx + i * 1.7));
+      const y = sh * (0.5 + 0.38 * Math.cos(t * fy + i * 2.3));
+      const r = Math.min(sw, sh) * (0.42 + 0.12 * Math.sin(t * 0.21 + i));
+      const gr = s.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, rgba(col, 0.20 + 0.10 * gb));
+      gr.addColorStop(1, rgba(col, 0));
+      s.fillStyle = gr;
+      s.fillRect(0, 0, sw, sh);
+    });
+    g.globalCompositeOperation = 'source-over';
+    g.imageSmoothingEnabled = true;
+    g.drawImage(M.small, 0, 0, w, h);
+
+    // Sonar rings from the centre every 2 beats
+    const beatIdx = Math.floor(M.t * (nowPlayingPoint() ? bpmOf(nowPlayingPoint()) : 112) / 60 / 2);
+    if (beatIdx !== M.lastSonarBeat) { M.lastSonarBeat = beatIdx; M.sonar.push(t); if (M.sonar.length > 4) M.sonar.shift(); }
+    const cx = w / 2, cy = h / 2, maxR = Math.hypot(w, h) / 2;
+    g.lineWidth = 1;
+    for (const st of M.sonar) {
+      const a = (t - st) / 4.5;
+      if (a > 1) continue;
+      g.strokeStyle = `rgba(255,255,255,${(0.07 * (1 - a)).toFixed(3)})`;
+      g.beginPath(); g.arc(cx, cy, a * maxR, 0, TAU); g.stroke();
+    }
+
+    // Star field drifting outward (warps during the intro)
+    M.warp = Math.max(0, M.warp - M.dt * 0.9);
+    const speed = 0.012 + M.warp * 0.9;
+    g.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < M.stars.length; i++) {
+      const st = M.stars[i];
+      st.d += speed * st.z * M.dt * (0.4 + st.d);
+      if (st.d > 1.05) { M.stars[i] = newStar(false); continue; }
+      const x = cx + Math.cos(st.a) * st.d * maxR;
+      const y = cy + Math.sin(st.a) * st.d * maxR;
+      const tw = 0.45 + 0.55 * Math.sin(t * 2.2 + st.tw);
+      const alpha = Math.min(1, st.d * 3) * tw * st.z * (0.55 + 0.4 * gb);
+      if (M.warp > 0.15 && st.px != null) {
+        g.strokeStyle = `rgba(200,210,255,${(alpha * 0.8).toFixed(3)})`;
+        g.lineWidth = st.z * 1.4;
+        g.beginPath(); g.moveTo(st.px, st.py); g.lineTo(x, y); g.stroke();
+      } else {
+        g.fillStyle = `rgba(220,225,255,${alpha.toFixed(3)})`;
+        g.fillRect(x, y, st.z * 1.6, st.z * 1.6);
+      }
+      st.px = x; st.py = y;
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  // --------------------------------------------------------- 2D brain
+  function decorateBrainSVG(svg) {
+    if (!svg || svg.querySelector('.sm-sweep')) return;
+    svg.querySelectorAll('.bv-cell').forEach(el => el.style.setProperty('--sm-i', el.dataset.idx || 0));
+    svg.querySelectorAll('.bv-seed').forEach(el => el.style.setProperty('--sm-i', el.dataset.idx || 0));
+    svg.querySelectorAll('path[stroke="rgba(255,255,255,0.1)"]').forEach(el => el.classList.add('sm-gyrus'));
+    const clip = svg.querySelector('clipPath');
+    if (!clip) return;
+    const ns = 'http://www.w3.org/2000/svg';
+    const defs = document.createElementNS(ns, 'defs');
+    defs.innerHTML = `<linearGradient id="smSweepGrad" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+        <stop offset=".5" stop-color="#fff" stop-opacity=".16"/>
+        <stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>`;
+    const sweep = document.createElementNS(ns, 'g');
+    sweep.setAttribute('class', 'sm-sweep');
+    sweep.setAttribute('clip-path', `url(#${clip.id})`);
+    sweep.setAttribute('style', 'pointer-events:none;mix-blend-mode:screen');
+    sweep.innerHTML = `<rect x="0" y="0" width="300" height="700" fill="url(#smSweepGrad)" transform="skewX(-18)"/>`;
+    const sonar = document.createElementNS(ns, 'g');
+    sonar.setAttribute('class', 'sm-sonar');
+    sonar.setAttribute('clip-path', `url(#${clip.id})`);
+    sonar.setAttribute('style', 'pointer-events:none');
+    sonar.innerHTML = [0, 1.3, 2.6].map(b => `
+      <circle cx="500" cy="344" r="0" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="1.5">
+        <animate attributeName="r" values="0;460" dur="3.9s" begin="${b}s" repeatCount="indefinite"/>
+        <animate attributeName="stroke-opacity" values=".45;0" dur="3.9s" begin="${b}s" repeatCount="indefinite"/>
+      </circle>`).join('');
+    const labels = svg.querySelector('[id$="bv-labels"]');
+    svg.insertBefore(defs, svg.firstChild);
+    svg.insertBefore(sweep, labels);
+    svg.insertBefore(sonar, labels);
+  }
+  function brainIntro(svg) {
+    if (!M.on || !svg) return;
+    svg.classList.remove('sm-bv-intro');
+    void svg.getBoundingClientRect();
+    svg.classList.add('sm-bv-intro');
+    clearTimeout(M._bvTimer);
+    M._bvTimer = setTimeout(() => svg.classList.remove('sm-bv-intro'), 2000);
+    M.warp = 1;
+  }
+  if (typeof _showBrainOverlay === 'function') {
+    const _showBrainOverlayOrig = _showBrainOverlay;
+    _showBrainOverlay = function () {
+      const ov = document.getElementById('brain-overlay');
+      const svg = document.getElementById('brain-svg');
+      const wasHidden = ov && ov.style.display !== 'block';
+      const before = svg?.dataset.built;
+      const r = _showBrainOverlayOrig.apply(this, arguments);
+      if (svg && (svg.dataset.built !== before || !svg.querySelector('.sm-sweep'))) decorateBrainSVG(svg);
+      if (wasHidden) brainIntro(svg);
+      return r;
+    };
+  }
+  if (typeof _showCompareBrainView === 'function') {
+    const _cmpOrig = _showCompareBrainView;
+    _showCompareBrainView = function () {
+      const r = _cmpOrig.apply(this, arguments);
+      ['cmp-svg-me', 'cmp-svg-friend'].forEach(id => decorateBrainSVG(document.getElementById(id)));
+      return r;
+    };
+  }
+
+  // --------------------------------------------------------- 3D brain
+  // Particle brain: the solid cortex is swapped for ~50k glowing points in an
+  // anatomical shape — two hemispheres with sulci folds, temporal lobes, a
+  // banded cerebellum and a brainstem. Points are tinted by playlist lobe,
+  // fade with depth, shimmer to the beat, carry sparks that run along the
+  // folds, lift when their lobe is hovered, and assemble from a cloud when
+  // the view opens. The old mesh stays invisible underneath for hit-testing.
+  const PB = { obj: null, mat: null, built: '', introAt: -1e9 };
+
+  function pbBuild() {
+    if (!brain3D?.ready || !brain3D.THREE || !brain3D.names?.length || !brain3D.brainMesh) return;
+    if (typeof _hexToThreeColor !== 'function') return;
+    const THREE = brain3D.THREE;
+    const mobile = window.innerWidth < 768;
+    const key = `${brain3D.dataKey}|${mobile}`;
+    if (PB.obj && PB.built === key && PB.obj.parent) return;
+    if (PB.obj) { PB.obj.parent?.remove(PB.obj); PB.obj.geometry.dispose(); PB.mat.dispose(); PB.obj = null; }
+
+    const dirs = brain3D.dirs || [];
+    if (!dirs.length) return;
+    const lobeCols = brain3D.names.map(n => _hexToThreeColor(THREE, playlistColors[n] || COLOR_UNTAGGED));
+    const N = mobile ? 16000 : 34000;
+    const pos = new Float32Array(N * 3), colA = new Float32Array(N * 3);
+    const dat = new Float32Array(N * 4), start = new Float32Array(N * 3);
+    let rs = 123456789;
+    const rnd = () => (rs = (Math.imul(rs, 1103515245) + 12345) & 0x7fffffff) / 0x7fffffff;
+    const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+    const SX = 1.25, SY = 0.95, SZ = 1.15;
+
+    function cortex(d) {
+      const x = d[0], y = d[1], z = d[2];
+      const fold = 0.5 + 0.5 * (
+        0.65 * Math.sin(x * 14 + y * 8) * Math.sin(z * 12 - y * 6) +
+        0.35 * Math.sin((x + z) * 24 + 2) * Math.sin(y * 16 - z * 4));
+      const r = 1
+        - 0.14 * smooth(0, 0.75, -y - 0.2)                                                     // flat underside
+        + 0.035 * z                                                                            // frontal fullness
+        + 0.10 * Math.exp(-((Math.abs(x) - 0.88) ** 2) / 0.09 - ((y + 0.3) ** 2) / 0.1 - ((z - 0.3) ** 2) / 0.4) // temporal lobes
+        - 0.24 * Math.exp(-((y + 0.55) ** 2) / 0.1 - ((z + 0.78) ** 2) / 0.16)                 // room for cerebellum
+        + (fold - 0.5) * 0.085                                                                 // sulci relief
+        - Math.exp(-Math.abs(x) * 26) * 0.17;                                                  // interhemispheric fissure
+      return { r, fold };
+    }
+    function winner(d) {
+      let best = 0, bd = -2;
+      for (let i = 0; i < dirs.length; i++) {
+        const q = dirs[i];
+        const dot = d[0] * q[0] + d[1] * q[1] + d[2] * q[2];
+        if (dot > bd) { bd = dot; best = i; }
+      }
+      return best;
+    }
+    let i = 0;
+    function put(px, py, pz, d, fold, kind, dim) {
+      const lobe = winner(d);
+      const c = lobeCols[lobe] || { r: 0.65, g: 0.55, b: 1 };
+      const shade = dim * (0.45 + 0.6 * fold) * (0.88 + 0.24 * rnd());
+      pos[i * 3] = px; pos[i * 3 + 1] = py; pos[i * 3 + 2] = pz;
+      colA[i * 3] = Math.min(1, c.r * shade); colA[i * 3 + 1] = Math.min(1, c.g * shade); colA[i * 3 + 2] = Math.min(1, c.b * shade);
+      dat[i * 4] = lobe; dat[i * 4 + 1] = rnd(); dat[i * 4 + 2] = fold; dat[i * 4 + 3] = kind;
+      const sr = 2.8 + rnd() * 2.2, sz2 = rnd() * 2 - 1, sa = rnd() * TAU, ss = Math.sqrt(1 - sz2 * sz2);
+      start[i * 3] = Math.cos(sa) * ss * sr; start[i * 3 + 1] = sz2 * sr; start[i * 3 + 2] = Math.sin(sa) * ss * sr;
+      i++;
+    }
+    const nCortex = Math.floor(N * 0.86), nCer = Math.floor(N * 0.11);
+    while (i < nCortex) {
+      const y = rnd() * 2 - 1, a = rnd() * TAU, s = Math.sqrt(1 - y * y);
+      const d = [Math.cos(a) * s, y, Math.sin(a) * s];
+      const { r, fold } = cortex(d);
+      if (r < 0.45) continue;                       // inside a carved region
+      const shell = 1 - rnd() * rnd() * 0.05;       // slight thickness
+      put(d[0] * r * SX * shell, d[1] * r * SY * shell, d[2] * r * SZ * shell, d, fold, 1, 1);
+    }
+    // Cerebellum: banded little brain at the back underside
+    const CC = [0, -0.58, -0.74], CR = [0.47, 0.27, 0.36];
+    while (i < nCortex + nCer) {
+      const y = rnd() * 2 - 1, a = rnd() * TAU, s = Math.sqrt(1 - y * y);
+      const d = [Math.cos(a) * s, y, Math.sin(a) * s];
+      const band = 0.5 + 0.5 * Math.sin(y * 26 + d[0] * 3);
+      const rr = (0.9 + rnd() * 0.1) * (1 + (band - 0.5) * 0.1) * (1 - Math.exp(-Math.abs(d[0]) * 18) * 0.25);
+      const px = (CC[0] + d[0] * CR[0] * rr) * SX, py = (CC[1] + d[1] * CR[1] * rr) * SY, pz = (CC[2] + d[2] * CR[2] * rr) * SZ;
+      put(px, py, pz, [px / SX, py / SY, pz / SZ], band, 0.35, 0.62);
+    }
+    // Brainstem
+    while (i < N) {
+      const t = rnd(), a = rnd() * TAU, rad = 0.13 * Math.sqrt(rnd()) * (1 - t * 0.35);
+      const cx = Math.cos(a) * rad, cz = Math.sin(a) * rad;
+      const px = cx * SX, py = (-0.5 - t * 0.5) * SY, pz = (-0.18 - t * 0.22 + cz) * SZ;
+      put(px, py, pz, [px / SX, py / SY, pz / SZ], 0.5, 0, 0.45);
+    }
+
+    // Shuffle so that drawing only the first X% still samples the whole
+    // brain evenly — that is what adaptive quality leans on below.
+    for (let a1 = N - 1; a1 > 0; a1--) {
+      const b1 = Math.floor(rnd() * (a1 + 1));
+      for (let c = 0; c < 3; c++) {
+        let t2 = pos[a1 * 3 + c]; pos[a1 * 3 + c] = pos[b1 * 3 + c]; pos[b1 * 3 + c] = t2;
+        t2 = colA[a1 * 3 + c]; colA[a1 * 3 + c] = colA[b1 * 3 + c]; colA[b1 * 3 + c] = t2;
+        t2 = start[a1 * 3 + c]; start[a1 * 3 + c] = start[b1 * 3 + c]; start[b1 * 3 + c] = t2;
+      }
+      for (let c = 0; c < 4; c++) {
+        const t2 = dat[a1 * 4 + c]; dat[a1 * 4 + c] = dat[b1 * 4 + c]; dat[b1 * 4 + c] = t2;
+      }
+    }
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geom.setAttribute('aColor', new THREE.BufferAttribute(colA, 3));
+    geom.setAttribute('aData', new THREE.BufferAttribute(dat, 4));
+    geom.setAttribute('aStart', new THREE.BufferAttribute(start, 3));
+    PB.mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uBeat: { value: 0 }, uIntro: { value: 1 }, uHover: { value: -1 }, uPx: { value: 1 }, uDim: { value: 1 } },
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      vertexShader: `
+        attribute vec3 aColor; attribute vec4 aData; attribute vec3 aStart;
+        uniform float uTime, uBeat, uIntro, uHover, uPx, uDim;
+        varying vec3 vC; varying float vA;
+        void main() {
+          float rand = aData.y, fold = aData.z, kind = aData.w;
+          float k = clamp(uIntro * 1.3 - rand * 0.3, 0.0, 1.0);
+          float e = 1.0 - pow(1.0 - k, 3.0);
+          vec3 p = mix(aStart, position, e);
+          float th = (1.0 - e) * (2.2 + rand * 4.0);
+          float cs = cos(th), sn = sin(th);
+          p = vec3(p.x * cs - p.z * sn, p.y, p.x * sn + p.z * cs);
+          float lifted = (uHover > -0.5 && abs(aData.x - uHover) < 0.5) ? 1.0 : 0.0;
+          p *= 1.0 + 0.09 * lifted * (0.7 + 0.3 * sin(uTime * 2.6 + rand * 6.3));
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          float tw = 0.8 + 0.35 * sin(uTime * (1.5 + rand * 2.5) + rand * 40.0);
+          float beatK = 1.0 + 0.55 * uBeat * step(0.68, fract(rand * 9.7));
+          gl_PointSize = min(uPx * (0.8 + 1.3 * rand) * tw * beatK * (1.0 + 0.7 * lifted) * (115.0 / -mv.z), 6.5 * uPx);
+          float spark = pow(max(sin(fold * 19.0 - uTime * 2.6 + rand * 0.8), 0.0), 30.0) * kind * (0.35 + 0.75 * uBeat);
+          vA = clamp((6.2 + mv.z) / 4.0, 0.04, 0.85) * e * uDim;
+          vC = aColor * (0.5 + 0.28 * uBeat) * (1.0 + 0.7 * lifted) + vec3(1.0, 0.97, 0.9) * spark * 0.6;
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        varying vec3 vC; varying float vA;
+        void main() {
+          vec2 q = gl_PointCoord - vec2(0.5);
+          float d = dot(q, q);
+          if (d > 0.25) discard;
+          float core = smoothstep(0.25, 0.0, d);
+          gl_FragColor = vec4(vC * (0.3 + 0.8 * core), vA * 0.55 * (0.08 + 0.92 * core));
+        }`,
+    });
+    PB.total = N;
+    PB.quality = PB.quality || 1;
+    geom.setDrawRange(0, Math.round(N * PB.quality));
+    PB.obj = new THREE.Points(geom, PB.mat);
+    PB.obj.renderOrder = 2;
+    PB.obj.frustumCulled = false;
+    brain3D.group.add(PB.obj);
+    PB.built = key;
+    PB.introAt = M.t;
+  }
+
+  if (typeof _rebuildBrain3DScene === 'function') {
+    const _rbOrig = _rebuildBrain3DScene;
+    _rebuildBrain3DScene = function () {
+      const r = _rbOrig.apply(this, arguments);
+      PB.built = '';
+      try { pbBuild(); } catch (err) { console.warn('[motion:pb]', err); }
+      return r;
+    };
+  }
+  if (typeof _showBrain3DOverlay === 'function') {
+    const _sb3Orig = _showBrain3DOverlay;
+    _showBrain3DOverlay = function () {
+      const wasHidden = !overlayShown('brain3d-overlay');
+      const r = _sb3Orig.apply(this, arguments);
+      if (wasHidden) { PB.introAt = M.t; M.warp = 1; }
+      return r;
+    };
+  }
+  if (typeof _brain3DAnimate === 'function' && typeof brain3D === 'object') {
+    const _b3dOrig = _brain3DAnimate;
+    _brain3DAnimate = function () {
+      if (brain3D.ready) {
+        const on = M.on;
+        // Adaptive quality: sample frame times and drop/raise the share of
+        // points drawn so the brain keeps a smooth frame rate on any machine.
+        if (on && PB.obj && PB.total) {
+          const nowMs = performance.now();
+          if (PB.lastFrame) {
+            const ft = nowMs - PB.lastFrame;
+            PB.ftAvg = PB.ftAvg ? PB.ftAvg * 0.9 + ft * 0.1 : ft;
+            PB.qCheck = (PB.qCheck || 0) + 1;
+            if (PB.qCheck > 45 && PB.ftAvg) {
+              PB.qCheck = 0;
+              const q = PB.quality || 1;
+              let nq = q;
+              if (PB.ftAvg > 26 && q > 0.18) nq = Math.max(0.18, q - 0.18);
+              else if (PB.ftAvg < 15 && q < 1) nq = Math.min(1, q + 0.08);
+              if (nq !== q) {
+                PB.quality = nq;
+                PB.obj.geometry.setDrawRange(0, Math.round(PB.total * nq));
+              }
+            }
+          }
+          PB.lastFrame = nowMs;
+        }
+        if (PB.zoomT != null) {
+          if (brain3D.cameraTween) PB.zoomT = null;
+          else {
+            brain3D.distance += (PB.zoomT - brain3D.distance) * (1 - Math.exp(-M.dt * 8));
+            if (Math.abs(PB.zoomT - brain3D.distance) < 0.003) { brain3D.distance = PB.zoomT; PB.zoomT = null; }
+          }
+        }
+        if (on && (!PB.obj || !PB.obj.parent)) { try { pbBuild(); } catch (err) { console.warn('[motion:pb]', err); } }
+        const gb = on ? globalBeat() : 0;
+        if (PB.obj && PB.mat) {
+          PB.obj.visible = on;
+          if (brain3D.brainMesh?.material) brain3D.brainMesh.material.visible = !on;
+          const u = PB.mat.uniforms;
+          u.uTime.value = M.t;
+          u.uBeat.value = gb;
+          u.uHover.value = brain3D.mode === 'world' ? brain3D.hoverIndex : brain3D.activePlaylistIndex;
+          u.uIntro.value = clamp((M.t - PB.introAt) / 2.4, 0, 1);
+          u.uPx.value = (brain3D.renderer?.domElement?.height || 900) / 900;
+          const dimT = brain3D.mode === 'world' ? 1 : 0.12;
+          PB.dim = (PB.dim === undefined ? 1 : PB.dim) + (dimT - (PB.dim === undefined ? 1 : PB.dim)) * Math.min(1, M.dt * 3.5);
+          u.uDim.value = PB.dim;
+          if (PB.detail && brain3D.mode !== 'world') {
+            // Planets turn on their own axes; their scale is left alone so
+            // selecting an artist still reads.
+            (PB.detail.spin || []).forEach((sp, i) => {
+              const mh = PB.detail.artists[i];
+              if (mh) { mh.rotation.y += M.dt * sp; mh.rotation.x += M.dt * sp * 0.3; }
+            });
+            if (!brain3D.dragging && !brain3D.cameraTween && performance.now() - brain3D.lastInputAt > 2600) brain3D.yaw += 0.0011;
+            (PB.detail.artists || []).forEach(mh => {
+              const u = mh.material && mh.material.uniforms;
+              if (u) { u.uTime.value = M.t; u.uBeat.value = gb; }
+            });
+            const sm = PB.detail.songMat;
+            if (sm && sm.uniforms) {
+              sm.uniforms.uTime.value = M.t;
+              sm.uniforms.uBeat.value = gb;
+              sm.uniforms.uGroupScale.value = brain3D.detailGroup ? brain3D.detailGroup.scale.x : 1;
+              sm.uniforms.uScale.value = (brain3D.renderer?.domElement?.height || 900) * 0.5;
+            }
+          }
+        }
+        if (brain3D.group) {
+          const s = on ? 1 + 0.012 * Math.sin(M.t * 1.3) + 0.015 * gb : 1;
+          brain3D.group.scale.setScalar(s);
+        }
+        if (brain3D.stars) {
+          brain3D.stars.rotation.y += on ? 0.0012 + M.warp * 0.02 : 0;
+          if (on) brain3D.stars.rotation.x = Math.sin(M.t * 0.07) * 0.08;
+        }
+      }
+      return _b3dOrig.apply(this, arguments);
+    };
+  }
+
+  // ---------------------------------------- 3D brain: detail view + way back
+  // Fix the base opacity tween: it used to set every material to the same
+  // absolute opacity, turning the lobe backing (designed at 0.06) into an
+  // opaque pancake. Respect each material's design opacity instead.
+  if (typeof _brain3DSetMaterialOpacity === 'function') {
+    _brain3DSetMaterialOpacity = function (obj, k) {
+      obj.traverse(child => {
+        const m = child.material;
+        if (!m) return;
+        if (m.userData.smBase === undefined) m.userData.smBase = (m.opacity === undefined || m.opacity === null) ? 1 : m.opacity;
+        m.transparent = true;
+        const o = m.userData.smBase * Math.max(0, Math.min(1, k));
+        m.opacity = o;
+        if (m.uniforms && m.uniforms.uOpacity) m.uniforms.uOpacity.value = o;
+      });
+    };
+  }
+
+  function pbGlowTexture(THREE) {
+    if (PB.glowTex) return PB.glowTex;
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,.95)');
+    gr.addColorStop(0.3, 'rgba(255,255,255,.32)');
+    gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 64, 64);
+    PB.glowTex = new THREE.CanvasTexture(c);
+    return PB.glowTex;
+  }
+
+  // Particle-style the drill-down: near-black backing, glowing artist orbs
+  // with additive halos, bigger song sparks — all pulsing to the beat.
+  // Turn the drill-down into a solar system: artists become planets spread
+  // through 3D space, their songs become moons on inclined orbits. The flat
+  // lobe cut-out is dropped so the system sits in open space.
+  function pbStyleDetail() {
+    const THREE = brain3D.THREE, g = brain3D.detailGroup;
+    if (!THREE || !g) return;
+    const det = { artists: [], spin: [], songMat: null };
+    const meshes = brain3D.artistMeshes || [];
+    const clusters = brain3D.artistData || [];
+
+    // --- the flat lobe plate and its outline have no place in open space
+    g.children.forEach(c => {
+      if (c.isMesh && c.geometry && c.geometry.type === 'ShapeGeometry') c.material.userData.smBase = 0;
+      if (c.isLine) c.material.userData.smBase = 0;
+    });
+
+    // --- planets: spread over nested shells with a Fibonacci direction each
+    const total = Math.max(meshes.length, 1);
+    const GOLD = 2.399963229728653;
+    const radiusOf = m => (m.geometry && m.geometry.parameters && m.geometry.parameters.radius) || 0.1;
+    const reach = m => radiusOf(m) + 0.15;            // planet plus its moon shell
+    meshes.forEach((mesh, i) => {
+      const t = (i + 0.5) / total;
+      const y = 1 - 2 * t;
+      const ring = Math.sqrt(Math.max(0, 1 - y * y));
+      const phi = i * GOLD;
+      const shell = 0.42 + 0.56 * (((i * 0.6180339887) % 1));
+      mesh.position.set(Math.cos(phi) * ring * shell, y * shell * 0.86, Math.sin(phi) * ring * shell);
+    });
+    // nudge apart any planets whose moon shells would collide
+    for (let pass = 0; pass < 12; pass++) {
+      let moved = false;
+      for (let i = 0; i < meshes.length; i++) {
+        for (let j = i + 1; j < meshes.length; j++) {
+          const A = meshes[i].position, B = meshes[j].position;
+          const need = reach(meshes[i]) + reach(meshes[j]);
+          const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
+          const d = Math.hypot(dx, dy, dz) || 1e-4;
+          if (d >= need) continue;
+          const push = (need - d) * 0.5, ux = dx / d, uy = dy / d, uz = dz / d;
+          A.set(A.x - ux * push, A.y - uy * push, A.z - uz * push);
+          B.set(B.x + ux * push, B.y + uy * push, B.z + uz * push);
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+
+    // --- planet surfaces: procedural terrain so each artist reads as a world
+    //     — ocean, land, highlands, ice caps, drifting cloud and an
+    //     atmosphere rim, all tinted by that artist's colour.
+    const planetVert = `
+      varying vec3 vObj; varying vec3 vN; varying vec3 vV;
+      void main() {
+        vObj = normalize(position);
+        vN = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vV = -mv.xyz;
+        gl_Position = projectionMatrix * mv;
+      }`;
+    const planetFrag = `
+      uniform vec3 uColor; uniform float uTime, uBeat, uOpacity, uSelect, uSeed;
+      varying vec3 vObj; varying vec3 vN; varying vec3 vV;
+      float hs(vec3 p) {
+        p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+        p *= 17.0;
+        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+      }
+      float nz(vec3 x) {
+        vec3 i = floor(x), f = fract(x);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(hs(i), hs(i + vec3(1,0,0)), f.x),
+                       mix(hs(i + vec3(0,1,0)), hs(i + vec3(1,1,0)), f.x), f.y),
+                   mix(mix(hs(i + vec3(0,0,1)), hs(i + vec3(1,0,1)), f.x),
+                       mix(hs(i + vec3(0,1,1)), hs(i + vec3(1,1,1)), f.x), f.y), f.z);
+      }
+      float fbm(vec3 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 4; i++) { v += a * nz(p); p *= 2.03; a *= 0.5; }
+        return v;
+      }
+      void main() {
+        vec3 N = normalize(vN), V = normalize(vV);
+        vec3 L = normalize(vec3(0.42, 0.62, 0.72));
+        vec3 q = vObj + uSeed;
+        float h = fbm(q * 2.1);
+        float land = smoothstep(0.47, 0.55, h);
+        float high = smoothstep(0.58, 0.76, h);
+        vec3 ocean = mix(uColor * 0.26, vec3(0.03, 0.08, 0.16), 0.5);
+        vec3 grass = mix(uColor * 0.95, vec3(0.26, 0.35, 0.16), 0.42);
+        vec3 rock  = mix(uColor * 1.15, vec3(0.50, 0.43, 0.32), 0.52);
+        vec3 surf = mix(ocean, grass, land);
+        surf = mix(surf, rock, high * land);
+        float cap = smoothstep(0.74, 0.93, abs(vObj.y));
+        surf = mix(surf, vec3(0.86, 0.90, 0.95), cap * 0.8);
+        float cl = fbm(q * 3.0 + vec3(uTime * 0.015, 0.0, 0.0));
+        surf = mix(surf, vec3(0.92), smoothstep(0.54, 0.73, cl) * 0.45);
+        float diff = max(dot(N, L), 0.0);
+        vec3 col = surf * (0.24 + 0.95 * diff);
+        float spec = pow(max(dot(reflect(-L, N), V), 0.0), 26.0) * (1.0 - land) * 0.45;
+        col += vec3(1.0) * spec * diff;
+        float rim = pow(1.0 - max(dot(N, V), 0.0), 2.6);
+        col += uColor * rim * 0.75;
+        col *= 1.0 + 0.10 * uBeat;
+        gl_FragColor = vec4(col, uOpacity * uSelect);
+      }`;
+    meshes.forEach((mesh, i) => {
+      const tint = mesh.material.color ? mesh.material.color.clone() : new THREE.Color(0.6, 0.6, 0.8);
+      const pm = new THREE.ShaderMaterial({
+        uniforms: {
+          uColor: { value: tint }, uTime: { value: 0 }, uBeat: { value: 0 },
+          uOpacity: { value: 0 }, uSelect: { value: 1 }, uSeed: { value: i * 3.77 },
+        },
+        transparent: true, depthWrite: true,
+        vertexShader: planetVert, fragmentShader: planetFrag,
+      });
+      pm.userData.smBase = 1;
+      mesh.material.dispose();
+      mesh.material = pm;
+      det.artists.push(mesh);
+      det.spin.push(0.05 + ((i * 0.37) % 1) * 0.1);
+    });
+
+    // --- labels ride along to the planets' new homes
+    (brain3D.labelItems || []).forEach(item => {
+      if (item.kind !== 'artist' || !Number.isInteger(item.index)) return;
+      const mesh = meshes[item.index];
+      if (mesh) item.localPos = mesh.position.clone().add(new THREE.Vector3(0, radiusOf(mesh) + 0.08, 0));
+    });
+
+    // --- moons: one inclined orbit each, around their own planet
+    const pts = brain3D.detailSongPoints;
+    if (pts && pts.geometry && pts.geometry.attributes.position) {
+      const sg = pts.geometry;
+      const pa = sg.attributes.position, ca = sg.attributes.color;
+      const n = pa.count;
+
+      // songs were emitted cluster by cluster, up to 36 each — rebuild that map
+      const owner = new Int32Array(n).fill(-1);
+      const slot = new Float32Array(n);
+      let k = 0;
+      for (let i = 0; i < clusters.length && k < n; i++) {
+        const shown = Math.min((clusters[i].songs || []).length, 36);
+        for (let j = 0; j < shown && k < n; j++) { owner[k] = i; slot[k] = (j + 0.5) / shown; k++; }
+      }
+
+      const centers = new Float32Array(n * 3);
+      const uAxis = new Float32Array(n * 3);
+      const vAxis = new Float32Array(n * 3);
+      const orbit = new Float32Array(n * 4);   // radius, start angle, speed, seed
+      const cols = new Float32Array(n * 3);
+      let rs = 20260416;
+      const rnd = () => (rs = (Math.imul(rs, 1103515245) + 12345) & 0x7fffffff) / 0x7fffffff;
+
+      for (let i = 0; i < n; i++) {
+        let mesh = owner[i] >= 0 ? meshes[owner[i]] : null;
+        if (!mesh) {                                    // safety: nearest planet
+          let bd = Infinity;
+          const px = pa.getX(i), py = pa.getY(i), pz = pa.getZ(i);
+          for (const mh of meshes) {
+            const d = (mh.position.x - px) ** 2 + (mh.position.y - py) ** 2 + (mh.position.z - pz) ** 2;
+            if (d < bd) { bd = d; mesh = mh; }
+          }
+        }
+        const c = mesh ? mesh.position : { x: 0, y: 0, z: 0 };
+        centers[i * 3] = c.x; centers[i * 3 + 1] = c.y; centers[i * 3 + 2] = c.z;
+
+        const pr = mesh ? radiusOf(mesh) : 0.1;
+        const r = pr + 0.035 + (slot[i] || rnd()) * 0.105 + rnd() * 0.012;
+
+        // a random orbital plane: normal n, then two perpendicular axes in it
+        const nz = rnd() * 2 - 1, na = rnd() * TAU, ns = Math.sqrt(Math.max(0, 1 - nz * nz));
+        const nx = Math.cos(na) * ns, ny2 = nz, nzz = Math.sin(na) * ns;
+        let ax = 0, ay = 1, az = 0;
+        if (Math.abs(ny2) > 0.9) { ax = 1; ay = 0; }
+        let ux = ay * nzz - az * ny2, uy = az * nx - ax * nzz, uz = ax * ny2 - ay * nx;
+        let ul = Math.hypot(ux, uy, uz) || 1; ux /= ul; uy /= ul; uz /= ul;
+        const vx = ny2 * uz - nzz * uy, vy = nzz * ux - nx * uz, vz = nx * uy - ny2 * ux;
+        uAxis[i * 3] = ux; uAxis[i * 3 + 1] = uy; uAxis[i * 3 + 2] = uz;
+        vAxis[i * 3] = vx; vAxis[i * 3 + 1] = vy; vAxis[i * 3 + 2] = vz;
+
+        // closer moons run faster, as they should
+        const speed = Math.max(0.12, Math.min(1.5, 0.30 * Math.pow(0.11 / r, 1.3))) * (rnd() > 0.5 ? 1 : -1);
+        orbit[i * 4] = r;
+        orbit[i * 4 + 1] = rnd() * TAU;
+        orbit[i * 4 + 2] = speed;
+        orbit[i * 4 + 3] = rnd();
+
+        if (ca) { cols[i * 3] = ca.getX(i); cols[i * 3 + 1] = ca.getY(i); cols[i * 3 + 2] = ca.getZ(i); }
+        else { cols[i * 3] = cols[i * 3 + 1] = cols[i * 3 + 2] = 1; }
+      }
+      sg.setAttribute('aCenter', new THREE.BufferAttribute(centers, 3));
+      sg.setAttribute('aU', new THREE.BufferAttribute(uAxis, 3));
+      sg.setAttribute('aV', new THREE.BufferAttribute(vAxis, 3));
+      sg.setAttribute('aOrbit', new THREE.BufferAttribute(orbit, 4));
+      sg.setAttribute('aCol', new THREE.BufferAttribute(cols, 3));
+      sg.computeBoundingSphere();
+
+      const mobile = window.innerWidth < 768;
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 }, uBeat: { value: 0 }, uOpacity: { value: 0 },
+          uSize: { value: mobile ? 0.22 : 0.19 }, uScale: { value: 450 }, uGroupScale: { value: 1 },
+        },
+        transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending,
+        vertexShader: `
+          attribute vec3 aCenter; attribute vec3 aU; attribute vec3 aV;
+          attribute vec4 aOrbit; attribute vec3 aCol;
+          uniform float uTime, uBeat, uSize, uScale, uGroupScale;
+          varying vec3 vCol; varying float vSeed;
+          void main() {
+            float rad = aOrbit.x, a0 = aOrbit.y, spd = aOrbit.z, seed = aOrbit.w;
+            float a = a0 + uTime * spd;
+            float r = rad * (1.0 + 0.05 * sin(uTime * (0.5 + seed) + seed * 6.3));
+            vec3 p = aCenter + (aU * cos(a) + aV * sin(a)) * r;
+            vec4 mv = modelViewMatrix * vec4(p, 1.0);
+            float pulse = 1.0 + 0.3 * uBeat * (0.5 + 0.5 * sin(seed * 20.0));
+            gl_PointSize = min(uSize * uGroupScale * pulse * (uScale / -mv.z), 90.0);
+            vCol = aCol; vSeed = seed;
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `
+          uniform float uOpacity, uTime;
+          varying vec3 vCol; varying float vSeed;
+          void main() {
+            vec2 q = gl_PointCoord - vec2(0.5);
+            float d = length(q);
+            if (d > 0.5) discard;
+            float core = smoothstep(0.5, 0.0, d);
+            float ball = pow(core, 2.0);
+            float hl = pow(max(0.0, 1.0 - length(q - vec2(-0.12, 0.12)) * 3.0), 3.0);
+            float shimmer = 0.9 + 0.1 * sin(uTime * 2.0 + vSeed * 30.0);
+            vec3 col = vCol * (0.22 + 1.7 * ball) * shimmer + vec3(1.0, 0.98, 0.94) * hl * 0.6;
+            gl_FragColor = vec4(col, uOpacity * clamp(ball * 1.05 + core * 0.2, 0.0, 1.0));
+          }`,
+      });
+      mat.userData.smBase = 0.95;
+      pts.material.dispose();
+      pts.material = mat;
+      pts.frustumCulled = false;
+      det.songMat = mat;
+    }
+    PB.detail = det;
+  }
+
+  if (typeof _brain3DMakePlaylistDetail === 'function') {
+    const _mkDetOrig = _brain3DMakePlaylistDetail;
+    _brain3DMakePlaylistDetail = function (idx) {
+      const r = _mkDetOrig.apply(this, arguments);
+      try { if (M.on) pbStyleDetail(); } catch (err) { console.warn('[motion:pb]', err); }
+      return r;
+    };
+  }
+
+  // Selecting an artist dims the others via material.opacity, which a
+  // shader material ignores — mirror it into the uniform.
+  if (typeof _brain3DSelectArtist === 'function') {
+    const _selOrig = _brain3DSelectArtist;
+    _brain3DSelectArtist = function (idx) {
+      const r = _selOrig.apply(this, arguments);
+      PB.buzz && PB.buzz(10);
+      (brain3D.artistMeshes || []).forEach((mesh, i) => {
+        const u = mesh.material && mesh.material.uniforms;
+        if (u && u.uSelect) u.uSelect.value = i === idx ? 1 : 0.4;
+      });
+      return r;
+    };
+  }
+
+  // Light haptic taps. navigator.vibrate works on Android browsers; iOS
+  // Safari and desktop have no web haptics API, where this is a no-op.
+  const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (_) {} };
+  PB.buzz = buzz;
+
+  // Tint the panel with the playlist's own colour, and mark the overlay so
+  // the world blurb can step aside.
+  if (typeof _brain3DShowPlaylistPanel === 'function') {
+    const _panelOrig = _brain3DShowPlaylistPanel;
+    _brain3DShowPlaylistPanel = function (idx) {
+      const r = _panelOrig.apply(this, arguments);
+      const panel = document.getElementById('brain3d-detail-panel');
+      const col = (typeof playlistColors === 'object' && playlistColors[brain3D.names?.[idx]]) || '#7c6af7';
+      if (panel) panel.style.setProperty('--pl', col);
+      return r;
+    };
+  }
+  if (typeof _brain3DUpdateNav === 'function') {
+    const _navOrig2 = _brain3DUpdateNav;
+    _brain3DUpdateNav = function () {
+      const r = _navOrig2.apply(this, arguments);
+      document.getElementById('brain3d-overlay')?.classList.toggle('sm-in-playlist', brain3D.mode !== 'world');
+      return r;
+    };
+  }
+
+  // Labels, the HUD and other overlay chrome sit above the canvas and used
+  // to swallow the wheel, so zooming stalled whenever one drifted under the
+  // cursor. Catch the wheel for the whole overlay instead, leaving the
+  // side panel and song card free to scroll.
+  (() => {
+    const ov = document.getElementById('brain3d-overlay');
+    if (!ov || typeof _brain3DZoom !== 'function') return;
+    ov.addEventListener('wheel', e => {
+      if (!M.on || !overlayShown('brain3d-overlay')) return;
+      const t = e.target;
+      if (t && t.closest && t.closest('#brain3d-detail-panel, #brain3d-song-card')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      _brain3DZoom(e.deltaY > 0 ? 0.9 : 1.12);
+    }, { passive: false, capture: true });
+  })();
+
+  // The camera orbits the world origin, but a playlist's system is lifted
+  // off to one side — so dragging used to swing it out of view. Inside a
+  // playlist the camera now orbits the system itself, easing on entry/exit.
+  if (typeof _brain3DUpdateCamera === 'function') {
+    const _camOrig = _brain3DUpdateCamera;
+    _brain3DUpdateCamera = function () {
+      if (!M.on || !brain3D.THREE) return _camOrig.apply(this, arguments);
+      const THREE = brain3D.THREE;
+      if (!PB.camTarget) PB.camTarget = new THREE.Vector3();
+      if (!PB.camWant) PB.camWant = new THREE.Vector3();
+      if (brain3D.mode !== 'world' && brain3D.detailGroup) PB.camWant.copy(brain3D.detailGroup.position);
+      else PB.camWant.set(0, 0, 0);
+      PB.camTarget.lerp(PB.camWant, 1 - Math.exp(-(M.dt || 0.016) * 4.5));
+      if (PB.camTarget.lengthSq() < 1e-6 && brain3D.mode === 'world') return _camOrig.apply(this, arguments);
+      const t = PB.camTarget, cp = Math.cos(brain3D.pitch);
+      brain3D.camera.position.set(
+        t.x + Math.sin(brain3D.yaw) * cp * brain3D.distance,
+        t.y + Math.sin(brain3D.pitch) * brain3D.distance + 0.12,
+        t.z + Math.cos(brain3D.yaw) * cp * brain3D.distance
+      );
+      brain3D.camera.lookAt(t);
+    };
+  }
+
+  // Centred on the system, the old framing distance is far too far out.
+  if (typeof _brain3DEnterPlaylist === 'function') {
+    const _enterOrig = _brain3DEnterPlaylist;
+    _brain3DEnterPlaylist = function (idx) {
+      const r = _enterOrig.apply(this, arguments);
+      PB.buzz && PB.buzz([12, 28, 16]);
+      if (M.on && brain3D.cameraTween && brain3D.cameraTween.to) {
+        brain3D.cameraTween.to.distance = window.innerWidth < 768 ? 3.1 : 2.85;
+      }
+      return r;
+    };
+  }
+
+  // Ways back from a playlist: Esc, double-click anywhere, or zoom out.
+  // Zooming in hard on a hovered lobe dives into it.
+  if (typeof _brain3DReturnWorld === 'function') {
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || !overlayShown('brain3d-overlay')) return;
+      if (typeof brain3D === 'object' && brain3D.mode && brain3D.mode !== 'world') {
+        e.stopPropagation();
+        _brain3DReturnWorld();
+      }
+    }, true);
+    if (typeof _brain3DDoubleClick === 'function') {
+      const _dblOrig = _brain3DDoubleClick;
+      _brain3DDoubleClick = function (e) {
+        if (brain3D.mode !== 'world') { _brain3DReturnWorld(); return; }
+        return _dblOrig.apply(this, arguments);
+      };
+    }
+    if (typeof _brain3DZoom === 'function') {
+      const _zoomOrig = _brain3DZoom;
+      _brain3DZoom = function (factor) {
+        if (!brain3D.ready) return _zoomOrig.apply(this, arguments);
+        brain3D.cameraTween = null;
+        brain3D.lastInputAt = performance.now();
+        // Dynamic zoom: wheel moves a TARGET; the camera glides to it each
+        // frame instead of teleporting one step per notch.
+        const cur = PB.zoomT == null ? brain3D.distance : PB.zoomT;
+        const minD = brain3D.mode === 'world' ? 2.15 : 1.15;
+        PB.zoomT = Math.max(minD, Math.min(8.5, cur / factor));
+        M.warp = Math.min(1, M.warp + 0.12);
+        if (brain3D.mode !== 'world' && factor < 1 && PB.zoomT >= 4.6) {
+          PB.zoomT = null;
+          _brain3DReturnWorld();
+          return true;
+        }
+        if (brain3D.mode === 'world' && factor > 1 && brain3D.hoverIndex >= 0) {
+          // Steer toward the lobe under the cursor while zooming in
+          const d = brain3D.dirs[brain3D.hoverIndex];
+          if (d) {
+            const ty = Math.atan2(d[0], d[2]);
+            const tp = Math.asin(Math.max(-0.72, Math.min(0.72, d[1]))) * 0.72;
+            let dy = ty - brain3D.yaw;
+            dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+            brain3D.yaw += dy * 0.16;
+            brain3D.pitch += (tp - brain3D.pitch) * 0.16;
+          }
+          if (PB.zoomT <= 2.35) {
+            PB.zoomT = null;
+            _brain3DEnterPlaylist(brain3D.hoverIndex);
+            return true;
+          }
+        }
+        return true;
+      };
+    }
+    if (typeof _brain3DUpdateNav === 'function') {
+      const _navOrig = _brain3DUpdateNav;
+      _brain3DUpdateNav = function () {
+        const r = _navOrig.apply(this, arguments);
+        if (brain3D.mode !== 'world') {
+          const hud = document.getElementById('brain3d-hud');
+          if (hud) hud.innerHTML += '<span>Esc, zoom out or double-click → back</span>';
+        }
+        return r;
+      };
+    }
+    const navCss = document.createElement('style');
+    navCss.textContent = `
+      #brain3d-back { font-size: .85rem !important; padding: .5rem 1.05rem !important;
+        border: 1px solid rgba(124,106,247,.65) !important; border-radius: 999px !important;
+        background: rgba(18,16,34,.92) !important; color: #c4b5fd !important;
+        box-shadow: 0 0 18px rgba(124,106,247,.35); cursor: pointer; }
+      #brain3d-back:hover { background: rgba(124,106,247,.28) !important; color: #fff !important; }`;
+    document.head.appendChild(navCss);
+    const backBtn = document.getElementById('brain3d-back');
+    if (backBtn) backBtn.textContent = '← Back to brain';
+  }
+
+  // ------------------------------------------------------------ toggle
+  function addToggle() {
+    const anchor = document.getElementById('btn-brain3d') || document.getElementById('btn-brain');
+    if (!anchor) return;
+    const btn = document.createElement('button');
+    btn.className = 'btn-icon';
+    btn.id = 'btn-motion';
+    btn.title = 'Toggle motion graphics (M)';
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M4 10v4" style="animation-delay:-.2s"/><path d="M8 6v12" style="animation-delay:-.5s"/>
+      <path d="M12 3v18" style="animation-delay:-.1s"/><path d="M16 7v10" style="animation-delay:-.7s"/>
+      <path d="M20 10v4" style="animation-delay:-.35s"/></svg> Motion`;
+    anchor.insertAdjacentElement('afterend', btn);
+    btn.addEventListener('click', () => setMotion(!M.on));
+    document.addEventListener('keydown', e => {
+      if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey && !e.altKey &&
+          !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '') &&
+          !document.activeElement?.isContentEditable) setMotion(!M.on);
+    });
+  }
+  function setMotion(on) {
+    M.on = on;
+    try { localStorage.setItem('soundmap_motion', on ? '1' : '0'); } catch (_) {}
+    document.body.classList.toggle('sm-motion', on);
+    document.getElementById('btn-motion')?.classList.toggle('on', on);
+    if (M.bg) M.bg.style.display = on ? 'block' : 'none';
+    M.introT = 99; M.ripples = [];
+    if (!on && scatterVisible()) render();
+    if (on && scatterVisible()) startIntro();
+  }
+  function startIntro() {
+    if (!M.on) return;
+    M.introStart = M.t; M.introT = 0; M.warp = 1;
+  }
+
+  // -------------------------------------------------------------- loop
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (document.hidden) { M.last = now; return; }
+    M.dt = Math.min(0.05, (now - M.last) / 1000);
+    M.last = now;
+    M.t = (now - M.t0) / 1000;
+    if (!M.on) return;
+
+    const sc = scatterVisible() && !overlayShown('brain3d-overlay');
+    if (sc && !M.lastScatter) startIntro();
+    M.lastScatter = sc;
+    if (M.introStart >= 0) M.introT = M.t - M.introStart;
+
+    const b3d = overlayShown('brain3d-overlay');
+    const grainEl = document.getElementById('motion-grain');
+    if (grainEl) grainEl.style.display = b3d ? 'none' : '';
+    if (!b3d && !drilldownTracks) drawBg();
+    if (sc) {
+      watchSelection();
+      try { comparePoints.length ? renderWithCompare() : _renderDots(); } catch (err) { console.warn('[motion]', err); }
+    }
+  }
+
+  // Focus mode: only the 3D particle brain for now — the scatter and 2D
+  // brain switchers are parked while performance is tuned. Flip to false
+  // to bring them back.
+  const FOCUS_3D = true;
+  if (FOCUS_3D) {
+    const css = document.createElement('style');
+    css.textContent = '#btn-brain, #btn-brain3d { display: none !important; }';
+    document.head.appendChild(css);
+    brainMode = true;
+    brain3DMode = true;
+  }
+
+  setupBg();
+  addToggle();
+  setMotion(M.on);
+  M._palTick = 0;
+  requestAnimationFrame(frame);
+})();
+</script>
+<!-- =================== end SoundMap Motion Layer =================== -->
+
 </body>
 </html>

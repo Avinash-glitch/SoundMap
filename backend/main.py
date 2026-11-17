@@ -32,6 +32,76 @@ def _default_provider() -> str:
     return "anthropic"
 
 
+def _load_user_map_any(user_id: str):
+    """Load the session user's map: their Spotify map first, else their Apple map.
+    Returns (map_id, map_data) or (None, None)."""
+    candidates = [user_id]
+    if user_id and not user_id.endswith("_apple"):
+        candidates.append(f"{user_id}_apple")
+    for mid in candidates:
+        if not mid:
+            continue
+        data = storage.load_map(mid)
+        if data:
+            return mid, data
+    return None, None
+
+
+def _apple_write_headers(request: Request):
+    """Developer-token + Music-User-Token headers for Apple library writes, or None."""
+    mut = (request.session.get("music_user_token") or "").strip()
+    if not mut:
+        return None
+    from .apple_auth import get_developer_token
+    try:
+        dev_token = get_developer_token()
+    except Exception as e:
+        print(f"[apple] developer token unavailable: {e}")
+        return None
+    return {"Authorization": f"Bearer {dev_token}", "Music-User-Token": mut}
+
+
+def _apple_library_playlist_ids(h: dict) -> dict:
+    """Map the user's Apple Music library playlist names -> library playlist ids."""
+    out: dict[str, str] = {}
+    url = "https://api.music.apple.com/v1/me/library/playlists?limit=100"
+    while url:
+        r = _requests.get(url, headers=h, timeout=20)
+        if r.status_code != 200:
+            break
+        data = r.json()
+        for pl in data.get("data", []):
+            name = ((pl.get("attributes") or {}).get("name") or "").strip()
+            if name and name not in out:
+                out[name] = pl["id"]
+        nxt = data.get("next")
+        url = f"https://api.music.apple.com{nxt}" if nxt else None
+    return out
+
+
+def _apple_track_refs(map_data: dict, track_ids: list) -> list:
+    """Resolve SoundMap track ids to Apple playlist-insertable refs.
+    Prefers catalog ids; falls back to the library-song id."""
+    lookup: dict[str, dict] = {}
+    for t in (map_data.get("remaining") or []):
+        if t.get("id"):
+            lookup.setdefault(str(t["id"]), t)
+    for p in (map_data.get("points") or []):
+        if p.get("id"):
+            lookup.setdefault(str(p["id"]), p)
+    refs: list[dict] = []
+    for tid in track_ids:
+        if not tid:
+            continue
+        t = lookup.get(str(tid)) or {}
+        cid = t.get("apple_catalog_id")
+        if cid:
+            refs.append({"id": str(cid), "type": "songs"})
+        else:
+            refs.append({"id": str(tid), "type": "library-songs"})
+    return refs
+
+
 def _parse_llm_json(raw: str) -> dict:
     """Robust JSON extraction from LLM output — handles markdown fences and stray text."""
     cleaned = _re.sub(r'```(?:json)?\s*', '', raw).strip().rstrip('`').strip()
@@ -65,13 +135,52 @@ async def redirect_legacy_hosts(request: Request, call_next):
         return RedirectResponse(target, status_code=308)
     return await call_next(request)
 
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.environ.get("SESSION_SECRET", "dev-secret-change-in-production"),
-)
+def _session_secret() -> str:
+    """Session signing key.
+
+    A hard-coded fallback would let anyone forge a session, so there is none.
+    When SESSION_SECRET is unset we mint a random one for this process and say
+    so loudly: sessions then reset on restart and are not shared across
+    replicas, but they can never be forged.
+    """
+    secret = os.environ.get("SESSION_SECRET", "").strip()
+    if secret:
+        return secret
+    import secrets as _secrets
+    print(
+        "[startup] WARNING: SESSION_SECRET is not set. Using a random key for "
+        "this process - everyone is logged out on restart and sessions do not "
+        "work across replicas. Set SESSION_SECRET to fix this.",
+        flush=True,
+    )
+    return _secrets.token_urlsafe(48)
+
+
+def _allowed_origins() -> list[str]:
+    """Browser origins allowed to send credentialed cross-site requests.
+
+    The frontend is served from the same origin as the API, so this only needs
+    the hosts we actually run on. '*' together with allow_credentials makes
+    Starlette reflect whatever Origin it is sent, which would expose the
+    session cookie to any site, so it is never used.
+    """
+    origins = {"http://127.0.0.1:8000", "http://localhost:8000"}
+    if CANONICAL_HOST:
+        origins.add(f"https://{CANONICAL_HOST}")
+    for host in LEGACY_HOSTS:
+        if host:
+            origins.add(f"https://{host}")
+    for extra in os.environ.get("CORS_ALLOW_ORIGINS", "").split(","):
+        extra = extra.strip()
+        if extra:
+            origins.add(extra)
+    return sorted(origins)
+
+
+app.add_middleware(SessionMiddleware, secret_key=_session_secret())
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -346,9 +455,28 @@ async def stop_job_endpoint(job_id: str, request: Request) -> JSONResponse:
     return JSONResponse({"stopped": stopped})
 
 
+DEBUG_ROUTES_ENABLED = os.environ.get("SOUNDMAP_DEBUG_ROUTES", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _require_debug_routes() -> None:
+    """Debug routes hand out access tokens, so they are off unless asked for.
+
+    404 rather than 403 when disabled, so they are not advertised at all.
+    """
+    if not DEBUG_ROUTES_ENABLED:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+@app.get("/healthz")
+async def healthz() -> JSONResponse:
+    """Liveness probe: no auth, no session, no external calls."""
+    return JSONResponse({"status": "ok"})
+
+
 @app.get("/debug/token")
 async def debug_token(request: Request) -> JSONResponse:
     """Return the current session's Spotify token for testing."""
+    _require_debug_routes()
     token = request.session.get("access_token")
     user_id = request.session.get("user_id")
     if not token:
@@ -359,6 +487,7 @@ async def debug_token(request: Request) -> JSONResponse:
 @app.get("/debug/playlists")
 async def debug_playlists(request: Request) -> JSONResponse:
     """Test endpoint — lists owned playlists and fetches items from the first one."""
+    _require_debug_routes()
     token = request.session.get("access_token")
     user_id = request.session.get("user_id")
     if not token:
@@ -419,9 +548,6 @@ async def generate_remaining_playlists(request: Request) -> StreamingResponse:
     user_id = request.session.get("user_id")
     if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
-    token = await _get_valid_token(request)
-    if not token:
-        raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
 
     try:
         body = await request.json()
@@ -437,9 +563,14 @@ async def generate_remaining_playlists(request: Request) -> StreamingResponse:
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key required")
 
-    map_data = storage.load_map(user_id)
+    map_id, map_data = _load_user_map_any(user_id)
     if not map_data:
         raise HTTPException(status_code=404, detail="Map not found — process your library first")
+    is_apple = map_data.get("source") == "apple"
+    if not is_apple:
+        token = await _get_valid_token(request)
+        if not token:
+            raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
 
     remaining = map_data.get("remaining", [])
     if not remaining:
@@ -529,7 +660,7 @@ async def ai_sort_remaining(request: Request) -> StreamingResponse:
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key required")
 
-    map_data = storage.load_map(user_id)
+    map_id, map_data = _load_user_map_any(user_id)
     if not map_data:
         raise HTTPException(status_code=404, detail="Map not found")
 
@@ -703,9 +834,13 @@ async def add_to_playlists(request: Request) -> JSONResponse:
     Add tracks to existing Spotify playlists in batch.
     Body: {"assignments": {"PlaylistName": ["track_id1", "track_id2", ...]}}
     """
-    token = request.session.get("access_token")
     user_id = request.session.get("user_id")
-    if not token or not user_id:
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    map_id, map_data = _load_user_map_any(user_id)
+    is_apple = bool(map_data) and map_data.get("source") == "apple"
+    token = request.session.get("access_token")
+    if not is_apple and not token:
         raise HTTPException(status_code=401, detail="Not logged in")
 
     try:
@@ -716,6 +851,34 @@ async def add_to_playlists(request: Request) -> JSONResponse:
 
     if not assignments:
         raise HTTPException(status_code=400, detail="No assignments provided")
+
+    if is_apple:
+        ah = _apple_write_headers(request)
+        if not ah:
+            raise HTTPException(status_code=401, detail="Apple Music session expired — reconnect Apple Music")
+        name_to_id = _apple_library_playlist_ids(ah)
+        results = []
+        for pl_name, track_ids in assignments.items():
+            pl_id = name_to_id.get(pl_name)
+            if not pl_id:
+                results.append({"playlist": pl_name, "error": "playlist not found"})
+                continue
+            refs = _apple_track_refs(map_data, track_ids)
+            added = 0
+            for i in range(0, len(refs), 100):
+                r = _requests.post(
+                    f"https://api.music.apple.com/v1/me/library/playlists/{pl_id}/tracks",
+                    headers={**ah, "Content-Type": "application/json"},
+                    json={"data": refs[i:i + 100]},
+                    timeout=20,
+                )
+                if r.status_code in (200, 201, 202, 204):
+                    added += len(refs[i:i + 100])
+                else:
+                    print(f"[add-to-playlists:apple] '{pl_name}' batch failed {r.status_code}: {r.text[:150]}")
+            results.append({"playlist": pl_name, "added": added})
+            print(f"[add-to-playlists:apple] '{pl_name}' <- {added} tracks")
+        return JSONResponse({"results": results})
 
     h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
@@ -938,7 +1101,7 @@ async def compare_users(user_id_a: str, user_id_b: str) -> JSONResponse:
 
     def artist_recommendations(source_profile: dict[str, dict], target_keys: set[str], limit: int = 24) -> list[dict]:
         recs: list[dict] = []
-        for artist_key, source_artist in source_profile.items():
+        for _artist_key, source_artist in source_profile.items():
             candidates = [
                 item
                 for tk, item in source_artist["tracks"].items()
@@ -1816,7 +1979,7 @@ async def create_mood_playlists(request: Request) -> JSONResponse:
 
         # Create the playlist
         pl_resp = _requests.post(
-            f"https://api.spotify.com/v1/me/playlists",
+            "https://api.spotify.com/v1/me/playlists",
             headers=h,
             json={
                 "name": pl_name,
@@ -2022,7 +2185,7 @@ async def ai_playlist(request: Request) -> JSONResponse:
             from openai import OpenAI
             client = OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1")
             resp = client.chat.completions.create(
-                model="z-ai/glm-5.1",
+                model=os.environ.get("NVIDIA_MODEL", "z-ai/glm-5.3"),
                 max_tokens=4000,
                 messages=[
                     {"role": "system", "content": system_msg},
@@ -2131,9 +2294,13 @@ async def create_suggested_playlists(request: Request) -> StreamingResponse:
     user_id = request.session.get("user_id")
     if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
-    token = await _get_valid_token(request)
-    if not token:
-        raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
+    map_id, map_data = _load_user_map_any(user_id)
+    is_apple = bool(map_data) and map_data.get("source") == "apple"
+    token = None
+    if not is_apple:
+        token = await _get_valid_token(request)
+        if not token:
+            raise HTTPException(status_code=401, detail="Spotify session expired — please log in again")
 
     try:
         body = await request.json()
@@ -2146,6 +2313,60 @@ async def create_suggested_playlists(request: Request) -> StreamingResponse:
 
     def _sse(obj: dict) -> str:
         return f"data: {json.dumps(obj)}\n\n"
+
+    if is_apple:
+        ah = _apple_write_headers(request)
+        if not ah:
+            raise HTTPException(status_code=401, detail="Apple Music session expired — reconnect Apple Music")
+        storefront = (request.session.get("storefront") or map_data.get("storefront") or "us").strip().lower()
+
+        async def apple_stream():
+            created = []
+            n = len(playlists)
+            loop = asyncio.get_running_loop()
+            for i, pl in enumerate(playlists):
+                pl_name = (pl.get("name") or "").strip()
+                track_ids = pl.get("track_ids", [])
+                if not pl_name or not track_ids:
+                    continue
+                yield _sse({"type": "progress", "message": f"Creating '{pl_name}'… ({i + 1}/{n})", "pct": int(i / n * 90)})
+
+                def _make(pl_name=pl_name, track_ids=track_ids):
+                    body = {"attributes": {"name": pl_name, "description": "SoundMap — organised from liked tracks", "isPublic": False}}
+                    r = _requests.post(
+                        "https://api.music.apple.com/v1/me/library/playlists",
+                        headers={**ah, "Content-Type": "application/json"}, json=body, timeout=20,
+                    )
+                    if r.status_code not in (200, 201):
+                        print(f"[create-suggested:apple] failed '{pl_name}': {r.status_code} {r.text[:150]}")
+                        return None
+                    pl_id = ((r.json().get("data") or [{}])[0] or {}).get("id")
+                    if not pl_id:
+                        return None
+                    refs = _apple_track_refs(map_data, track_ids)
+                    added = 0
+                    for j in range(0, len(refs), 100):
+                        ar = _requests.post(
+                            f"https://api.music.apple.com/v1/me/library/playlists/{pl_id}/tracks",
+                            headers={**ah, "Content-Type": "application/json"},
+                            json={"data": refs[j:j + 100]}, timeout=20,
+                        )
+                        if ar.status_code in (200, 201, 202, 204):
+                            added += len(refs[j:j + 100])
+                        else:
+                            print(f"[create-suggested:apple] add batch failed {ar.status_code}: {ar.text[:150]}")
+                    url = f"https://music.apple.com/{storefront}/library/playlist/{pl_id}"
+                    return {"name": pl_name, "track_count": added, "url": url}
+
+                item = await loop.run_in_executor(None, _make)
+                if item:
+                    created.append(item)
+                    print(f"[create-suggested:apple] created '{item['name']}' ({item['track_count']} tracks)")
+
+            yield _sse({"type": "done", "created": created, "total_organised": sum(p["track_count"] for p in created)})
+
+        return StreamingResponse(apple_stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     async def stream():
         h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}

@@ -3,6 +3,7 @@ Spotify library processing pipeline — adapted for per-user programmatic use.
 Fetches tracks, computes genre embeddings, runs UMAP, saves result via storage.py.
 """
 
+import os
 import time
 import numpy as np
 from typing import Callable
@@ -589,7 +590,10 @@ def _run_umap(embeddings: np.ndarray) -> np.ndarray:
 
     n = len(embeddings)
     n_neighbors = min(15, n - 1)
-    reducer = UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.1, random_state=42)
+    # No random_state: a fixed seed forces UMAP into single-threaded mode.
+    # Dropping it lets UMAP use every core (several times faster on big
+    # libraries) at the cost of a slightly different layout per rebuild.
+    reducer = UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.1)
     return reducer.fit_transform(embeddings)
 
 
@@ -603,7 +607,7 @@ def _call_llm_chat(system: str, user: str, api_key: str, provider: str = "anthro
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1")
         resp = client.chat.completions.create(
-            model="z-ai/glm-5.1",
+            model=os.environ.get("NVIDIA_MODEL", "z-ai/glm-5.3"),
             max_tokens=max_tokens,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         )
@@ -818,18 +822,47 @@ def _fetch_apple_library(
     }
     base_url = "https://api.music.apple.com"
 
-    def _get_all(path: str) -> list[dict]:
-        items: list[dict] = []
-        url = f"{base_url}{path}?limit=100"
-        while url:
+    def _get_page(path: str, offset: int) -> tuple[list[dict], int | None, str | None]:
+        """One page. Returns (items, meta_total, next_url) — retries once on 429."""
+        sep = "&" if "?" in path else "?"
+        url = f"{base_url}{path}{sep}limit=100&offset={offset}"
+        for attempt in (0, 1):
             r = requests.get(url, headers=headers, timeout=30)
+            if r.status_code == 429 and attempt == 0:
+                time.sleep(float(r.headers.get("Retry-After", 1) or 1))
+                continue
             if r.status_code != 200:
                 print(f"[apple] {path}: HTTP {r.status_code} — {r.text[:200]}")
-                break
+                return [], None, None
             data = r.json()
-            items.extend(data.get("data", []))
-            nxt = data.get("next")
+            total = (data.get("meta") or {}).get("total")
+            return data.get("data", []), total if isinstance(total, int) else None, data.get("next")
+        return [], None, None
+
+    def _get_all(path: str) -> list[dict]:
+        """Fetch every page. When the first page reports a total, the rest
+        are fetched in parallel instead of walking `next` links one by one."""
+        items, total, nxt = _get_page(path, 0)
+        if not items:
+            return items
+        if total and total > len(items):
+            offsets = list(range(len(items), total, 100))
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                for page_items, _, _ in pool.map(lambda off: _get_page(path, off), offsets):
+                    items.extend(page_items)
+        else:
+            # Fallback: no total reported — walk next links sequentially.
             url = f"{base_url}{nxt}" if nxt else None
+            while url:
+                r = requests.get(url, headers=headers, timeout=30)
+                if r.status_code != 200:
+                    print(f"[apple] {path}: HTTP {r.status_code} — {r.text[:200]}")
+                    break
+                data = r.json()
+                items.extend(data.get("data", []))
+                nxt2 = data.get("next")
+                url = f"{base_url}{nxt2}" if nxt2 else None
         return items
 
     if on_progress:
@@ -848,18 +881,31 @@ def _fetch_apple_library(
             if value and not current.get(key):
                 current[key] = value
 
-    for i, pl in enumerate(playlists):
-        pl_name = (pl.get("attributes") or {}).get("name") or f"Playlist {i + 1}"
-        pl_id = pl["id"]
-        if on_progress:
-            on_progress(5 + int(i / n_pl * 40), f"Reading '{pl_name}'…")
-        for t in _get_all(f"/v1/me/library/playlists/{pl_id}/tracks"):
-            tid = t.get("id")
-            if not tid:
-                continue
-            attrs = t.get("attributes") or {}
-            _merge_attrs(tid, attrs)
-            track_to_pls.setdefault(tid, []).append(pl_name)
+    # Fetch all playlists' tracks in parallel (4 at a time); merge on this
+    # thread so the shared dicts are only touched sequentially.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    names = [
+        ((pl.get("attributes") or {}).get("name") or f"Playlist {i + 1}", pl["id"])
+        for i, pl in enumerate(playlists)
+    ]
+    done_count = 0
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {
+            pool.submit(_get_all, f"/v1/me/library/playlists/{pl_id}/tracks"): pl_name
+            for pl_name, pl_id in names
+        }
+        for fut in as_completed(futures):
+            pl_name = futures[fut]
+            done_count += 1
+            if on_progress:
+                on_progress(5 + int(done_count / n_pl * 40), f"Read '{pl_name}' ({done_count}/{len(names)})…")
+            for t in fut.result():
+                tid = t.get("id")
+                if not tid:
+                    continue
+                attrs = t.get("attributes") or {}
+                _merge_attrs(tid, attrs)
+                track_to_pls.setdefault(tid, []).append(pl_name)
 
     if on_progress:
         on_progress(50, "Fetching library songs…")
@@ -1131,7 +1177,7 @@ def _build_map_data(
 ) -> dict:
     pl_to_mood = pl_to_mood or {}
     points = []
-    for track, (x, y), genre in zip(tracks, coords, track_genres):
+    for track, (x, y), genre in zip(tracks, coords, track_genres, strict=False):
         pl = (track.get("playlists") or [None])[0]
         mood = pl_to_mood.get(pl, "Uncharted") if pl else "Uncharted"
         points.append({
@@ -1150,7 +1196,7 @@ def _build_map_data(
         "embedding_method": "genres",
         "display_name": display_name,
         "playlists": playlist_meta or [],
-        "moods": sorted(set(p["mood"] for p in points)),
+        "moods": sorted({p["mood"] for p in points}),
         "persona": persona,
         "remaining": remaining or [],
     }
