@@ -1316,6 +1316,42 @@ async def apple_developer_token() -> JSONResponse:
 
 
 @app.post("/apple/start-job")
+def _apple_token_is_usable(music_user_token: str) -> tuple[bool, int]:
+    """Confirm a Music-User-Token still works, with one cheap request.
+
+    MusicKit's isAuthorized in the browser only means "I have a token cached",
+    not "that token is still good", so a stale one sails through the frontend
+    and fails deep inside the job. Checking here turns a two-minute failure
+    into a one-second one.
+
+    Fails open: anything other than a clear rejection from Apple lets the job
+    run, so a blip here never blocks a legitimate rebuild.
+    """
+    try:
+        from .apple_auth import get_developer_token
+        dev_token = get_developer_token()
+    except Exception as exc:
+        print(f"[apple] token precheck skipped: {exc}", flush=True)
+        return True, 0
+    try:
+        resp = _requests.get(
+            "https://api.music.apple.com/v1/me/library/playlists",
+            headers={
+                "Authorization": f"Bearer {dev_token}",
+                "Music-User-Token": music_user_token,
+            },
+            params={"limit": 1},
+            timeout=10,
+        )
+    except Exception as exc:
+        print(f"[apple] token precheck could not reach Apple: {exc}", flush=True)
+        return True, 0
+    if resp.status_code in (401, 403):
+        print(f"[apple] token precheck rejected: HTTP {resp.status_code} — {resp.text[:200]}", flush=True)
+        return False, resp.status_code
+    return True, resp.status_code
+
+
 async def apple_start_job(request: Request) -> JSONResponse:
     """Start an Apple Music pipeline job. Body: {music_user_token, storefront}."""
     user_id = request.session.get("user_id")
@@ -1331,6 +1367,22 @@ async def apple_start_job(request: Request) -> JSONResponse:
 
     if not music_user_token:
         raise HTTPException(status_code=400, detail="music_user_token required")
+
+    usable, status = _apple_token_is_usable(music_user_token)
+    if not usable:
+        # Drop the stale copy so later server-side writes do not reuse it.
+        request.session.pop("music_user_token", None)
+        return JSONResponse(
+            status_code=401,
+            content={
+                "code": "apple_auth",
+                "status": status,
+                "detail": (
+                    "Your Apple Music connection is no longer valid. "
+                    "Reconnecting to Apple Music…"
+                ),
+            },
+        )
 
     if not user_id:
         import hashlib
