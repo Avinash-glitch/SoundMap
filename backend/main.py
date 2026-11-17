@@ -191,6 +191,19 @@ app.include_router(auth_router)
 FRONTEND = Path(__file__).parent.parent / "frontend"
 
 
+def _page(name: str) -> FileResponse:
+    """Serve an app page, always revalidated.
+
+    Without an explicit Cache-Control, browsers apply heuristic caching to
+    HTML and can keep serving a copy from before the last deploy - which
+    looks exactly like "the fix did not work".
+    """
+    return FileResponse(
+        FRONTEND / name,
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
 async def _get_valid_token(request: Request) -> str | None:
     """Return a valid Spotify access token, auto-refreshing if the stored one is expired."""
     token = request.session.get("access_token")
@@ -214,33 +227,33 @@ async def index(request: Request):
         user_agent=request.headers.get("user-agent"),
         referer=request.headers.get("referer"),
     )
-    return FileResponse(FRONTEND / "index.html")
+    return _page("index.html")
 
 
 @app.get("/loading.html")
 async def loading():
-    return FileResponse(FRONTEND / "loading.html")
+    return _page("loading.html")
 
 
 @app.get("/map.html")
 async def map_page():
-    return FileResponse(FRONTEND / "map.html")
+    return _page("map.html")
 
 
 @app.get("/compare.html")
 async def compare_page():
-    return FileResponse(FRONTEND / "compare.html")
+    return _page("compare.html")
 
 
 @app.get("/apple-login.html")
 async def apple_login_page():
-    return FileResponse(FRONTEND / "apple-login.html")
+    return _page("apple-login.html")
 
 
 @app.get("/demo.html")
 @app.get("/soundmap-demo.html")
 async def demo_page():
-    return FileResponse(FRONTEND / "demo.html")
+    return _page("demo.html")
 
 
 @app.get("/status/{job_id}")

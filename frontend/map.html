@@ -8706,12 +8706,29 @@ async function _ensureAppleMusicKit() {
     return MusicKit.getInstance();
 }
 
+function _appleDetailText(payload, fallback) {
+  const d = payload && payload.detail;
+  if (!d) return fallback;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) {
+    const parts = d.map(x => (x && (x.msg || x.message)) || '').filter(Boolean);
+    if (parts.length) return parts.join('; ');
+  }
+  if (typeof d === 'object') {
+    if (d.msg || d.message) return String(d.msg || d.message);
+    try { return JSON.stringify(d); } catch (_) {}
+  }
+  return fallback;
+}
+
 function _appleErrText(err) {
   // MusicKit rejects with plain objects rather than Errors, so err.message is
   // often undefined and interpolating gives "[object Object]".
   if (!err) return 'Something went wrong.';
   if (typeof err === 'string') return err;
-  if (typeof err.message === 'string' && err.message) return err.message;
+  // "[object Object]" is what Error(someObject).message gives, so it is a
+  // string but a useless one - keep looking.
+  if (typeof err.message === 'string' && err.message && err.message !== '[object Object]') return err.message;
   if (err.description) return String(err.description);
   if (err.errorCode) return `Apple Music error: ${err.errorCode}`;
   try {
@@ -8763,7 +8780,7 @@ async function _startAppleMapJob(force = false) {
       payload = await resp.json().catch(() => ({}));
     }
 
-    if (!resp.ok) throw new Error(payload.detail || 'Failed to start');
+    if (!resp.ok) throw new Error(_appleDetailText(payload, 'Failed to start'));
     const { job_id, user_id: appleUserId } = payload;
     location.href = `/loading.html?user=${encodeURIComponent(appleUserId)}&job=${encodeURIComponent(job_id)}`;
   } catch (err) {

@@ -134,7 +134,9 @@
       // often undefined and `${err}` becomes "[object Object]".
       if (!err) return 'Something went wrong.';
       if (typeof err === 'string') return err;
-      if (typeof err.message === 'string' && err.message) return err.message;
+      // "[object Object]" is what Error(someObject).message gives, so it is a
+      // string but a useless one - keep looking.
+      if (typeof err.message === 'string' && err.message && err.message !== '[object Object]') return err.message;
       if (err.description) return String(err.description);
       if (err.errorCode) return `Apple Music error: ${err.errorCode}`;
       try {
@@ -142,6 +144,21 @@
         if (asText && asText !== '{}') return asText;
       } catch (_) {}
       return 'Something went wrong connecting to Apple Music.';
+    }
+
+    function detailText(payload, fallback) {
+      const d = payload && payload.detail;
+      if (!d) return fallback;
+      if (typeof d === 'string') return d;
+      if (Array.isArray(d)) {
+        const parts = d.map(x => (x && (x.msg || x.message)) || '').filter(Boolean);
+        if (parts.length) return parts.join('; ');
+      }
+      if (typeof d === 'object') {
+        if (d.msg || d.message) return String(d.msg || d.message);
+        try { return JSON.stringify(d); } catch (_) {}
+      }
+      return fallback;
     }
 
     async function freshUserToken(music, { force = false } = {}) {
@@ -164,9 +181,9 @@
       setStatus('Loading Apple Music login…');
       const resp = await fetch('/apple/token');
       if (!resp.ok) {
-        let detail = 'Apple Music is not configured on this server.';
-        try { detail = (await resp.json()).detail || detail; } catch {}
-        throw new Error(detail);
+        let payload = {};
+        try { payload = await resp.json(); } catch (_) {}
+        throw new Error(detailText(payload, 'Apple Music is not configured on this server.'));
       }
       const { developer_token } = await resp.json();
 
@@ -216,7 +233,7 @@
         }
 
         if (!resp.ok) {
-          throw new Error(payload.detail || 'Could not start Apple Music map.');
+          throw new Error(detailText(payload, 'Could not start Apple Music map.'));
         }
         const { job_id, user_id } = payload;
         location.href = `/loading.html?user=${encodeURIComponent(user_id)}&job=${encodeURIComponent(job_id)}`;
