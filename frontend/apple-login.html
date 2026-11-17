@@ -129,6 +129,32 @@
     const btn = document.getElementById('apple-auth-btn');
     const statusEl = document.getElementById('status');
 
+    function errText(err) {
+      // MusicKit rejects with plain objects, not Errors, so err.message is
+      // often undefined and `${err}` becomes "[object Object]".
+      if (!err) return 'Something went wrong.';
+      if (typeof err === 'string') return err;
+      if (typeof err.message === 'string' && err.message) return err.message;
+      if (err.description) return String(err.description);
+      if (err.errorCode) return `Apple Music error: ${err.errorCode}`;
+      try {
+        const asText = JSON.stringify(err);
+        if (asText && asText !== '{}') return asText;
+      } catch (_) {}
+      return 'Something went wrong connecting to Apple Music.';
+    }
+
+    async function freshUserToken(music, { force = false } = {}) {
+      // isAuthorized only means "a token is cached", not "it still works",
+      // so a stale one has to be thrown away explicitly.
+      if (force) {
+        try { await music.unauthorize(); } catch (err) { console.warn('[apple] unauthorize failed', err); }
+      }
+      if (!music.isAuthorized) await music.authorize();
+      if (!music.musicUserToken) throw new Error('Apple Music did not return a user token. Please try again.');
+      return music.musicUserToken;
+    }
+
     function setStatus(message, isError = false) {
       statusEl.textContent = message;
       statusEl.className = isError ? 'status error' : 'status';
@@ -163,28 +189,42 @@
       btn.textContent = 'Authorizing…';
       try {
         const music = await configureMusicKit();
-        if (!music.isAuthorized) await music.authorize();
-        setStatus('Starting your Apple Music map…');
-        const resp = await fetch('/apple/start-job', {
+        await freshUserToken(music);
+
+        const share = (document.querySelector('input[name="share-choice"]:checked')?.value || '1') === '1';
+        const startJob = () => fetch('/apple/start-job', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             music_user_token: music.musicUserToken,
             storefront: music.storefrontCountryCode || 'us',
-            share_for_comparison: (document.querySelector('input[name="share-choice"]:checked')?.value || '1') === '1',
+            share_for_comparison: share,
           }),
         });
-        if (!resp.ok) {
-          let detail = 'Could not start Apple Music map.';
-          try { detail = (await resp.json()).detail || detail; } catch {}
-          throw new Error(detail);
+
+        setStatus('Starting your Apple Music map…');
+        let resp = await startJob();
+        let payload = await resp.json().catch(() => ({}));
+
+        // The server checks the token before starting work. If it is stale,
+        // throw it away, authorize again and make one more attempt.
+        if (resp.status === 401 && payload.code === 'apple_auth') {
+          setStatus('Your Apple Music connection expired — reconnecting…');
+          await freshUserToken(music, { force: true });
+          resp = await startJob();
+          payload = await resp.json().catch(() => ({}));
         }
-        const { job_id, user_id } = await resp.json();
+
+        if (!resp.ok) {
+          throw new Error(payload.detail || 'Could not start Apple Music map.');
+        }
+        const { job_id, user_id } = payload;
         location.href = `/loading.html?user=${encodeURIComponent(user_id)}&job=${encodeURIComponent(job_id)}`;
       } catch (err) {
+        console.error('[apple] connect failed', err);
         btn.disabled = false;
         btn.textContent = 'Connect Apple Music';
-        setStatus(err.message || 'Apple Music authorization was cancelled.', true);
+        setStatus(errText(err), true);
       }
     });
   </script>
