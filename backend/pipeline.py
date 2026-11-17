@@ -853,7 +853,7 @@ def _fetch_apple_library(
 
     skipped: list[str] = []
 
-    def _get_page(path: str, offset: int, optional: bool = False) -> tuple[list[dict], int | None, str | None]:
+    def _get_page(path: str, offset: int, optional: bool = False, limit: int = 100) -> tuple[list[dict], int | None, str | None]:
         """One page, with backoff.
 
         Failures are split into two kinds. Anything that affects the whole
@@ -863,7 +863,7 @@ def _fetch_apple_library(
         playlist, which must not take the whole job down with it.
         """
         sep = "&" if "?" in path else "?"
-        url = f"{base_url}{path}{sep}limit=100&offset={offset}"
+        url = f"{base_url}{path}{sep}limit={limit}&offset={offset}"
         last_status = 0
         last_body = ""
         for attempt in range(5):
@@ -906,27 +906,31 @@ def _fetch_apple_library(
         print(f"[apple] {path}: giving up after HTTP {last_status} — {last_body}", flush=True)
         raise AppleAPIError(last_status, path, last_body)
 
-    def _get_all(path: str, optional: bool = False) -> list[dict]:
+    def _get_all(path: str, optional: bool = False, limit: int = 100) -> list[dict]:
         """Fetch every page. When the first page reports a total, the rest
         are fetched in parallel instead of walking `next` links one by one.
 
         optional=True marks a per-resource fetch, where a failure means skip
         this one rather than abandon the run.
+
+        limit is the page size. 100 is the library maximum, but the history
+        endpoints cap far lower and reject anything above it outright, so
+        they pass their own.
         """
-        items, total, nxt = _get_page(path, 0, optional)
+        items, total, nxt = _get_page(path, 0, optional, limit)
         if not items:
             return items
         if total and total > len(items):
-            offsets = list(range(len(items), total, 100))
+            offsets = list(range(len(items), total, limit))
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=3) as pool:
-                for page_items, _, _ in pool.map(lambda off: _get_page(path, off, optional), offsets):
+                for page_items, _, _ in pool.map(lambda off: _get_page(path, off, optional, limit), offsets):
                     items.extend(page_items)
         else:
             # Fallback: no total reported — walk next links sequentially.
             offset = len(items)
             while nxt:
-                page_items, _, nxt = _get_page(path, offset, optional)
+                page_items, _, nxt = _get_page(path, offset, optional, limit)
                 if not page_items:
                     break
                 items.extend(page_items)
@@ -985,8 +989,14 @@ def _fetch_apple_library(
     if on_progress:
         on_progress(53, "Checking recent Apple Music plays…")
 
-    heavy_items = _get_all("/v1/me/history/heavy-rotation")
-    recent_items = _get_all("/v1/me/recent/played/tracks")
+    # Play history only ranks tracks that are already in the map, and the code
+    # below falls back to date-added order without it. Apple also caps these
+    # endpoints well below the library's 100 per page and rejects anything
+    # larger, which is why asking for 100 returned HTTP 400 every time.
+    heavy_items = _get_all("/v1/me/history/heavy-rotation", optional=True, limit=10)
+    recent_items = _get_all("/v1/me/recent/played/tracks", optional=True, limit=30)
+    if not heavy_items and not recent_items:
+        print("[apple] no play history available - ranking by date added instead", flush=True)
     recent_rank: dict[str, int] = {}
     current_taste_rank: dict[str, int] = {}
     for rank, item in enumerate([*heavy_items[:50], *recent_items[:50]]):
