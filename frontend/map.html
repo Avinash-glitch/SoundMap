@@ -8699,10 +8699,26 @@ async function _ensureAppleMusicKit() {
         app: { name: 'SoundMap', build: '1.0.0' },
       });
     } catch (mkErr) {
-      throw new Error(`MusicKit config failed: ${mkErr.message || mkErr} — visit /apple/test to diagnose`);
+      console.error('[apple] MusicKit config failed', mkErr);
+      throw new Error(`MusicKit config failed: ${_appleErrText(mkErr)} — visit /apple/test to diagnose`);
     }
 
     return MusicKit.getInstance();
+}
+
+function _appleErrText(err) {
+  // MusicKit rejects with plain objects rather than Errors, so err.message is
+  // often undefined and interpolating gives "[object Object]".
+  if (!err) return 'Something went wrong.';
+  if (typeof err === 'string') return err;
+  if (typeof err.message === 'string' && err.message) return err.message;
+  if (err.description) return String(err.description);
+  if (err.errorCode) return `Apple Music error: ${err.errorCode}`;
+  try {
+    const asText = JSON.stringify(err);
+    if (asText && asText !== '{}') return asText;
+  } catch (_) {}
+  return 'Something went wrong connecting to Apple Music.';
 }
 
 async function _startAppleMapJob(force = false) {
@@ -8711,6 +8727,10 @@ async function _startAppleMapJob(force = false) {
   modal.classList.add('open');
   body.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:.5rem 0">Connecting to Apple Music…</div>';
 
+  const note = (text) => {
+    body.innerHTML = `<div style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:.5rem 0">${esc(text)}</div>`;
+  };
+
   try {
     const instance = await _ensureAppleMusicKit();
     if (!instance.isAuthorized) {
@@ -8718,8 +8738,7 @@ async function _startAppleMapJob(force = false) {
       return;
     }
 
-    body.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;text-align:center;padding:.5rem 0">Starting Apple Music rebuild…</div>';
-    const resp = await fetch('/apple/start-job', {
+    const startJob = () => fetch('/apple/start-job', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -8729,11 +8748,27 @@ async function _startAppleMapJob(force = false) {
         share_for_comparison: _appleShareForComparison,
       }),
     });
-    if (!resp.ok) { const e = await resp.json(); throw new Error(e.detail || 'Failed to start'); }
-    const { job_id, user_id: appleUserId } = await resp.json();
+
+    note('Starting Apple Music rebuild…');
+    let resp = await startJob();
+    let payload = await resp.json().catch(() => ({}));
+
+    // The server checks the token first. isAuthorized above only means one is
+    // cached, so a dead token gets this far; drop it and authorize again.
+    if (resp.status === 401 && payload.code === 'apple_auth') {
+      note('Your Apple Music connection expired — reconnecting…');
+      try { await instance.unauthorize(); } catch (e) { console.warn('[apple] unauthorize failed', e); }
+      await instance.authorize();
+      resp = await startJob();
+      payload = await resp.json().catch(() => ({}));
+    }
+
+    if (!resp.ok) throw new Error(payload.detail || 'Failed to start');
+    const { job_id, user_id: appleUserId } = payload;
     location.href = `/loading.html?user=${encodeURIComponent(appleUserId)}&job=${encodeURIComponent(job_id)}`;
   } catch (err) {
-    body.innerHTML = `<div style="color:#f87171;font-size:.82rem;padding:.5rem 0">${esc(err.message)}</div>`;
+    console.error('[apple] rebuild failed', err);
+    body.innerHTML = `<div style="color:#f87171;font-size:.82rem;padding:.5rem 0">${esc(_appleErrText(err))}</div>`;
   }
 }
 
