@@ -1,0 +1,49 @@
+"""Route wiring.
+
+A helper function once landed between @app.post("/apple/start-job") and its
+handler, so FastAPI registered the helper as the endpoint and answered every
+request with 422 "field required" for a query parameter nobody sends. The
+real handler was never reachable. These tests pin the wiring itself.
+"""
+import pytest
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture(scope="module")
+def client():
+    import backend.main as main
+    return TestClient(main.app)
+
+
+def test_apple_start_job_is_wired_to_its_own_handler(client):
+    import backend.main as main
+    route = next(
+        r for r in main.app.routes
+        if getattr(r, "path", None) == "/apple/start-job"
+    )
+    assert route.endpoint.__name__ == "apple_start_job"
+
+
+def test_apple_start_job_rejects_an_empty_body_in_plain_english(client):
+    """An empty body is a missing token, not a framework validation error."""
+    resp = client.post("/apple/start-job", json={})
+    assert resp.status_code != 422, "422 means the route is bound to the wrong function"
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "music_user_token required"
+
+
+@pytest.mark.parametrize("path,name", [
+    ("/apple/start-job", "apple_start_job"),
+    ("/start-job", "start_job"),
+    ("/status/{job_id}", "job_status"),
+    ("/healthz", "healthz"),
+    ("/apple/token", "apple_developer_token"),
+])
+def test_routes_point_at_the_function_they_are_named_for(path, name):
+    """Cheap guard against a decorator drifting onto the wrong definition."""
+    import backend.main as main
+    matches = [r for r in main.app.routes if getattr(r, "path", None) == path]
+    assert matches, f"no route registered at {path}"
+    assert any(r.endpoint.__name__ == name for r in matches), (
+        f"{path} is handled by {[r.endpoint.__name__ for r in matches]}, expected {name}"
+    )
