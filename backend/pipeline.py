@@ -4,6 +4,7 @@ Fetches tracks, computes genre embeddings, runs UMAP, saves result via storage.p
 """
 
 import os
+import threading
 import time
 import numpy as np
 from typing import Callable
@@ -11,6 +12,34 @@ from typing import Callable
 import requests
 
 from . import storage
+
+
+class AppleAPIError(RuntimeError):
+    """An Apple Music request failed after retries.
+
+    Carried as an exception rather than an empty list so the job reports the
+    real reason. Returning [] here is what produced the misleading
+    "No tracks found in your Apple Music library" message.
+    """
+
+    def __init__(self, status: int, path: str, body: str = "") -> None:
+        self.status = status
+        self.path = path
+        if status == 429:
+            msg = ("Apple Music is rate-limiting us (HTTP 429). Wait a minute "
+                   "and try again.")
+        elif status in (401, 403):
+            msg = (f"Apple Music rejected the request (HTTP {status}). Your "
+                   "Apple Music session has expired - reconnect Apple Music "
+                   "and try again.")
+        else:
+            msg = f"Apple Music returned HTTP {status} for {path}."
+        super().__init__(msg)
+
+
+# Apple rate-limits per developer token, so every request in this process
+# queues through one gate no matter how many pools are running.
+_APPLE_GATE = threading.BoundedSemaphore(4)
 
 MAX_TRACKS = 1000
 ARTIST_BATCH = 50
@@ -823,21 +852,38 @@ def _fetch_apple_library(
     base_url = "https://api.music.apple.com"
 
     def _get_page(path: str, offset: int) -> tuple[list[dict], int | None, str | None]:
-        """One page. Returns (items, meta_total, next_url) — retries once on 429."""
+        """One page, with backoff. Raises AppleAPIError rather than returning
+        an empty list, so a rate-limited fetch is never mistaken for an empty
+        library."""
         sep = "&" if "?" in path else "?"
         url = f"{base_url}{path}{sep}limit=100&offset={offset}"
-        for attempt in (0, 1):
-            r = requests.get(url, headers=headers, timeout=30)
-            if r.status_code == 429 and attempt == 0:
-                time.sleep(float(r.headers.get("Retry-After", 1) or 1))
+        last_status = 0
+        last_body = ""
+        for attempt in range(5):
+            with _APPLE_GATE:
+                r = requests.get(url, headers=headers, timeout=30)
+            if r.status_code == 200:
+                data = r.json()
+                total = (data.get("meta") or {}).get("total")
+                return (
+                    data.get("data", []),
+                    total if isinstance(total, int) else None,
+                    data.get("next"),
+                )
+            last_status, last_body = r.status_code, (r.text or "")[:200]
+            if r.status_code == 429 or r.status_code >= 500:
+                try:
+                    wait = float(r.headers.get("Retry-After") or 0)
+                except ValueError:
+                    wait = 0.0
+                wait = max(wait, 0.8 * (2 ** attempt))
+                print(f"[apple] {path}: HTTP {r.status_code}, retrying in {wait:.1f}s "
+                      f"(attempt {attempt + 1}/5)", flush=True)
+                time.sleep(min(wait, 20.0))
                 continue
-            if r.status_code != 200:
-                print(f"[apple] {path}: HTTP {r.status_code} — {r.text[:200]}")
-                return [], None, None
-            data = r.json()
-            total = (data.get("meta") or {}).get("total")
-            return data.get("data", []), total if isinstance(total, int) else None, data.get("next")
-        return [], None, None
+            break  # 4xx other than 429 will not improve on retry
+        print(f"[apple] {path}: giving up after HTTP {last_status} — {last_body}", flush=True)
+        raise AppleAPIError(last_status, path, last_body)
 
     def _get_all(path: str) -> list[dict]:
         """Fetch every page. When the first page reports a total, the rest
@@ -848,21 +894,18 @@ def _fetch_apple_library(
         if total and total > len(items):
             offsets = list(range(len(items), total, 100))
             from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=5) as pool:
+            with ThreadPoolExecutor(max_workers=3) as pool:
                 for page_items, _, _ in pool.map(lambda off: _get_page(path, off), offsets):
                     items.extend(page_items)
         else:
             # Fallback: no total reported — walk next links sequentially.
-            url = f"{base_url}{nxt}" if nxt else None
-            while url:
-                r = requests.get(url, headers=headers, timeout=30)
-                if r.status_code != 200:
-                    print(f"[apple] {path}: HTTP {r.status_code} — {r.text[:200]}")
+            offset = len(items)
+            while nxt:
+                page_items, _, nxt = _get_page(path, offset)
+                if not page_items:
                     break
-                data = r.json()
-                items.extend(data.get("data", []))
-                nxt2 = data.get("next")
-                url = f"{base_url}{nxt2}" if nxt2 else None
+                items.extend(page_items)
+                offset += len(page_items)
         return items
 
     if on_progress:
@@ -889,7 +932,7 @@ def _fetch_apple_library(
         for i, pl in enumerate(playlists)
     ]
     done_count = 0
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {
             pool.submit(_get_all, f"/v1/me/library/playlists/{pl_id}/tracks"): pl_name
             for pl_name, pl_id in names
