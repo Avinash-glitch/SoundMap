@@ -112,6 +112,51 @@ def test_auth_failure_is_still_fatal_even_for_one_playlist(monkeypatch):
     assert excinfo.value.status == 403
 
 
+def test_play_history_failing_does_not_stop_the_map(monkeypatch):
+    """Heavy rotation and recently-played are a ranking bonus, not a source
+    of tracks. Apple answers 400 there for an over-sized page, and that must
+    not cost the user their whole map."""
+    seen = {}
+
+    def routed_get(url, **kw):
+        if "/history/" in url or "/recent/" in url:
+            seen[url.split("?")[0]] = url
+            return _Resp(400, text="bad request")
+        if "/library/songs" in url:
+            return _Resp(payload={
+                "data": [{"id": "i.1", "attributes": {
+                    "name": "Kept", "artistName": "A", "dateAdded": "2026-01-02T03:04:05Z",
+                }}],
+                "meta": {"total": 1},
+            })
+        return _Resp(payload={"data": [], "meta": {"total": 0}})
+
+    monkeypatch.setattr(pipeline.requests, "get", routed_get)
+    tracks = _fetch_apple_library("dev-token", "user-token")
+
+    assert [t["name"] for t in tracks] == ["Kept"]
+    assert seen, "the history endpoints should still have been attempted"
+    assert tracks[0]["is_top_track"] is True, "should fall back to date-added ranking"
+
+
+def test_history_endpoints_ask_for_a_page_size_they_allow(monkeypatch):
+    """Apple caps these well below the library's 100 and rejects more."""
+    asked = {}
+
+    def routed_get(url, **kw):
+        if "/history/heavy-rotation" in url:
+            asked["heavy"] = url
+        if "/recent/played" in url:
+            asked["recent"] = url
+        return _Resp(payload={"data": [], "meta": {"total": 0}})
+
+    monkeypatch.setattr(pipeline.requests, "get", routed_get)
+    _fetch_apple_library("dev-token", "user-token")
+
+    assert "limit=10&" in asked["heavy"], asked["heavy"]
+    assert "limit=30&" in asked["recent"], asked["recent"]
+
+
 def test_a_client_error_is_not_retried(monkeypatch):
     calls = {"n": 0}
 
