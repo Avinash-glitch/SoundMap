@@ -851,10 +851,17 @@ def _fetch_apple_library(
     }
     base_url = "https://api.music.apple.com"
 
-    def _get_page(path: str, offset: int) -> tuple[list[dict], int | None, str | None]:
-        """One page, with backoff. Raises AppleAPIError rather than returning
-        an empty list, so a rate-limited fetch is never mistaken for an empty
-        library."""
+    skipped: list[str] = []
+
+    def _get_page(path: str, offset: int, optional: bool = False) -> tuple[list[dict], int | None, str | None]:
+        """One page, with backoff.
+
+        Failures are split into two kinds. Anything that affects the whole
+        run - an expired token, or throttling that survives five retries -
+        raises, so it is never mistaken for an empty library. Anything local
+        to one resource is skipped: Apple answers 404 for an empty or deleted
+        playlist, which must not take the whole job down with it.
+        """
         sep = "&" if "?" in path else "?"
         url = f"{base_url}{path}{sep}limit=100&offset={offset}"
         last_status = 0
@@ -871,6 +878,15 @@ def _fetch_apple_library(
                     data.get("next"),
                 )
             last_status, last_body = r.status_code, (r.text or "")[:200]
+
+            # Nothing there: an empty playlist, or one no longer in the library.
+            if r.status_code == 404:
+                return [], None, None
+
+            # Whole-run problems: no point retrying, and no point continuing.
+            if r.status_code in (401, 403):
+                raise AppleAPIError(r.status_code, path, last_body)
+
             if r.status_code == 429 or r.status_code >= 500:
                 try:
                     wait = float(r.headers.get("Retry-After") or 0)
@@ -881,27 +897,36 @@ def _fetch_apple_library(
                       f"(attempt {attempt + 1}/5)", flush=True)
                 time.sleep(min(wait, 20.0))
                 continue
-            break  # 4xx other than 429 will not improve on retry
+            break  # other 4xx will not improve on retry
+
+        if optional:
+            print(f"[apple] skipping {path}: HTTP {last_status} — {last_body}", flush=True)
+            skipped.append(path)
+            return [], None, None
         print(f"[apple] {path}: giving up after HTTP {last_status} — {last_body}", flush=True)
         raise AppleAPIError(last_status, path, last_body)
 
-    def _get_all(path: str) -> list[dict]:
+    def _get_all(path: str, optional: bool = False) -> list[dict]:
         """Fetch every page. When the first page reports a total, the rest
-        are fetched in parallel instead of walking `next` links one by one."""
-        items, total, nxt = _get_page(path, 0)
+        are fetched in parallel instead of walking `next` links one by one.
+
+        optional=True marks a per-resource fetch, where a failure means skip
+        this one rather than abandon the run.
+        """
+        items, total, nxt = _get_page(path, 0, optional)
         if not items:
             return items
         if total and total > len(items):
             offsets = list(range(len(items), total, 100))
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=3) as pool:
-                for page_items, _, _ in pool.map(lambda off: _get_page(path, off), offsets):
+                for page_items, _, _ in pool.map(lambda off: _get_page(path, off, optional), offsets):
                     items.extend(page_items)
         else:
             # Fallback: no total reported — walk next links sequentially.
             offset = len(items)
             while nxt:
-                page_items, _, nxt = _get_page(path, offset)
+                page_items, _, nxt = _get_page(path, offset, optional)
                 if not page_items:
                     break
                 items.extend(page_items)
@@ -934,7 +959,7 @@ def _fetch_apple_library(
     done_count = 0
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {
-            pool.submit(_get_all, f"/v1/me/library/playlists/{pl_id}/tracks"): pl_name
+            pool.submit(_get_all, f"/v1/me/library/playlists/{pl_id}/tracks", True): pl_name
             for pl_name, pl_id in names
         }
         for fut in as_completed(futures):
@@ -1053,6 +1078,8 @@ def _fetch_apple_library(
             track["play_score"] = max(track.get("play_score", 1), 100 - rank)
             track["current_taste_score"] = max(track.get("current_taste_score", 0), 100 - rank)
 
+    if skipped:
+        print(f"[apple] {len(skipped)} playlist(s) skipped (empty, removed, or unreadable)", flush=True)
     print(f"[apple] library: {len(tracks_out)} tracks across {len(playlists)} playlists")
     return tracks_out
 

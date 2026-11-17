@@ -66,6 +66,52 @@ def test_a_throttled_page_is_retried_rather_than_dropped(monkeypatch):
     assert tracks == []       # genuinely empty library, reported as such
 
 
+def test_an_empty_or_missing_playlist_does_not_kill_the_run(monkeypatch):
+    """Apple answers 404 for an empty or removed playlist.
+
+    That is a fact about one playlist, not about the library, so the run must
+    carry on and still return the songs it did find.
+    """
+    def routed_get(url, **kw):
+        if "/library/playlists/p.DEAD/tracks" in url:
+            return _Resp(404, text="not found")
+        if "/library/playlists" in url and "/tracks" not in url:
+            return _Resp(payload={
+                "data": [{"id": "p.DEAD", "attributes": {"name": "Gone"}}],
+                "meta": {"total": 1},
+            })
+        if "/library/songs" in url:
+            return _Resp(payload={
+                "data": [{"id": "i.keep", "attributes": {"name": "Kept", "artistName": "A"}}],
+                "meta": {"total": 1},
+            })
+        return _Resp(payload={"data": [], "meta": {"total": 0}})
+
+    monkeypatch.setattr(pipeline.requests, "get", routed_get)
+    tracks = _fetch_apple_library("dev-token", "user-token")
+
+    assert [t["name"] for t in tracks] == ["Kept"]
+
+
+def test_auth_failure_is_still_fatal_even_for_one_playlist(monkeypatch):
+    """A 403 means the token is dead, so skipping and carrying on would just
+    produce a silently empty map."""
+    def routed_get(url, **kw):
+        if "/library/playlists" in url and "/tracks" in url:
+            return _Resp(403, text="forbidden")
+        if "/library/playlists" in url:
+            return _Resp(payload={
+                "data": [{"id": "p.1", "attributes": {"name": "One"}}],
+                "meta": {"total": 1},
+            })
+        return _Resp(payload={"data": [], "meta": {"total": 0}})
+
+    monkeypatch.setattr(pipeline.requests, "get", routed_get)
+    with pytest.raises(AppleAPIError) as excinfo:
+        _fetch_apple_library("dev-token", "user-token")
+    assert excinfo.value.status == 403
+
+
 def test_a_client_error_is_not_retried(monkeypatch):
     calls = {"n": 0}
 
