@@ -3,7 +3,6 @@ Spotify library processing pipeline — adapted for per-user programmatic use.
 Fetches tracks, computes genre embeddings, runs UMAP, saves result via storage.py.
 """
 
-import os
 import threading
 import time
 import numpy as np
@@ -43,17 +42,6 @@ _APPLE_GATE = threading.BoundedSemaphore(4)
 
 MAX_TRACKS = 1000
 ARTIST_BATCH = 50
-
-_ENV_KEY_MAP = {"nvidia": "NVIDIA_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
-
-
-def _default_provider() -> str:
-    import os
-    for p in ("nvidia", "anthropic", "openai"):
-        if os.environ.get(_ENV_KEY_MAP[p]):
-            return p
-    return "anthropic"
-
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -630,36 +618,14 @@ def _run_umap(embeddings: np.ndarray) -> np.ndarray:
 # LLM helpers
 # ---------------------------------------------------------------------------
 
-def _call_llm_chat(system: str, user: str, api_key: str, provider: str = "anthropic", max_tokens: int = 1200) -> str:
-    """Route a chat completion to Anthropic, OpenAI, or NVIDIA NIM (GLM-5.1)."""
-    if provider == "nvidia":
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1")
-        resp = client.chat.completions.create(
-            model=os.environ.get("NVIDIA_MODEL", "z-ai/glm-5.3"),
-            max_tokens=max_tokens,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        )
-        return resp.choices[0].message.content.strip()
-    elif provider == "openai":
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            max_tokens=max_tokens,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        )
-        return resp.choices[0].message.content.strip()
-    else:  # anthropic default
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        return resp.content[0].text.strip()
+def _call_llm_chat(system: str, user: str, api_key: str, provider: str | None = None, max_tokens: int = 1200) -> str:
+    """Thin shim over the one LLM entry point.
+
+    provider is accepted and ignored so older callers and request bodies do
+    not break; there is only Gemini now. See backend/llm.py.
+    """
+    from .llm import call_llm
+    return call_llm(system, user, api_key=api_key, max_tokens=max_tokens)
 
 
 _GENRE_BUCKETS_SET = {"metal", "hip-hop", "electronic", "rock", "pop", "jazz", "classical", "folk", "latin", "world", "other"}
@@ -668,7 +634,7 @@ _GENRE_BUCKETS_SET = {"metal", "hip-hop", "electronic", "rock", "pop", "jazz", "
 def _llm_genre_detect(
     tracks: list[dict],
     api_key: str,
-    provider: str = "anthropic",
+    provider: str | None = None,
 ) -> list[str]:
     """
     Batch-classify each track's genre using an LLM.
@@ -726,7 +692,7 @@ def _llm_mood_groups(
     playlist_meta: list[dict],
     pl_track_samples: dict[str, list[str]],
     api_key: str = "",
-    provider: str = "anthropic",
+    provider: str | None = None,
 ) -> tuple[dict[str, str], str]:
     """
     Group playlists into persona-aware mood categories using Claude.

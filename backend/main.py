@@ -18,18 +18,10 @@ from .jobs import get_job, submit_job, stop_job
 from .models import JobStatus
 from .notifications import send_notification
 from . import storage
+# All AI goes through backend/llm.py: one provider, one key, one code path.
+from .llm import call_llm
 
 load_dotenv()
-
-_ENV_KEY_MAP = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "nvidia": "NVIDIA_API_KEY"}
-
-
-def _default_provider() -> str:
-    """Pick the first provider whose API key is configured in the environment."""
-    for provider in ("nvidia", "anthropic", "openai"):
-        if os.environ.get(_ENV_KEY_MAP[provider]):
-            return provider
-    return "anthropic"
 
 
 def _load_user_map_any(user_id: str):
@@ -274,6 +266,18 @@ async def job_status(job_id: str) -> JSONResponse:
     )
 
 
+@app.get("/ai/health")
+async def ai_health() -> JSONResponse:
+    """Is the AI actually working right now, and with which model.
+
+    Every AI feature failed silently for weeks because the configured model
+    had been retired. This answers that question directly instead of waiting
+    for a user to hit it.
+    """
+    from .llm import health
+    return JSONResponse(health())
+
+
 @app.post("/analyze-moods")
 async def analyze_moods(request: Request) -> JSONResponse:
     """Re-run mood grouping on existing map data using a user-supplied API key."""
@@ -284,16 +288,15 @@ async def analyze_moods(request: Request) -> JSONResponse:
     try:
         body = await request.json()
         user_api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or _default_provider()).strip().lower()
+        # provider is still read so older pages keep working; it is ignored.
+        body.get("provider")
     except Exception:
-        user_api_key, provider = "", "anthropic"
+        user_api_key = ""
 
-    if provider not in ("anthropic", "openai", "nvidia"):
-        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
-    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
+    api_key = user_api_key or os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
-        raise HTTPException(status_code=400, detail="api_key required")
+        raise HTTPException(status_code=400, detail="No Gemini API key. Add yours in AI settings, or set GEMINI_API_KEY on the server.")
 
     map_data = storage.load_map(user_id)
     if not map_data:
@@ -316,7 +319,7 @@ async def analyze_moods(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="No playlist data to analyze")
 
     from .pipeline import _llm_mood_groups
-    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_tracks, api_key=api_key, provider=provider)
+    pl_to_mood, persona = _llm_mood_groups(playlist_meta, pl_tracks, api_key=api_key)
 
     if not pl_to_mood:
         raise HTTPException(status_code=500, detail="Mood analysis returned no results — check your API key")
@@ -341,19 +344,17 @@ async def playlist_insight(request: Request) -> JSONResponse:
     try:
         body = await request.json()
         user_api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or _default_provider()).strip().lower()
+        # provider is still read so older pages keep working; it is ignored.
+        body.get("provider")
         playlist_name = (body.get("playlist_name") or "Playlist").strip()[:120]
         tracks = body.get("tracks") or []
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
-    if provider not in ("anthropic", "openai", "nvidia"):
-        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
-    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
+    api_key = user_api_key or os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
-        labels = {"anthropic": "Anthropic", "openai": "OpenAI", "nvidia": "NVIDIA"}
-        raise HTTPException(status_code=400, detail=f"No {labels[provider]} API key configured")
+        raise HTTPException(status_code=400, detail="No Gemini API key. Add yours in AI settings, or set GEMINI_API_KEY on the server.")
 
     if not isinstance(tracks, list) or not tracks:
         raise HTTPException(status_code=400, detail="tracks required")
@@ -400,7 +401,7 @@ async def playlist_insight(request: Request) -> JSONResponse:
         loop = asyncio.get_running_loop()
         raw = await loop.run_in_executor(
             None,
-            lambda: _call_llm_chat(system_msg, user_msg, api_key=api_key, provider=provider, max_tokens=700),
+            lambda: _call_llm_chat(system_msg, user_msg, api_key=api_key, max_tokens=700),
         )
         data = _parse_llm_json(raw)
     except Exception as exc:
@@ -565,16 +566,15 @@ async def generate_remaining_playlists(request: Request) -> StreamingResponse:
     try:
         body = await request.json()
         user_api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or _default_provider()).strip().lower()
+        # provider is still read so older pages keep working; it is ignored.
+        body.get("provider")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
-    if provider not in ("anthropic", "openai", "nvidia"):
-        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
-    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
+    api_key = user_api_key or os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
-        raise HTTPException(status_code=400, detail="api_key required")
+        raise HTTPException(status_code=400, detail="No Gemini API key. Add yours in AI settings, or set GEMINI_API_KEY on the server.")
 
     map_id, map_data = _load_user_map_any(user_id)
     if not map_data:
@@ -622,7 +622,7 @@ async def generate_remaining_playlists(request: Request) -> StreamingResponse:
         try:
             raw = await loop.run_in_executor(
                 None,
-                lambda: _call_llm_chat(system_msg, user_msg, api_key=api_key, provider=provider, max_tokens=4000),
+                lambda: _call_llm_chat(system_msg, user_msg, api_key=api_key, max_tokens=4000),
             )
             llm_data = _parse_llm_json(raw)
         except Exception as exc:
@@ -662,16 +662,15 @@ async def ai_sort_remaining(request: Request) -> StreamingResponse:
     try:
         body = await request.json()
         user_api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or _default_provider()).strip().lower()
+        # provider is still read so older pages keep working; it is ignored.
+        body.get("provider")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
-    if provider not in ("anthropic", "openai", "nvidia"):
-        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
-    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
+    api_key = user_api_key or os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
-        raise HTTPException(status_code=400, detail="api_key required")
+        raise HTTPException(status_code=400, detail="No Gemini API key. Add yours in AI settings, or set GEMINI_API_KEY on the server.")
 
     map_id, map_data = _load_user_map_any(user_id)
     if not map_data:
@@ -730,7 +729,7 @@ async def ai_sort_remaining(request: Request) -> StreamingResponse:
 
             # Run LLM in executor; send keep-alive pings every 15s so Railway doesn't drop the connection
             fut = asyncio.ensure_future(loop.run_in_executor(
-                None, lambda u=batch_user: _call_llm_chat(system_msg, u, api_key=api_key, provider=provider, max_tokens=2000)
+                None, lambda u=batch_user: _call_llm_chat(system_msg, u, api_key=api_key, max_tokens=2000)
             ))
             while not fut.done():
                 try:
@@ -2165,7 +2164,7 @@ async def merge_playlists(request: Request) -> JSONResponse:
 async def ai_playlist(request: Request) -> JSONResponse:
     """
     Curate a playlist using Claude or OpenAI.
-    Body: {"prompt": "...", "name": "..." (optional), "api_key": "..." (optional), "provider": "anthropic"|"openai" (optional)}
+    Body: {"prompt": "...", "name": "..." (optional), "api_key": "..." (optional)}
     Returns: {name, url, track_count, duration_min, reasoning, track_ids}
     """
     user_id = request.session.get("user_id")
@@ -2180,7 +2179,8 @@ async def ai_playlist(request: Request) -> JSONResponse:
         prompt = (body.get("prompt") or "").strip()
         custom_name = (body.get("name") or "").strip()
         user_api_key = (body.get("api_key") or "").strip()
-        provider = (body.get("provider") or _default_provider()).strip().lower()
+        # provider is still read so older pages keep working; it is ignored.
+        body.get("provider")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid request body")
 
@@ -2188,14 +2188,11 @@ async def ai_playlist(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Prompt is required")
     if len(prompt) > 600:
         raise HTTPException(status_code=400, detail="Prompt too long (max 600 chars)")
-    if provider not in ("anthropic", "openai", "nvidia"):
-        raise HTTPException(status_code=400, detail="provider must be 'anthropic', 'openai', or 'nvidia'")
 
     # Resolve API key: user-supplied key takes priority over server key
-    api_key = user_api_key or os.environ.get(_ENV_KEY_MAP[provider], "")
+    api_key = user_api_key or os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
-        _labels = {"anthropic": "Anthropic", "openai": "OpenAI", "nvidia": "NVIDIA"}
-        raise HTTPException(status_code=500, detail=f"No {_labels[provider]} API key — add yours in AI settings or configure {_ENV_KEY_MAP[provider]}")
+        raise HTTPException(status_code=500, detail="No Gemini API key — add yours in AI settings or set GEMINI_API_KEY on the server.")
 
     map_data = storage.load_map(user_id)
     if not map_data:
@@ -2245,44 +2242,11 @@ async def ai_playlist(request: Request) -> JSONResponse:
 
     user_msg = f"Library ({len(lines)} tracks):\n{manifest}\n\nRequest: {prompt}"
 
-    print(f"[ai-playlist] {provider} for user {user_id} — {len(lines)} tracks, prompt: {prompt!r}")
+    print(f"[ai-playlist] user {user_id} — {len(lines)} tracks, prompt: {prompt!r}")
 
     raw = ""
     try:
-        if provider == "anthropic":
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            resp = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=4000,
-                system=system_msg,
-                messages=[{"role": "user", "content": user_msg}],
-            )
-            raw = resp.content[0].text.strip()
-        elif provider == "nvidia":
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1")
-            resp = client.chat.completions.create(
-                model=os.environ.get("NVIDIA_MODEL", "z-ai/glm-5.3"),
-                max_tokens=4000,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg},
-                ],
-            )
-            raw = resp.choices[0].message.content.strip()
-        else:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key)
-            resp = client.chat.completions.create(
-                model="gpt-4o",
-                max_tokens=4000,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg},
-                ],
-            )
-            raw = resp.choices[0].message.content.strip()
+        raw = call_llm(system_msg, user_msg, api_key=api_key, max_tokens=4000)
 
         import re as _re
         match = _re.search(r'\{.*\}', raw, _re.DOTALL)

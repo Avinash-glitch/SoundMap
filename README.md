@@ -86,8 +86,9 @@ SPOTIFY_CLIENT_ID=your_spotify_client_id
 SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 SPOTIFY_REDIRECT_URI=http://localhost:8000/callback
 
-# AI — NVIDIA is free and works for all users
-NVIDIA_API_KEY=optional_server_side_ai
+# AI — one provider for every AI feature
+GEMINI_API_KEY=AIza...        # https://aistudio.google.com/apikey
+GEMINI_MODEL=                 # optional; auto-detected when blank
 
 # Optional — users can also enter these in the UI
 ANTHROPIC_API_KEY=optional
@@ -140,6 +141,24 @@ ruff check backend tests
 GitHub Actions runs both on every pull request and on pushes to `main` and
 `dev-soundmap`, then builds the Docker image, boots it and checks `/healthz`
 answers and that the container is not running as root.
+
+### AI features
+
+All five AI features — mood grouping, playlist profiles, "create new
+playlists", "sort into my playlists" and prompt-to-playlist — go through a
+single entry point, `backend/llm.py`, using Google Gemini via its
+OpenAI-compatible endpoint. One key (`GEMINI_API_KEY`), one code path. Users
+may paste their own key in AI settings, which overrides the server's.
+
+The model is not hard-coded. Unless `GEMINI_MODEL` is set, the server asks
+the API which models the key can use and picks a current Flash one. A
+retired model id previously broke every AI feature silently, so
+`GET /ai/health` now reports whether the AI works right now and which model
+it resolved to:
+
+```bash
+curl https://your-host/ai/health
+```
 
 ### Operational notes
 
