@@ -253,7 +253,8 @@
         <strong>Something went wrong.</strong><br />
         <span id="error-detail"></span>
         <br />
-        <a href="/" class="btn-retry">Try Again</a>
+        <a href="/" class="btn-retry" id="btn-retry">Try Again</a>
+        <a href="/apple-login.html?reset=1" class="btn-retry" id="btn-reconnect" style="display:none">Reconnect Apple Music</a>
       </div>
     </div>
 
@@ -316,8 +317,18 @@
 
       if (job.status === 'error') {
         titleEl.textContent = 'Processing failed';
-        errorDetail.textContent = job.error || 'Unknown error.';
+        const detail = job.error || 'Unknown error.';
+        errorDetail.textContent = detail;
         errorBox.style.display = 'block';
+        // An expired Apple connection cannot be retried from here: the browser
+        // would just replay the same dead token. Send them somewhere that
+        // clears it first.
+        if (/apple/i.test(detail) && /expired|authoriz|reconnect|401|403/i.test(detail)) {
+          const reconnect = document.getElementById('btn-reconnect');
+          const retry = document.getElementById('btn-retry');
+          if (reconnect) reconnect.style.display = '';
+          if (retry) retry.style.display = 'none';
+        }
         progressPanel.querySelector('.dots').style.display = 'none';
         return;
       }
