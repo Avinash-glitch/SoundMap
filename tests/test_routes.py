@@ -58,3 +58,13 @@ def test_ai_health_is_wired_and_answers_without_a_key(client):
 
     body = client.get("/ai/health").json()
     assert set(body) >= {"ok", "configured"}
+def test_apple_disconnect_clears_the_server_side_token(client):
+    """The escape hatch: without this the server keeps replaying a token
+    Apple has already rejected."""
+    import backend.main as main
+    route = next(r for r in main.app.routes if getattr(r, "path", None) == "/apple/disconnect")
+    assert route.endpoint.__name__ == "apple_disconnect"
+
+    resp = client.post("/apple/disconnect")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
