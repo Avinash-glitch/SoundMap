@@ -10,6 +10,7 @@ openai package that is already a dependency rather than adding an SDK.
 
 import os
 import threading
+import time
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
@@ -88,24 +89,85 @@ def resolve_model(api_key: str, refresh: bool = False) -> str:
         return _resolved_model
 
 
+# Worth waiting out: the service is busy, not the request wrong.
+_TRANSIENT = {429, 500, 502, 503, 504}
+# The model itself is the problem: retrying it changes nothing, another might work.
+_WRONG_MODEL = {400, 404}
+
+
+def _status_of(exc: Exception) -> int | None:
+    for attr in ("status_code", "http_status", "code"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def _friendly(status: int | None, exc: Exception) -> str:
+    if status in (401, 403):
+        return "Gemini rejected the API key. Check it in AI settings, or GEMINI_API_KEY on the server."
+    if status == 429:
+        return "Gemini rate limit reached. Wait a moment and try again."
+    if status in _TRANSIENT:
+        return "Gemini is busy right now and did not respond in time. Try again in a moment."
+    if status in _WRONG_MODEL:
+        return f"Gemini rejected the request ({status}). {exc}"[:300]
+    return f"{type(exc).__name__}: {exc}"[:300]
+
+
+class LLMUnavailable(RuntimeError):
+    """The model could not be reached after retrying. Usually transient."""
+
+
+def _candidates(key: str) -> list[str]:
+    """The resolved model first, then a couple of alternates.
+
+    Gemini answers 503 when a model is overloaded, which is common on the
+    free tier, so a second model is often the difference between a working
+    feature and an error message.
+    """
+    first = resolve_model(key)
+    rest = [m for m in ("gemini-2.5-flash", "gemini-2.0-flash") if m != first]
+    return [first, *rest]
+
+
 def call_llm(
     system: str,
     user: str,
     api_key: str | None = None,
     max_tokens: int = 1200,
 ) -> str:
-    """One chat completion. Returns the reply text."""
+    """One chat completion, retried through the noise. Returns the reply text."""
     key = api_key_from(api_key)
-    model = resolve_model(key)
-    resp = _client(key).chat.completions.create(
-        model=model,
-        max_tokens=max_tokens,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    )
-    return (resp.choices[0].message.content or "").strip()
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    last_exc: Exception | None = None
+    last_status: int | None = None
+
+    for model in _candidates(key):
+        for attempt in range(3):
+            try:
+                resp = _client(key).chat.completions.create(
+                    model=model, max_tokens=max_tokens, messages=messages,
+                )
+                return (resp.choices[0].message.content or "").strip()
+            except Exception as exc:
+                last_exc, last_status = exc, _status_of(exc)
+                if last_status in (401, 403):
+                    raise LLMUnavailable(_friendly(last_status, exc)) from exc
+                if last_status in _TRANSIENT and attempt < 2:
+                    wait = 1.5 * (2 ** attempt)
+                    print(f"[llm] {model} returned {last_status}; retrying in {wait:.1f}s", flush=True)
+                    time.sleep(wait)
+                    continue
+                break  # out of retries, or the model itself is wrong: try the next
+        print(f"[llm] giving up on {model} (last status {last_status})", flush=True)
+
+    raise LLMUnavailable(_friendly(last_status, last_exc or RuntimeError("unknown")))
 
 
 def health(api_key: str | None = None) -> dict:
