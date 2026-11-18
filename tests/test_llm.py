@@ -103,17 +103,17 @@ def test_a_busy_model_is_retried_not_surfaced(monkeypatch):
     """503 means overloaded. Riding it out beats showing an error code."""
     monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
     monkeypatch.setattr(llm.time, "sleep", lambda *_: None)
-    Client, calls = _client_raising(503, 503)
+    Client, calls = _client_raising(503)
     monkeypatch.setattr(llm, "_client", lambda key, timeout=45.0: Client())
 
     assert llm.call_llm("s", "u", api_key="k") == "the answer"
-    assert calls["n"] == 3
+    assert calls["n"] == 2
 
 
 def test_a_model_that_keeps_failing_falls_back_to_another(monkeypatch):
     monkeypatch.setenv("GEMINI_MODEL", "gemini-busy")
     monkeypatch.setattr(llm.time, "sleep", lambda *_: None)
-    Client, calls = _client_raising(503, 503, 503)
+    Client, calls = _client_raising(503, 503)
     monkeypatch.setattr(llm, "_client", lambda key, timeout=45.0: Client())
 
     assert llm.call_llm("s", "u", api_key="k") == "the answer"
@@ -131,6 +131,19 @@ def test_a_bad_key_fails_immediately(monkeypatch):
         llm.call_llm("s", "u", api_key="k")
     assert "API key" in str(exc.value)
     assert calls["n"] == 1, "a rejected key should not be retried"
+
+
+def test_retrying_is_capped_so_a_failure_cannot_burn_the_quota(monkeypatch):
+    """Each failed try still bills its input tokens, and these prompts carry
+    a whole music library."""
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
+    monkeypatch.setattr(llm.time, "sleep", lambda *_: None)
+    Client, calls = _client_raising(*([503] * 50))
+    monkeypatch.setattr(llm, "_client", lambda key, timeout=45.0: Client())
+
+    with pytest.raises(llm.LLMUnavailable):
+        llm.call_llm("s", "u", api_key="k")
+    assert calls["n"] == llm.MAX_ATTEMPTS, f"made {calls['n']} calls, budget is {llm.MAX_ATTEMPTS}"
 
 
 def test_persistent_overload_explains_itself(monkeypatch):

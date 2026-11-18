@@ -100,6 +100,13 @@ def resolve_model(api_key: str, refresh: bool = False) -> str:
         return _resolved_model
 
 
+# Total tries for one call, across every model. Kept small on purpose: a
+# failed request still bills its input tokens, and these prompts carry a whole
+# music library. Split per model so the first one cannot eat the whole budget
+# and leave no room to fall back.
+MAX_ATTEMPTS = 4
+ATTEMPTS_PER_MODEL = 2
+
 # Worth waiting out: the service is busy, not the request wrong.
 _TRANSIENT = {429, 500, 502, 503, 504}
 # The model itself is the problem: retrying it changes nothing, another might work.
@@ -159,8 +166,16 @@ def call_llm(
     last_exc: Exception | None = None
     last_status: int | None = None
 
+    # A failed request still bills its input tokens, and these prompts carry a
+    # whole library, so the budget is on total attempts rather than per model:
+    # retrying three models three times each could spend six figures of tokens
+    # on one button press.
+    attempts_left = MAX_ATTEMPTS
     for model in _candidates(key):
-        for attempt in range(3):
+        if attempts_left <= 0:
+            break
+        for _ in range(min(ATTEMPTS_PER_MODEL, attempts_left)):
+            attempts_left -= 1
             try:
                 resp = _client(key).chat.completions.create(
                     model=model, max_tokens=max_tokens, messages=messages,
@@ -170,14 +185,17 @@ def call_llm(
                 last_exc, last_status = exc, _status_of(exc)
                 if last_status in (401, 403):
                     raise LLMUnavailable(_friendly(last_status, exc)) from exc
-                if last_status in _TRANSIENT and attempt < 2:
-                    wait = 1.5 * (2 ** attempt)
-                    print(f"[llm] {model} returned {last_status}; retrying in {wait:.1f}s", flush=True)
-                    time.sleep(wait)
+                if last_status in _WRONG_MODEL:
+                    break  # this model is not the problem to retry; try another
+                if last_status in _TRANSIENT and attempts_left > 0:
+                    wait = 1.5 * (2 ** (MAX_ATTEMPTS - attempts_left - 1))
+                    print(f"[llm] {model} returned {last_status}; retrying in {wait:.1f}s "
+                          f"({attempts_left} attempts left)", flush=True)
+                    time.sleep(min(wait, 8.0))
                     continue
-                break  # out of retries, or the model itself is wrong: try the next
-        print(f"[llm] giving up on {model} (last status {last_status})", flush=True)
+                break
 
+    print(f"[llm] gave up after {MAX_ATTEMPTS - attempts_left} attempt(s), last status {last_status}", flush=True)
     raise LLMUnavailable(_friendly(last_status, last_exc or RuntimeError("unknown")))
 
 
