@@ -1328,7 +1328,6 @@ async def apple_developer_token() -> JSONResponse:
         raise HTTPException(status_code=500, detail=f"Token generation failed: {exc}")
 
 
-@app.post("/apple/start-job")
 def _apple_token_is_usable(music_user_token: str) -> tuple[bool, int]:
     """Confirm a Music-User-Token still works, with one cheap request.
 
@@ -1365,6 +1364,7 @@ def _apple_token_is_usable(music_user_token: str) -> tuple[bool, int]:
     return True, resp.status_code
 
 
+@app.post("/apple/start-job")
 async def apple_start_job(request: Request) -> JSONResponse:
     """Start an Apple Music pipeline job. Body: {music_user_token, storefront}."""
     user_id = request.session.get("user_id")
