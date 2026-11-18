@@ -98,6 +98,9 @@
     }
     .error { color: #f87171; }
     a { color: var(--apple); text-decoration: none; }
+    .reset-row { margin-top: .9rem; text-align: center; }
+    .reset-row a { font-size: .78rem; opacity: .65; text-decoration: underline; }
+    .reset-row a:hover { opacity: 1; }
   </style>
 </head>
 <body>
@@ -123,11 +126,32 @@
     </div>
     <button class="btn" id="apple-auth-btn">Connect Apple Music</button>
     <div class="status" id="status"></div>
+    <div class="reset-row">
+      <a href="#" id="apple-reset">Stuck on "session expired"? Reset this connection</a>
+    </div>
   </main>
 
   <script>
     const btn = document.getElementById('apple-auth-btn');
     const statusEl = document.getElementById('status');
+    const resetLink = document.getElementById('apple-reset');
+
+    resetLink.addEventListener('click', async (event) => {
+      event.preventDefault();
+      resetLink.textContent = 'Clearing…';
+      await resetAppleConnection();
+      setStatus('Connection cleared. Press Connect Apple Music to sign in again.');
+      resetLink.textContent = 'Reset this connection';
+    });
+
+    // Error pages send people here with ?reset=1 so the stale token is gone
+    // before they press anything.
+    if (new URLSearchParams(location.search).get('reset') === '1') {
+      resetAppleConnection().then(() => {
+        setStatus('Previous connection cleared. Press Connect Apple Music to sign in again.');
+        history.replaceState(null, '', location.pathname);
+      });
+    }
 
     function errText(err) {
       // MusicKit rejects with plain objects, not Errors, so err.message is
@@ -144,6 +168,31 @@
         if (asText && asText !== '{}') return asText;
       } catch (_) {}
       return 'Something went wrong connecting to Apple Music.';
+    }
+
+    async function resetAppleConnection(music) {
+      // Three places hold a stale connection, and all three have to go or the
+      // next attempt just replays the token Apple already rejected.
+      try {
+        const instance = music || (typeof MusicKit !== 'undefined' && MusicKit.getInstance ? MusicKit.getInstance() : null);
+        if (instance && instance.unauthorize) await instance.unauthorize();
+      } catch (err) {
+        console.warn('[apple] unauthorize failed', err);
+      }
+      try {
+        // MusicKit caches the user token in localStorage under music.* keys,
+        // and unauthorize() does not always clear every one of them.
+        Object.keys(localStorage)
+          .filter(k => k.startsWith('music.') || k.indexOf('media-user-token') !== -1)
+          .forEach(k => localStorage.removeItem(k));
+      } catch (err) {
+        console.warn('[apple] could not clear local storage', err);
+      }
+      try {
+        await fetch('/apple/disconnect', { method: 'POST' });
+      } catch (err) {
+        console.warn('[apple] server disconnect failed', err);
+      }
     }
 
     function detailText(payload, fallback) {
@@ -241,7 +290,12 @@
         console.error('[apple] connect failed', err);
         btn.disabled = false;
         btn.textContent = 'Connect Apple Music';
-        setStatus(errText(err), true);
+        const text = errText(err);
+        setStatus(text, true);
+        if (/expired|authoriz|403|401|reconnect/i.test(text)) {
+          resetLink.textContent = 'Reset this connection and sign in fresh';
+          resetLink.style.opacity = '1';
+        }
       }
     });
   </script>
