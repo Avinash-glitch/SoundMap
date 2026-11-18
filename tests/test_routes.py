@@ -49,6 +49,15 @@ def test_routes_point_at_the_function_they_are_named_for(path, name):
     )
 
 
+def test_ai_health_is_wired_and_answers_without_a_key(client):
+    """Every AI feature failed silently for weeks on a retired model id.
+    This endpoint exists so that question has a direct answer."""
+    import backend.main as main
+    route = next(r for r in main.app.routes if getattr(r, "path", None) == "/ai/health")
+    assert route.endpoint.__name__ == "ai_health"
+
+    body = client.get("/ai/health").json()
+    assert set(body) >= {"ok", "configured"}
 def test_apple_disconnect_clears_the_server_side_token(client):
     """The escape hatch: without this the server keeps replaying a token
     Apple has already rejected."""
