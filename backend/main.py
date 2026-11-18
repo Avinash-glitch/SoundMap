@@ -1364,6 +1364,19 @@ def _apple_token_is_usable(music_user_token: str) -> tuple[bool, int]:
     return True, resp.status_code
 
 
+@app.post("/apple/disconnect")
+async def apple_disconnect(request: Request) -> JSONResponse:
+    """Forget this browser's Apple Music connection.
+
+    The browser half (MusicKit's cached user token) is cleared on the page;
+    this drops the server's copy so the next attempt starts clean instead of
+    reusing a token Apple has already rejected.
+    """
+    request.session.pop("music_user_token", None)
+    request.session.pop("storefront", None)
+    return JSONResponse({"ok": True})
+
+
 @app.post("/apple/start-job")
 async def apple_start_job(request: Request) -> JSONResponse:
     """Start an Apple Music pipeline job. Body: {music_user_token, storefront}."""

@@ -47,3 +47,15 @@ def test_routes_point_at_the_function_they_are_named_for(path, name):
     assert any(r.endpoint.__name__ == name for r in matches), (
         f"{path} is handled by {[r.endpoint.__name__ for r in matches]}, expected {name}"
     )
+
+
+def test_apple_disconnect_clears_the_server_side_token(client):
+    """The escape hatch: without this the server keeps replaying a token
+    Apple has already rejected."""
+    import backend.main as main
+    route = next(r for r in main.app.routes if getattr(r, "path", None) == "/apple/disconnect")
+    assert route.endpoint.__name__ == "apple_disconnect"
+
+    resp = client.post("/apple/disconnect")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
