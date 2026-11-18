@@ -26,7 +26,7 @@ def test_a_caller_key_beats_the_environment(monkeypatch):
 def test_an_explicit_model_is_never_second_guessed(monkeypatch):
     monkeypatch.setenv("GEMINI_MODEL", "gemini-pinned")
 
-    def boom(_):
+    def boom(*a, **kw):
         raise AssertionError("should not ask the API when GEMINI_MODEL is set")
 
     monkeypatch.setattr(llm, "_client", boom)
@@ -45,12 +45,12 @@ def test_the_model_is_discovered_rather_than_hard_coded(monkeypatch):
             def list():
                 return [_M("models/gemini-2.0-flash"), _M("models/gemini-2.5-flash-002")]
 
-    monkeypatch.setattr(llm, "_client", lambda key: _Client())
+    monkeypatch.setattr(llm, "_client", lambda key, timeout=45.0: _Client())
     assert llm.resolve_model("k") == "gemini-2.5-flash-002"
 
 
 def test_an_unreachable_model_list_still_yields_something_usable(monkeypatch):
-    def boom(key):
+    def boom(key, timeout=45.0):
         raise RuntimeError("network down")
 
     monkeypatch.setattr(llm, "_client", boom)
@@ -104,7 +104,7 @@ def test_a_busy_model_is_retried_not_surfaced(monkeypatch):
     monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
     monkeypatch.setattr(llm.time, "sleep", lambda *_: None)
     Client, calls = _client_raising(503, 503)
-    monkeypatch.setattr(llm, "_client", lambda key: Client())
+    monkeypatch.setattr(llm, "_client", lambda key, timeout=45.0: Client())
 
     assert llm.call_llm("s", "u", api_key="k") == "the answer"
     assert calls["n"] == 3
@@ -114,7 +114,7 @@ def test_a_model_that_keeps_failing_falls_back_to_another(monkeypatch):
     monkeypatch.setenv("GEMINI_MODEL", "gemini-busy")
     monkeypatch.setattr(llm.time, "sleep", lambda *_: None)
     Client, calls = _client_raising(503, 503, 503)
-    monkeypatch.setattr(llm, "_client", lambda key: Client())
+    monkeypatch.setattr(llm, "_client", lambda key, timeout=45.0: Client())
 
     assert llm.call_llm("s", "u", api_key="k") == "the answer"
     assert calls["models"][0] == "gemini-busy"
@@ -125,7 +125,7 @@ def test_a_bad_key_fails_immediately(monkeypatch):
     """No point retrying or trying other models with a rejected key."""
     monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
     Client, calls = _client_raising(403, 403, 403, 403, 403, 403, 403, 403, 403)
-    monkeypatch.setattr(llm, "_client", lambda key: Client())
+    monkeypatch.setattr(llm, "_client", lambda key, timeout=45.0: Client())
 
     with pytest.raises(llm.LLMUnavailable) as exc:
         llm.call_llm("s", "u", api_key="k")
@@ -137,7 +137,7 @@ def test_persistent_overload_explains_itself(monkeypatch):
     monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
     monkeypatch.setattr(llm.time, "sleep", lambda *_: None)
     Client, _ = _client_raising(*([503] * 20))
-    monkeypatch.setattr(llm, "_client", lambda key: Client())
+    monkeypatch.setattr(llm, "_client", lambda key, timeout=45.0: Client())
 
     with pytest.raises(llm.LLMUnavailable) as exc:
         llm.call_llm("s", "u", api_key="k")

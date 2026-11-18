@@ -49,9 +49,21 @@ def is_configured() -> bool:
     return bool(os.environ.get("GEMINI_API_KEY", "").strip())
 
 
-def _client(api_key: str):
+def _client(api_key: str, timeout: float = 45.0):
+    """max_retries=0 on purpose: retries are handled in call_llm.
+
+    Leaving the SDK's own retries on multiplied with ours - up to three
+    models x three attempts x two SDK retries - so a busy model could hang a
+    request for minutes instead of failing usefully.
+    """
     from openai import OpenAI
-    return OpenAI(api_key=api_key, base_url=GEMINI_BASE_URL, timeout=90.0, max_retries=2)
+    return OpenAI(api_key=api_key, base_url=GEMINI_BASE_URL, timeout=timeout, max_retries=0)
+
+
+def list_models(api_key: str, timeout: float = 10.0) -> list[str]:
+    """Model ids this key can actually use, newest-looking first."""
+    raw = [m.id for m in _client(api_key, timeout=timeout).models.list()]
+    return [r.split("/")[-1] for r in raw]
 
 
 def resolve_model(api_key: str, refresh: bool = False) -> str:
@@ -75,8 +87,7 @@ def resolve_model(api_key: str, refresh: bool = False) -> str:
             return _resolved_model
         fallback = "gemini-2.5-flash"
         try:
-            available = [m.id for m in _client(api_key).models.list()]
-            names = [a.split("/")[-1] for a in available]
+            names = list_models(api_key)
             chosen = next(
                 (n for pref in _MODEL_PREFERENCE for n in names if n.startswith(pref)),
                 None,
@@ -171,14 +182,43 @@ def call_llm(
 
 
 def health(api_key: str | None = None) -> dict:
-    """What the AI features would do right now, without guessing."""
+    """What the AI features would do right now, without guessing.
+
+    One attempt on a short timeout, no retries and no model fallback: a probe
+    that can take minutes to answer tells you nothing you can act on.
+    """
     try:
         key = api_key_from(api_key)
     except LLMNotConfigured as exc:
         return {"ok": False, "configured": False, "error": str(exc)}
+
+    model = None
     try:
         model = resolve_model(key, refresh=True)
-        reply = call_llm("Reply with the single word: ok", "ping", api_key=key, max_tokens=16)
+        resp = _client(key, timeout=12.0).chat.completions.create(
+            model=model,
+            max_tokens=16,
+            messages=[
+                {"role": "system", "content": "Reply with the single word: ok"},
+                {"role": "user", "content": "ping"},
+            ],
+        )
+        reply = (resp.choices[0].message.content or "").strip()
         return {"ok": True, "configured": True, "model": model, "reply": reply[:40]}
     except Exception as exc:
-        return {"ok": False, "configured": True, "error": f"{type(exc).__name__}: {exc}"[:300]}
+        status = _status_of(exc)
+        out = {
+            "ok": False,
+            "configured": True,
+            "model": model,
+            "status": status,
+            "error": _friendly(status, exc),
+        }
+        # Which model to use is the usual answer to a failing health check,
+        # so say what this key can actually reach rather than making someone
+        # guess. Set GEMINI_MODEL to one of these to pin it.
+        try:
+            out["available"] = list_models(key)[:25]
+        except Exception as list_exc:
+            out["available_error"] = f"{type(list_exc).__name__}: {list_exc}"[:200]
+        return out
