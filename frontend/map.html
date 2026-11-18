@@ -2418,42 +2418,22 @@
 <div class="modal-backdrop" id="ai-settings-modal">
   <div class="modal" style="width:min(440px,92vw)">
     <div class="modal-title">AI Settings</div>
-    <div class="modal-sub">Powered by NVIDIA GLM-5.1. Use the server's key or bring your own.</div>
+    <div class="modal-sub">Powered by Google Gemini. Use the server's key or bring your own.</div>
 
-    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">Provider</div>
-    <div style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:1.1rem">
-      <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-nvidia">
-        <input type="radio" name="ai-provider" value="nvidia" style="accent-color:var(--accent)" />
-        <span>GLM-5.1 (NVIDIA)</span>
-        <span style="margin-left:auto;font-size:.65rem;color:var(--accent2);background:rgba(124,106,247,.15);border-radius:4px;padding:.1rem .4rem">recommended</span>
-      </label>
-      <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-anthropic">
-        <input type="radio" name="ai-provider" value="anthropic" style="accent-color:var(--accent)" /> Claude (Anthropic)
-      </label>
-      <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .9rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .15s" id="provider-label-openai">
-        <input type="radio" name="ai-provider" value="openai" style="accent-color:var(--accent)" /> GPT-4o (OpenAI)
-      </label>
-    </div>
-
-    <div id="ai-nvidia-note" style="font-size:.75rem;color:var(--text-dim);margin-bottom:1.25rem;line-height:1.7;padding:.75rem .9rem;background:rgba(124,106,247,.07);border-radius:8px;border:1px solid rgba(124,106,247,.2)">
-      <div style="color:var(--text);font-weight:500;margin-bottom:.4rem">Get your own NVIDIA API key (free)</div>
-      After creating an account on
-      <a href="https://build.nvidia.com/settings/api-keys" target="_blank" rel="noopener"
-        style="color:var(--accent2)">NVIDIA Build</a>,
-      navigate to your dashboard and generate an API key from the credentials or API access section.
-      Copy the key and paste it below to use your own quota.
-      <input class="modal-input" id="ai-key-input-nvidia" type="password"
-        placeholder="nvapi-… (leave blank to use server key)"
-        style="margin-top:.6rem;font-family:'DM Mono',monospace;font-size:.72rem" autocomplete="off" />
-    </div>
-    <div id="ai-key-section" style="display:none">
-      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);margin-bottom:.5rem">API Key</div>
+    <div id="ai-gemini-note" style="font-size:.75rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.7;padding:.75rem .9rem;background:rgba(124,106,247,.07);border-radius:8px;border:1px solid rgba(124,106,247,.2)">
+      <div style="color:var(--text);font-weight:500;margin-bottom:.4rem">Get your own Gemini API key (free tier available)</div>
+      Create a key in
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent2)">Google AI Studio</a>,
+      then paste it below to use your own quota. Leave it blank to use the server's key.
       <input class="modal-input" id="ai-key-input" type="password"
-        placeholder="Paste your API key here…"
-        style="margin-bottom:.4rem;font-family:'DM Mono',monospace" autocomplete="off" />
-      <div style="font-size:.7rem;color:var(--text-dim);margin-bottom:1.25rem;line-height:1.5">
-        Stored in your browser only. Leave blank to use the server's key.
-      </div>
+        placeholder="AIza… (leave blank to use server key)"
+        style="margin-top:.6rem;font-family:'DM Mono',monospace;font-size:.72rem" autocomplete="off" />
+      <div style="font-size:.7rem;opacity:.75;margin-top:.45rem">Stored in your browser only.</div>
+    </div>
+
+    <div id="ai-health-row" style="font-size:.72rem;color:var(--text-dim);margin-bottom:1.1rem">
+      <button class="btn-secondary" id="ai-health-btn" style="font-size:.72rem;padding:.35rem .7rem">Test connection</button>
+      <span id="ai-health-result" style="margin-left:.6rem"></span>
     </div>
 
     <div class="modal-actions">
@@ -3886,7 +3866,7 @@ function _brain3DRenderInsight(idx, color) {
   if (!insight) {
     area.innerHTML = `
       <button class="brain3d-ai-button" id="brain3d-ai-generate" type="button">Generate AI playlist profile</button>
-      <div class="brain3d-ai-note">Optional: sends this playlist's song titles and artists to your selected AI provider to infer energy, dance feel, average tempo, and mood.</div>`;
+      <div class="brain3d-ai-note">Optional: sends this playlist's song titles and artists to Gemini to infer energy, dance feel, average tempo, and mood.</div>`;
     area.querySelector('#brain3d-ai-generate')?.addEventListener('click', () => _brain3DGenerateInsight(idx));
     return;
   }
@@ -5944,7 +5924,7 @@ function buildMoodLegend() {
 
     document.getElementById('mood-gate').style.display = 'block';
 
-    const savedKey = localStorage.getItem('sm_ai_key_anthropic') || '';
+    const savedKey = _getAiSettings().key;
     if (savedKey) document.getElementById('mg-key-input').value = savedKey;
 
     document.getElementById('mg-generate-btn').addEventListener('click', async () => {
@@ -5960,7 +5940,7 @@ function buildMoodLegend() {
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || 'Failed');
-        localStorage.setItem('sm_ai_key_anthropic', key);
+        localStorage.setItem(LS_KEY, key);
         // Patch only the mood field — preserve nx/ny so the map stays visible
         const moodMap = {};
         for (const p of data.points) moodMap[p.id] = p.mood;
@@ -6870,82 +6850,73 @@ document.getElementById('ai-prompt').addEventListener('keydown', e => {
 // ---------------------------------------------------------------------------
 // AI Key Settings
 // ---------------------------------------------------------------------------
-const LS_KEY_ANTHROPIC = 'sm_ai_key_anthropic';
-const LS_KEY_OPENAI    = 'sm_ai_key_openai';
-const LS_KEY_NVIDIA    = 'sm_ai_key_nvidia';
-const LS_PROVIDER      = 'sm_ai_provider';
+// One provider, one key. Older installs stored a key per provider, so the
+// first read migrates whichever one was in use.
+const LS_KEY = 'sm_ai_key';
 
 function _getAiSettings() {
-  const provider = localStorage.getItem(LS_PROVIDER) || 'nvidia';
-  let key = '';
-  if (provider === 'openai')    key = localStorage.getItem(LS_KEY_OPENAI)    || '';
-  else if (provider === 'nvidia') key = localStorage.getItem(LS_KEY_NVIDIA)  || '';
-  else                            key = localStorage.getItem(LS_KEY_ANTHROPIC) || '';
-  return { provider, key };
+  let key = localStorage.getItem(LS_KEY);
+  if (key === null) {
+    key = localStorage.getItem('sm_ai_key_nvidia')
+       || localStorage.getItem('sm_ai_key_anthropic')
+       || localStorage.getItem('sm_ai_key_openai')
+       || '';
+    // Old keys belong to other providers and will not work with Gemini, so
+    // migrate the slot, not the value.
+    localStorage.setItem(LS_KEY, '');
+    ['sm_ai_key_nvidia', 'sm_ai_key_anthropic', 'sm_ai_key_openai', 'sm_ai_provider']
+      .forEach(k => localStorage.removeItem(k));
+    key = '';
+  }
+  return { provider: 'gemini', key };
 }
 
 function _updateAiModalSub() {
-  const { provider, key } = _getAiSettings();
+  const { key } = _getAiSettings();
   const sub     = document.getElementById('ai-modal-sub');
   const loading = document.getElementById('ai-loading-text');
-  const labels  = { nvidia: 'GLM-5.1', openai: 'GPT-4o', anthropic: 'Claude' };
-  const label   = labels[provider] || 'AI';
-  const keyNote = (provider === 'nvidia' && !key) ? ' · server key' : key ? ` · your key` : '';
-  sub.textContent     = `Describe what you want. ${label} reads your library and builds a playlist that fits.${keyNote}`;
-  loading.textContent = `${label} is reading your library…`;
-}
-
-function _highlightProviderLabel(provider) {
-  ['nvidia', 'anthropic', 'openai'].forEach(p => {
-    const lbl = document.getElementById(`provider-label-${p}`);
-    if (lbl) lbl.style.borderColor = p === provider ? 'var(--accent)' : 'var(--border)';
-  });
-  // Show/hide key input sections
-  const nvidiaNote = document.getElementById('ai-nvidia-note');
-  const keySection = document.getElementById('ai-key-section');
-  if (provider === 'nvidia') {
-    nvidiaNote.style.display = 'block';
-    keySection.style.display = 'none';
-  } else {
-    nvidiaNote.style.display = 'none';
-    keySection.style.display = 'block';
-  }
+  const keyNote = key ? ' · your key' : ' · server key';
+  if (sub) sub.textContent = `Describe what you want. Gemini reads your library and builds a playlist that fits.${keyNote}`;
+  if (loading) loading.textContent = 'Gemini is reading your library…';
 }
 
 document.getElementById('ai-settings-btn').addEventListener('click', () => {
-  const { provider, key } = _getAiSettings();
-  const radio = document.querySelector(`input[name="ai-provider"][value="${provider}"]`);
-  if (radio) radio.checked = true;
-  document.getElementById('ai-key-input').value = provider !== 'nvidia' ? key : '';
-  document.getElementById('ai-key-input-nvidia').value = provider === 'nvidia' ? key : '';
-  _highlightProviderLabel(provider);
+  const { key } = _getAiSettings();
+  document.getElementById('ai-key-input').value = key;
+  document.getElementById('ai-health-result').textContent = '';
   document.getElementById('ai-settings-modal').classList.add('open');
 });
 
-document.querySelectorAll('input[name="ai-provider"]').forEach(radio => {
-  radio.addEventListener('change', () => _highlightProviderLabel(radio.value));
+document.getElementById('ai-health-btn').addEventListener('click', async () => {
+  const out = document.getElementById('ai-health-result');
+  out.textContent = 'Checking…';
+  out.style.color = 'var(--text-dim)';
+  try {
+    const r = await fetch('/ai/health');
+    const j = await r.json();
+    if (j.ok) {
+      out.textContent = `Working · ${j.model}`;
+      out.style.color = '#4ade80';
+    } else {
+      out.textContent = j.error || 'Not working';
+      out.style.color = '#f87171';
+    }
+  } catch (err) {
+    out.textContent = 'Could not reach the server';
+    out.style.color = '#f87171';
+  }
 });
 
 document.getElementById('ai-settings-save').addEventListener('click', () => {
-  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'nvidia';
-  const key = provider === 'nvidia'
-    ? document.getElementById('ai-key-input-nvidia').value.trim()
-    : document.getElementById('ai-key-input').value.trim();
-  localStorage.setItem(LS_PROVIDER, provider);
-  if (provider === 'openai')       localStorage.setItem(LS_KEY_OPENAI,    key);
-  else if (provider === 'nvidia')  localStorage.setItem(LS_KEY_NVIDIA,    key);
-  else                             localStorage.setItem(LS_KEY_ANTHROPIC, key);
+  localStorage.setItem(LS_KEY, document.getElementById('ai-key-input').value.trim());
   _updateAiModalSub();
   document.getElementById('ai-settings-modal').classList.remove('open');
 });
 
 document.getElementById('ai-settings-clear').addEventListener('click', () => {
-  const provider = document.querySelector('input[name="ai-provider"]:checked')?.value || 'nvidia';
-  if (provider === 'openai')       localStorage.removeItem(LS_KEY_OPENAI);
-  else if (provider === 'nvidia')  localStorage.removeItem(LS_KEY_NVIDIA);
-  else                             localStorage.removeItem(LS_KEY_ANTHROPIC);
+  localStorage.setItem(LS_KEY, '');
   document.getElementById('ai-key-input').value = '';
-  document.getElementById('ai-key-input-nvidia').value = '';
+  document.getElementById('ai-health-result').textContent = '';
 });
 
 document.getElementById('ai-settings-cancel').addEventListener('click', () => {
